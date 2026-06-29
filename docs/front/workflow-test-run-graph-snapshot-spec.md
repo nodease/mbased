@@ -1,4 +1,9 @@
-# 워크플로우 테스트 실행 그래프 스냅샷 명세
+# Workflow 테스트 실행 그래프 스냅샷 명세
+
+Status: Draft
+Authority: Frontend Implementation Guide
+Source of Truth: No
+Verified Against: feature/mba-6
 
 ## 목적
 

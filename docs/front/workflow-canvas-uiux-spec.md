@@ -1,8 +1,13 @@
-# MBA-6 워크플로우 Canvas UI/UX 개선 기능 명세
+# Workflow Canvas UI/UX 기능 명세
+
+Status: Draft
+Authority: Frontend Implementation Guide
+Source of Truth: No
+Verified Against: feature/mba-6
 
 ## 문서 목적
 
-이 문서는 `feature/mba-6` 브랜치에서 dev 대비 추가된 워크플로우 Canvas UI/UX 작업 범위를 리뷰와 QA 관점에서 정리한다.
+이 문서는 `feature/mba-6` 브랜치에서 dev 대비 추가된 워크플로우 Canvas UI/UX 작업 범위를 프론트 구현, 리뷰, QA 관점에서 정리한다.
 
 기존 기능을 단순히 시각적으로 바꾸는 작업이 아니라, 다음 사용 흐름을 개선하는 것이 목표다.
 
@@ -306,7 +311,7 @@
 
 상세 문서:
 
-- `docs/HyeYeon/워크플로우-테스트-실행-그래프-스냅샷-명세.md`
+- [workflow-test-run-graph-snapshot-spec.md](workflow-test-run-graph-snapshot-spec.md)
 
 주요 파일:
 

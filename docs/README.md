@@ -18,6 +18,7 @@ Verified Against: feature/mba-59 @ b92bc9e0f38588495d228fc0d17b10dfaaed03c1
 | 서비스 경계, 런타임, 보안/RBAC 구조 | [architecture/](architecture/README.md) |
 | 물리 데이터 모델, 권한 정책, migration 정책 | [data-model/](data-model/README.md) |
 | API 계약 | [api/](api/README.md) |
+| 프론트 화면, 상태, API 연동 작업 문서 | [front/](front/README.md) |
 | 비가역적/중요 설계 결정 | [decisions/](decisions/README.md) |
 | 구현 순서, 이슈 분해, 검증 계획 | [implementation-plan/](implementation-plan/README.md) |
 | 과거 조사, 메모, 폐기 문서 | [references/](references/README.md) |
