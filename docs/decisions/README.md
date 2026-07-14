@@ -64,6 +64,7 @@ ADR 본문은 작성 시점의 결정 과정을 보존하는 기록 문서다. `
 | [ADR-0042](ADR-0042-security-alert-reconciliation-receipts.md) | Accepted | Security Alert reconciliation receipt 경계 | Processor별 receipt 부재를 미처리 audit의 durable 기준으로 사용한다. Event-time cursor는 rule 평가 순서와 관찰값으로 유지하고 late commit 발견 correctness에는 사용하지 않는다. |
 | [ADR-0043](ADR-0043-deployment-browser-origin-and-embedding-boundary.md) | Accepted | Deployment browser origin과 iframe embedding 경계 | Public Chatbot/Widget parent origin을 immutable deployment policy와 CSP `frame-ancestors`로 집행하고 first-party iframe API와 external direct JavaScript CORS를 분리한다. Missing/malformed policy와 projection 장애는 `'none'`으로 닫으며 public endpoint wildcard CORS를 제거한다. |
 | [ADR-0044](ADR-0044-knowledge-collection-operational-management-boundary.md) | Accepted | Knowledge Collection 운영 관리 경계 | MBA-264는 manual Collection restore, exact revision reorder, bounded Team/User subject page, action-set bundle revoke와 1~50개 Collection atomic bulk 권한 변경을 Collection-first lock·transaction-bound audit 경계로 구현한다. KC sync 실행은 MBA-265로 분리한다. |
+| [ADR-0045](ADR-0045-app-workflow-hard-delete-retention-boundary.md) | Accepted | App/Workflow hard delete와 운영 이력 보존 경계 | 활성 App/Workflow와 permission·배포 설정은 hard delete하고 run·trace·usage·audit·외부 효과 이력은 lifecycle FK에서 분리해 보존한다. 현재 `AppService.delete_app()`의 bulk delete는 Workflow permission FK에서 500이 발생하고 run cascade가 남아 있어 MBA-87 구현 전 target contract다. |
 
 ## 참고 보고서
 

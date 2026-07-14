@@ -1,7 +1,7 @@
 # App Management API Spec
 
 Status: Draft
-Verified Against: TBD
+Verified Against: feature/mba-87 @ 5c850b2e37d3b29476d8427884cca0ca4345f05d
 
 ## Endpoints
 
@@ -9,6 +9,7 @@ Verified Against: TBD
 | --- | --- | --- | --- |
 | GET | `/api/v1/apps` | 현재 사용자가 접근할 수 있는 App 목록 | authenticated organization member |
 | GET | `/api/v1/apps/operations` | 내 모듈 운영 현황 목록 | organization manager or workflow builder/manager |
+| DELETE | `/api/v1/apps/{app_id}` | App과 활성 Workflow 설정 삭제 | organization manager or primary workflow manager |
 
 ## Request And Response Models
 
@@ -71,14 +72,53 @@ Budget Management 확장 시 `app.budget_status`는 `GET /apps`의 `budget_statu
 - `trend_percent`: `projected_month_cost`와 `previous_month_cost`의 증감률. 직전 월 비용이 0이면 null이다.
 - `operation_metrics`는 `budget_status`와 별도 필드이며 `GET /apps` 응답에는 포함하지 않는다.
 
+### DELETE /apps/{app_id}
+
+Request body는 없고 `X-Organization-Id: <organization-uuid>` header가 필수다. Gateway는 active organization에서 App을 찾고 manage 권한, 연결 Workflow 무결성, 진행 중 operation을 확인한 뒤 하나의 transaction으로 삭제한다. 성공 응답은 기존 client 호환 shape를 유지한다.
+
+```json
+{
+  "message": "App deleted successfully"
+}
+```
+
+성공 시 HTTP `200`이다. App/Workflow와 활성 편집·배포 설정은 hard delete하지만 run·trace·usage·audit·Cost Optimizer·model routing history·Mail/external effect/schedule claim은 retention 정책대로 남긴다. 다른 Workflow graph의 WorkflowNode reference는 수정하지 않는다.
+
+오류는 공통 safe envelope를 사용한다.
+
+```json
+{
+  "error": {
+    "code": "app.delete_in_progress",
+    "message": "App deletion is blocked by an active operation.",
+    "request_id": "<opaque-request-id>",
+    "details": {}
+  }
+}
+```
+
+| Status | Code | Condition |
+| --- | --- | --- |
+| 400 | `organization.required` | `X-Organization-Id` 누락 |
+| 401 | `auth.required` | 인증 없음 |
+| 403 | `permission.denied` | active organization 안의 App이지만 manage 권한 없음 |
+| 404 | `resource.not_found` | App 없음, organization scope 밖, 이미 삭제됨 |
+| 409 | `app.delete_in_progress` | run/schedule/Mail/external effect가 진행 중이거나 결과 불명 |
+| 409 | `app.delete_requires_repair` | 연결 Workflow 100개 초과 또는 organization/연결 무결성 손상 |
+| 422 | `validation.failed` | `X-Organization-Id`가 UUID가 아님 |
+
+예상하지 못한 DB 오류는 전체 transaction을 rollback하고 기존 generic `500` envelope로 반환한다. SQL, FK 이름, 내부 row 정보는 응답에 넣지 않는다.
+
 ## Errors
 
 - `401`: 미인증
-- `403`: organization scope 또는 App 접근 권한 없음
-- `404`: 직접 조회 대상이 없거나 scope 밖 리소스
+- `403`: active organization 안에서 필요한 App action 권한 없음
+- `404`: 직접 조회 대상이 없거나 organization scope 밖 리소스
+- `409`: App 삭제와 경합하는 operation 또는 수동 복구가 필요한 legacy 연결
 
 ## Permissions
 
 - App 목록은 active organization context를 기준으로 사용자가 읽을 수 있는 App/Workflow만 반환한다.
 - 운영 현황은 active organization context를 기준으로 organization manager이거나 workflow `write` 이상 권한을 가진 App/Workflow만 반환한다. Workflow `execute` 전용 사용자는 `/apps/operations` 대상이 아니며, 배포된 챗봇 링크 또는 내부 실행 링크(`/modules/{workflow_id}/run?deploymentId={deployment_id}`)를 사용한다.
 - `budget_status`는 사용률과 상태만 노출한다. `/apps/operations`의 `operation_metrics`는 운영 표면에 반환된 workflow row의 비용 요약으로만 사용한다.
+- App 삭제는 active organization manager 또는 App primary Workflow의 `manager`만 수행한다. 잠금 뒤 같은 권한을 다시 확인하며, scope 밖 App은 존재 여부를 숨겨 `404`로 반환한다.

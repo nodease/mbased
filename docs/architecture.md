@@ -28,6 +28,15 @@ Security Alert MVP는 [ADR-0028](decisions/ADR-0028-security-alert-detection-and
 | Security Alert Admin Service | Gateway application/service boundary | organization owner/manager 전용 alert 조회·상태 변경, safe evidence projection, lifecycle audit transaction을 제공한다 |
 | Security Alert Notification Projection | Gateway/Client notification boundary | 영속 alert를 source of truth로 두고 Sidebar summary와 `notifications.changed` 재조회 신호를 제공한다 |
 
+App hard-delete 목표 구조는 [ADR-0045](decisions/ADR-0045-app-workflow-hard-delete-retention-boundary.md)을 따른다. 현재 `AppService.delete_app()`의 bulk delete가 이미 아래 구조를 구현했다는 뜻은 아니며 MBA-87이 migration과 use case를 순서대로 적용한다.
+
+| 구성요소 | 위치 | 책임 |
+| --- | --- | --- |
+| App Lifecycle Deletion Application | Gateway application boundary | active organization/manage 재검사, App→Workflow UUID exclusive lock 순서, bounded legacy 연결, 진행 중 operation 차단, active/history 삭제 계획과 단일 transaction을 조율한다 |
+| App Lifecycle Persistence Adapter | Gateway SQLAlchemy adapter | 연결 Workflow union, blocker/history 조회, permission·설정 delete와 history provenance 보존을 구현하며 repository 안에서 commit하지 않는다 |
+| App Lifecycle Audit Adapter | Gateway audit/outbox adapter | `app.delete`와 permission delete audit를 같은 transaction에 기록하고 성공 event는 commit 뒤에만 발행한다 |
+| Runtime Lifecycle Admission/Target Guard | Gateway와 Workflow Engine admission/runtime | 새 run/schedule/Mail durable active 상태 전에 App→Workflow shared lifecycle lock과 resource 재검사를 수행한다. 다른 graph의 stale WorkflowNode target은 수정하지 않고 preflight `workflow_node_target_unavailable`, runtime `workflow_node.target_unavailable`로 provider effect 전에 차단한다 |
+
 Knowledge 통합 목표 구조에서는 Gateway/Shared/Workflow Engine 경계에 다음 domain service를 둔다. 아래 항목은 현재 구현 컴포넌트 전체가 아니라 [ADR-0014](decisions/ADR-0014-knowledge-base-document-atom-and-collection-boundary.md), [ADR-0015](decisions/ADR-0015-knowledge-skill-context-routing-boundary.md), [ADR-0017](decisions/ADR-0017-knowledge-integration-provisional-implementation-baseline.md), [ADR-0020](decisions/ADR-0020-knowledge-mcp-incremental-sync-boundary.md), [ADR-0036](decisions/ADR-0036-knowledge-runtime-candidate-resolution.md), [ADR-0039](decisions/ADR-0039-knowledge-workflow-collection-routing-integration.md)의 target component다.
 
 | 구성요소 | 책임 |
@@ -198,6 +207,7 @@ Package 기준:
 - `apps/gateway/application/access_management/`는 actor 중심 organization access 조회·단일 mutation policy, command/result/error와 capability별 port를 소유한다.
 - `apps/gateway/adapters/db/access_management_*`와 `apps/gateway/adapters/audit/*`는 SQLAlchemy projection/mutation/lock, transaction-bound audit와 management reason redaction을 구현한다. `apps/gateway/composition/access_management.py`가 이를 조립한다.
 - 기존 member/team/user-direct/App 생성 권한 경로는 일괄 이동하지 않고 같은 subject lock protocol과 transaction-bound audit을 사용하는 compatibility path로 보강한다. 기존 authorization, response/status와 latent-row 정책은 유지한다.
+- MBA-87은 첫 구현에서 `apps/gateway/application/app_lifecycle/`에 삭제 command/result/error, repository/UnitOfWork port와 순수 삭제 계획을 두고 composition에서 SQLAlchemy와 audit adapter를 조립한다. 기존 `AppService.delete_app()`은 호환 facade로만 남기며 router가 여러 ORM delete를 직접 조율하지 않는다.
 - 다른 도메인도 동일한 router/use case/domain policy/port/adapter 기준을 따른다. `permissions`, `knowledge`, `llm`, `workflow_management`, `runtime_retrieval` 같은 domain package는 빈 구조로 선생성하지 않고, 해당 도메인의 첫 리팩터링 PR에서 실제 use case/port와 함께 만든다.
 - Conversation Memory는 Gateway 또는 Workflow Engine 하위 helper로 중복 구현하지 않는다. 첫 Memory use case와 함께 `apps/memory/` 최소 package를 만들고 `apps/gateway/composition/memory.py`, `apps/workflow_engine/composition/memory.py`가 runtime별 adapter를 조립한다. 현재 global `memory_mode`/execution-log memory가 이미 이 구조로 이관됐다고 간주하지 않는다.
 - Deployment preflight pilot을 이후 도메인 리팩터링의 reference implementation으로 사용하되, mutation 도메인은 별도 UnitOfWork와 transaction-bound audit 요구를 추가해야 한다.

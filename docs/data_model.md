@@ -13,18 +13,21 @@ Status: Draft
 
 ## 도메인별 테이블
 
-현재 코드 기준 활성 테이블은 Security Alert 4개와 `workflow_node_effect_attempts`를 포함해 42개다. `legacy_llm_provider`, `legacy_llm_credentials`는 migration `e4956fcd7e2b`에서 DROP됐고 모델도 주석 처리돼 있다.
+현재 SQLAlchemy metadata 기준 활성 테이블은 78개다. `legacy_llm_provider`, `legacy_llm_credentials`는 migration `e4956fcd7e2b`에서 DROP됐고 모델도 주석 처리돼 있다.
 
 | 도메인 | 테이블 |
 | --- | --- |
 | 사용자/조직 | `users`, `organization`, `organization_memberships`, `teams`, `team_memberships` |
-| 권한 | `team_workflow_permissions`, `team_knowledge_permissions`, `team_llm_permissions`, `team_mail_credential_permissions`, `team_audit_permissions`, `user_workflow_permissions`, `user_knowledge_permissions`, `user_llm_permissions`, `user_mail_credential_permissions` |
-| 앱/워크플로우 | `apps`, `workflows`, `workflow_budgets`, `workflow_deployments`, `schedules`, `workflow_runs`, `workflow_node_runs`, `workflow_node_effect_attempts` |
+| 권한/신청 | `permission_requests`, `user_app_creation_permissions`, `team_workflow_permissions`, `team_knowledge_permissions`, `team_knowledge_collection_permissions`, `team_knowledge_domain_permissions`, `team_llm_permissions`, `team_mail_credential_permissions`, `team_audit_permissions`, `user_workflow_permissions`, `user_knowledge_permissions`, `user_knowledge_collection_permissions`, `user_knowledge_domain_permissions`, `user_llm_permissions`, `user_mail_credential_permissions` |
+| 앱/워크플로우 | `apps`, `workflows`, `workflow_budgets`, `workflow_deployments`, `schedules`, `schedule_dispatch_claims`, `workflow_runs`, `workflow_node_runs`, `workflow_node_effect_attempts` |
 | 추적/감사 | `trace_payloads`, `trace_payload_access_events`, `trace_redaction_policies`, `trace_retention_policies`, `trace_visibility_policies`, `audit_logs` |
 | 보안 알림 | `security_alerts`, `security_alert_audit_events`, `security_alert_reconciliation_watermarks`, `security_alert_reconciliation_receipts`, `security_alert_notification_outbox` |
-| Knowledge/RAG | `knowledge_bases`, `documents`, `document_chunks`, `rag_answer_runs` |
-| LLM | `llm_providers`, `llm_models`, `llm_credentials`, `llm_rel_credential_models`, `llm_usage_logs` |
-| 외부 연동 | `connections`, `mail_credentials` |
+| Knowledge/RAG | `knowledge_bases`, `knowledge_collections`, `knowledge_collection_items`, `knowledge_source_identities`, `documents`, `document_chunks`, `document_versions`, `source_policy_kb_use_grants`, `source_authorization_provenance`, `knowledge_ingestion_outbox`, `rag_answer_runs` |
+| LLM | `llm_providers`, `llm_models`, `llm_credentials`, `llm_rel_credential_models`, `llm_usage_logs`, `llm_node_versions` |
+| Agent Builder | `agent_builder_sessions`, `agent_builder_requests`, `agent_builder_drafts` |
+| Cost Optimizer | `cost_optimizer_experiments`, `cost_optimizer_candidates`, `cost_optimizer_recommendation_verifications` |
+| Model Routing | `llm_node_model_routing_policies`, `llm_node_model_routing_policy_updates`, `llm_node_model_routing_policy_run_events`, `llm_node_model_routing_cohorts`, `llm_node_model_routing_cohort_examples`, `llm_node_model_routing_observations`, `llm_node_model_routing_model_evidence`, `llm_node_model_routing_validation_batches`, `llm_node_model_routing_validation_budget_months`, `llm_node_model_routing_validation_items`, `llm_node_model_routing_validation_cost_events` |
+| 외부 연동 | `connections`, `mail_credentials`, `mail_message_processings`, `mail_draft_effects` |
 
 ## 엔티티 관계
 
@@ -87,6 +90,25 @@ erDiagram
 - `rag_answer_runs`와 trace/usage 테이블은 FK가 아니라 opaque `correlation_id`(application-level convention)로만 연결한다 ([ADR-0013](decisions/ADR-0013-rag-answer-trace-usage-correlation-boundary.md)). 다이어그램에 없는 이유다.
 - `apps.workflow_id`와 `workflows.app_id`는 상호 참조(순환 FK)다.
 - JSONB metadata에 id를 넣는 방식(`audit_metadata`, `meta_info` 등)은 관계가 아니라 application convention이다.
+
+### App hard-delete lifecycle (ADR-0045)
+
+[ADR-0045](decisions/ADR-0045-app-workflow-hard-delete-retention-boundary.md)은 App 삭제와 운영 이력 purge를 분리한다. Migration `fe5f6a7b8c90`은 보존 대상의 기존 resource ID를 그대로 둔 채 App/Workflow/Deployment/active routing policy lifecycle FK를 제거한다. 별도 provenance 컬럼이나 backfill은 필요하지 않다. 삭제 use case의 권한·잠금·blocker·audit 구현은 이 DB 경계와 별도로 적용한다.
+
+| 분류 | 대상 | App 삭제 시 목표 동작 |
+| --- | --- | --- |
+| 활성 리소스 | `apps`, 연결 `workflows` | hard delete |
+| 권한/설정 | team/user Workflow permission, `workflow_budgets`, `workflow_deployments`, `schedules`, active routing policy, App-owned `llm_node_versions` | 같은 transaction에서 delete |
+| 실행/추적 | `workflow_runs`, `workflow_node_runs`, trace payload/access | row와 당시 resource ID 보존 |
+| 비용/최적화 | `llm_usage_logs`, Cost Optimizer experiment/candidate/verification | row와 당시 resource ID 보존 |
+| routing 이력 | policy update/run, cohort/observation/evidence/validation history | active policy와 분리해 보존 |
+| 외부 효과 이력 | `mail_message_processings`, `mail_draft_effects`, `workflow_node_effect_attempts`, `schedule_dispatch_claims` | 완료·해결된 row와 당시 resource ID 보존 |
+| 감사/보안 증거 | `audit_logs`, Security Alert evidence | 각 retention 정책까지 보존 |
+| 임시 Builder 상태 | Agent Builder session/draft | row는 자체 만료, App/Workflow reference만 `SET NULL` |
+
+보존 대상의 `app_id`, `workflow_id`, `deployment_id`는 삭제된 resource를 다시 join하기 위한 lifecycle FK가 아니라 immutable provenance ID다. App 삭제가 이 값을 `NULL`로 만들거나 row를 cascade delete하지 않는다. 해당 이력의 실제 삭제는 각 도메인 retention 정책만 수행한다.
+
+`team_workflow_permissions`와 `user_workflow_permissions`는 활성 설정이므로 Workflow 삭제 안전망으로 `ON DELETE CASCADE`를 사용한다. 새 삭제 use case는 permission audit를 위해 이 row를 명시적으로 먼저 삭제하며, cascade는 legacy 경로가 FK 500을 내지 않게 하는 최후 방어선이다. Migration downgrade는 보존 이력이 이미 삭제된 resource ID를 가리키면 lifecycle FK를 복구할 수 없으므로 안전하게 중단한다.
 
 ## 공통 컬럼과 규칙
 
