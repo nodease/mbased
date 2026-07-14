@@ -4,6 +4,7 @@ from datetime import datetime
 from decimal import Decimal
 from types import SimpleNamespace
 from typing import Any
+from uuid import UUID
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
@@ -1171,31 +1172,34 @@ class AppService:
         return new_app
 
     @staticmethod
-    def delete_app(db: Session, app_id: str, user_id: str):
+    def delete_app(
+        db: Session,
+        app_id: str,
+        user_id: str,
+        organization_id: str | None = None,
+    ):
         """
-        앱을 삭제합니다.
+        App lifecycle 삭제 use case를 호출하는 호환 facade입니다.
         """
-        app = db.query(App).filter(App.id == app_id).first()
-        if not app:
+        from apps.gateway.application.app_lifecycle.errors import AppResourceHidden
+        from apps.gateway.application.app_lifecycle.models import DeleteAppCommand
+        from apps.gateway.composition.app_lifecycle import build_delete_app_use_case
+
+        try:
+            command = DeleteAppCommand(
+                app_id=UUID(str(app_id)),
+                actor_id=UUID(str(user_id)),
+                organization_id=(
+                    UUID(str(organization_id)) if organization_id is not None else None
+                ),
+            )
+        except (TypeError, ValueError):
             return None
 
-        if not AppService.can_manage_app(db, app, user_id):
+        try:
+            build_delete_app_use_case(db).execute(command)
+        except AppResourceHidden:
             return None
-
-        # 1. Circular dependency 해결을 위해 workflow_id 관계 끊기
-        app.workflow_id = None
-        db.flush()
-
-        # 2. 연결된 워크플로우 삭제
-        # Workflow.app_id가 ON DELETE CASCADE가 아닐 수 있으므로 수동 삭제
-        db.query(Workflow).filter(Workflow.app_id == app_id).delete()
-        db.flush()
-
-        # 3. 앱 삭제
-        # WorkflowDeployment는 ON DELETE CASCADE로 설정되어 있어 자동 삭제됨
-        db.delete(app)
-        db.commit()
-
         return True
 
     @staticmethod

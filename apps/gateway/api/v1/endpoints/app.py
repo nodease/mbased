@@ -3,8 +3,14 @@ from typing import List, Literal
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 
+from apps.gateway.application.app_lifecycle.errors import (
+    AppDeleteInProgress,
+    AppDeleteRequiresRepair,
+    AppPermissionDenied,
+)
 from apps.gateway.auth.dependencies import get_current_user
 from apps.gateway.services.organization_context import resolve_active_organization_id
+from apps.gateway.utils.api_errors import raise_api_error
 from apps.gateway.utils.audit import audit
 from apps.shared.audit.actions import AuditAction
 from apps.shared.db.models.app import App
@@ -226,24 +232,58 @@ def clone_app(
 
 
 @router.delete("/{app_id}")
-@audit(AuditAction.APP_DELETE, target_param="app_id")
 def delete_app(
     app_id: str,
+    request: Request,
+    x_organization_id: str | None = Header(default=None, alias="X-Organization-Id"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
-    앱을 삭제합니다. (본인 앱만)
+    active organization 안의 앱과 활성 lifecycle 데이터를 삭제합니다.
     """
-    app_record = _get_app_or_404(db, app_id)
-    denial_status = AppService.access_denial_status(
-        db, app_record, current_user.id, "manage"
+    organization_id = resolve_active_organization_id(
+        db,
+        request,
+        x_organization_id,
+        current_user.id,
     )
-    if denial_status is not None:
-        raise _app_access_exception(denial_status)
 
-    result = AppService.delete_app(db, app_id, user_id=current_user.id)
+    try:
+        result = AppService.delete_app(
+            db,
+            app_id,
+            user_id=current_user.id,
+            organization_id=organization_id,
+        )
+    except AppPermissionDenied:
+        raise_api_error(
+            request,
+            403,
+            "permission.denied",
+            "App manage permission is required.",
+        )
+    except AppDeleteInProgress:
+        raise_api_error(
+            request,
+            409,
+            "app.delete_in_progress",
+            "App deletion is blocked by an active operation.",
+        )
+    except AppDeleteRequiresRepair:
+        raise_api_error(
+            request,
+            409,
+            "app.delete_requires_repair",
+            "App relationships must be repaired before deletion.",
+        )
+
     if not result:
-        raise HTTPException(status_code=404, detail="App not found")
+        raise_api_error(
+            request,
+            404,
+            "resource.not_found",
+            "App not found.",
+        )
 
     return {"message": "App deleted successfully"}
