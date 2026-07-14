@@ -68,13 +68,11 @@ class MailMessageProcessing(Base):
     )
     workflow_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("workflows.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
     deployment_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("workflow_deployments.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )

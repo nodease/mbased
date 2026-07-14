@@ -107,7 +107,6 @@ class LLMNodeModelRoutingPolicyUpdate(Base):
     )
     policy_id: Mapped[uuid.UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("llm_node_model_routing_policies.id", ondelete="CASCADE"),
         nullable=False,
     )
     trigger: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -148,7 +147,6 @@ class LLMNodeModelRoutingPolicyRunEvent(Base):
     )
     policy_id: Mapped[uuid.UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("llm_node_model_routing_policies.id", ondelete="CASCADE"),
         nullable=False,
     )
     workflow_run_id: Mapped[uuid.UUID] = mapped_column(

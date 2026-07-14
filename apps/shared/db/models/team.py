@@ -292,7 +292,7 @@ class TeamWorkflowPermission(TeamResourcePermissionMixin, Base):
     )
     workflow_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("workflows.id"),
+        ForeignKey("workflows.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -315,6 +315,7 @@ class UserWorkflowPermission(UserResourcePermissionMixin, Base):
             ["workflow_id", "grantee_organization_id"],
             ["workflows.id", "workflows.organization_id"],
             name="fk_user_workflow_permissions_workflow_org",
+            ondelete="CASCADE",
         ),
         CheckConstraint(
             "auth_state IN ('none', 'viewer', 'operator', 'builder', 'manager')",

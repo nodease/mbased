@@ -1118,7 +1118,7 @@ def test_knowledge_safe_metadata_migration_is_preserved_in_the_single_head():
     assert deployment_browser_policy_revision.down_revision == "c7f8a9b0d123"
     assert "2b6c7d8e9f02" in ancestry
     assert "a6f4d2c8e1b7" in ancestry
-    assert script.get_heads() == ["b8e5f4a3c2d2"]
+    assert script.get_heads() == ["fe5f6a7b8c90"]
 
 
 def test_demo_knowledge_seed_contract_has_ids_and_permission_specs():

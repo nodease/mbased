@@ -57,13 +57,11 @@ class CostOptimizerExperiment(Base):
     )
     workflow_id: Mapped[uuid.UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("workflows.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
     app_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("apps.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
@@ -238,7 +236,6 @@ class CostOptimizerRecommendationVerification(Base):
     )
     workflow_id: Mapped[uuid.UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("workflows.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )

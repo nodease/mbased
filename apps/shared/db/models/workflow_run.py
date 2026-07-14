@@ -66,11 +66,10 @@ class WorkflowRun(Base):
         PGUUID(as_uuid=True), primary_key=True, default=uuid.uuid4, nullable=False
     )
 
-    # === 외래 키 (관계) ===
-    # 어떤 워크플로우가 실행되었는지
+    # === 실행 시점 resource provenance ===
+    # App/Workflow 삭제 뒤에도 원래 ID를 보존하므로 lifecycle FK를 두지 않는다.
     workflow_id: Mapped[uuid.UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("workflows.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
@@ -83,7 +82,6 @@ class WorkflowRun(Base):
     )
     app_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("apps.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )
@@ -92,7 +90,6 @@ class WorkflowRun(Base):
     # 배포된 버전으로 실행된 경우 연결
     deployment_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("workflow_deployments.id", ondelete="SET NULL"),
         nullable=True,
         index=True,
     )

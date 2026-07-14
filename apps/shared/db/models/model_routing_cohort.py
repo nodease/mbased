@@ -37,7 +37,6 @@ class LLMNodeModelRoutingCohort(Base):
     )
     policy_id: Mapped[uuid.UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("llm_node_model_routing_policies.id", ondelete="CASCADE"),
         nullable=False,
     )
     cohort_key: Mapped[str] = mapped_column(String(128), nullable=False)
@@ -117,7 +116,6 @@ class LLMNodeModelRoutingObservation(Base):
     )
     policy_id: Mapped[uuid.UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("llm_node_model_routing_policies.id", ondelete="CASCADE"),
         nullable=False,
     )
     workflow_run_id: Mapped[uuid.UUID] = mapped_column(
@@ -201,7 +199,6 @@ class LLMNodeModelRoutingValidationBatch(Base):
     )
     policy_id: Mapped[uuid.UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("llm_node_model_routing_policies.id", ondelete="CASCADE"),
         nullable=False,
     )
     policy_update_id: Mapped[Optional[uuid.UUID]] = mapped_column(
@@ -241,7 +238,6 @@ class LLMNodeModelRoutingValidationBudgetMonth(Base):
     )
     policy_id: Mapped[uuid.UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("llm_node_model_routing_policies.id", ondelete="CASCADE"),
         nullable=False,
     )
     month_start: Mapped[date] = mapped_column(Date, nullable=False)
