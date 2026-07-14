@@ -360,6 +360,52 @@ def create_run_log(self, data: Dict[str, Any]):
             else _resolve_app_id(session, workflow_id, deployment_id)
         )
 
+        existing = None
+        if data.get("durable_admission"):
+            existing = (
+                session.query(WorkflowRun).filter(WorkflowRun.id == run_id).first()
+            )
+        if existing is not None:
+            if (
+                existing.workflow_id != workflow_id
+                or existing.app_id != app_id
+                or existing.user_id != user_id
+            ):
+                raise PermanentLogContractError(
+                    "workflow run admission identity mismatch"
+                )
+            existing.inputs = data.get("user_input") or {}
+            existing.trace_metadata = TraceMetadataSanitizer.sanitize_run_metadata(
+                data.get("trace_metadata") or {}
+            )
+            existing.redaction_applied = bool(data.get("redaction_applied"))
+            existing.pii_detected = bool(data.get("pii_detected"))
+            existing.redaction_policy_id = (
+                _deserialize_uuid(data.get("redaction_policy_id"))
+                if data.get("redaction_policy_id")
+                else None
+            )
+            existing.retention_policy_id = (
+                _deserialize_uuid(data.get("retention_policy_id"))
+                if data.get("retention_policy_id")
+                else None
+            )
+            existing.visibility_policy_id = (
+                _deserialize_uuid(data.get("visibility_policy_id"))
+                if data.get("visibility_policy_id")
+                else None
+            )
+            existing.payload_storage_mode = (
+                data.get("payload_storage_mode") or "redacted_only"
+            )
+            _insert_trace_payloads(
+                session,
+                run_id,
+                data.get("trace_payloads") or [],
+            )
+            session.commit()
+            return {"status": "success", "run_id": str(run_id)}
+
         run_log = WorkflowRun(
             id=run_id,
             workflow_id=workflow_id,

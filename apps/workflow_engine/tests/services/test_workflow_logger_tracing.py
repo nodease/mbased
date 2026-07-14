@@ -151,6 +151,40 @@ def test_create_run_log_keeps_valid_webhook_wire_value(monkeypatch):
     assert captured["data"]["trigger_mode"] == "webhook"
 
 
+def test_create_run_log_commits_durable_admission_before_publish(monkeypatch):
+    order = []
+    session = SimpleNamespace(close=lambda: order.append("close"))
+    monkeypatch.setattr(WorkflowLogger, "_prepare_payloads", _passthrough_payloads)
+    monkeypatch.setattr(
+        "apps.workflow_engine.workflow.core.workflow_logger.SessionLocal",
+        lambda: session,
+    )
+    monkeypatch.setattr(
+        "apps.workflow_engine.workflow.core.workflow_logger.admit_workflow_run",
+        lambda *args, **kwargs: order.append("admit"),
+    )
+    monkeypatch.setattr(
+        WorkflowLogger,
+        "_submit_log",
+        lambda *args, **kwargs: order.append("publish"),
+    )
+
+    logger = WorkflowLogger(db=object())
+    logger.create_run_log(
+        workflow_id=str(uuid.uuid4()),
+        user_id=str(uuid.uuid4()),
+        user_input={},
+        is_deployed=False,
+        execution_context={
+            "app_id": str(uuid.uuid4()),
+            "organization_id": str(uuid.uuid4()),
+            "trigger_mode": "manual",
+        },
+    )
+
+    assert order == ["admit", "close", "publish"]
+
+
 def test_mail_node_finish_log_sanitizes_content_before_trace_policy(monkeypatch):
     captured = {}
 

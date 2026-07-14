@@ -23,6 +23,15 @@ def _query_result(*, scalar=None, first=None, all_rows=None):
     return query
 
 
+def test_message_registration_uses_app_workflow_lifecycle_lock():
+    source = __import__("inspect").getsource(
+        SqlAlchemyMailProcessingRepository.register_message
+    )
+
+    assert "lock_app_workflow_for_admission" in source
+    assert "mail.processing_not_available" in source
+
+
 def test_outcome_unknown_transitions_effect_and_parent_processing_terminally():
     processing_id = uuid.uuid4()
     processing = SimpleNamespace(

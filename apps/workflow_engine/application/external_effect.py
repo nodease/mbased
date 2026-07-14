@@ -273,6 +273,8 @@ class ExternalEffectExecutor:
                 allow_retry=allow_retry,
                 now=now,
             )
+        except ExternalEffectError:
+            raise
         except Exception:
             self._raise_repository_retry(
                 allow_retry=allow_retry,

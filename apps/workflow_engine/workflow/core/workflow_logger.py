@@ -29,6 +29,11 @@ from apps.shared.services.external_effect_trace_capture import (
     durable_provider_summary,
     uses_metadata_only_provider_capture,
 )
+from apps.shared.services.app_lifecycle_admission import (
+    AppWorkflowAdmissionUnavailable,
+    admit_workflow_run,
+    uuid_or_none,
+)
 from apps.shared.services.tracing.metadata import TraceMetadataSanitizer
 from apps.shared.services.tracing.mail_payload import sanitize_mail_trace_payload
 from apps.shared.services.tracing.payload import TracePayloadService
@@ -60,6 +65,49 @@ class WorkflowLogger:
         self.workflow_run_id: Optional[uuid.UUID] = None
         self.app_id: Optional[str] = None
         self._policy_cache: Dict[str, Any] = {}
+        self._durable_admission_enabled = db is not None
+
+    def _admit_run(self, data: Dict[str, Any], canonical_trigger_mode: str) -> None:
+        if not self._durable_admission_enabled:
+            return
+        app_id = uuid_or_none(data.get("app_id"))
+        workflow_id = uuid_or_none(data.get("workflow_id"))
+        organization_id = uuid_or_none(data.get("organization_id"))
+        run_id = uuid_or_none(data.get("run_id"))
+        if None in {app_id, workflow_id, organization_id, run_id}:
+            raise NonRetryableWorkflowError("workflow.target_unavailable")
+
+        session = SessionLocal()
+        try:
+            admit_workflow_run(
+                session,
+                run_id=run_id,
+                app_id=app_id,
+                workflow_id=workflow_id,
+                organization_id=organization_id,
+                user_id=uuid_or_none(data.get("user_id")),
+                trigger_mode=canonical_trigger_mode,
+                inputs=data.get("user_input") or {},
+                deployment_id=uuid_or_none(data.get("deployment_id")),
+                workflow_version=data.get("workflow_version"),
+                correlation_id=data.get("correlation_id"),
+                conversation_id=uuid_or_none(data.get("conversation_id")),
+                request_id=data.get("request_id"),
+                workflow_task_id=data.get("workflow_task_id"),
+                trace_metadata=data.get("trace_metadata") or {},
+                redaction_applied=bool(data.get("redaction_applied")),
+                pii_detected=bool(data.get("pii_detected")),
+                redaction_policy_id=uuid_or_none(data.get("redaction_policy_id")),
+                retention_policy_id=uuid_or_none(data.get("retention_policy_id")),
+                visibility_policy_id=uuid_or_none(data.get("visibility_policy_id")),
+                payload_storage_mode=(
+                    data.get("payload_storage_mode") or "redacted_only"
+                ),
+            )
+        except AppWorkflowAdmissionUnavailable:
+            raise NonRetryableWorkflowError("workflow.target_unavailable") from None
+        finally:
+            session.close()
 
     def _serialize_for_celery(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Celery 태스크용 데이터 직렬화 (UUID, datetime 변환)"""
@@ -262,6 +310,8 @@ class WorkflowLogger:
             "app_id": self.app_id,
             "user_id": user_id,
             "user_input": redacted_input,
+            "organization_id": execution_context.get("organization_id"),
+            "durable_admission": self._durable_admission_enabled,
             "is_deployed": is_deployed,
             "trigger_mode": execution_context.get("trigger_mode"),
             "deployment_id": execution_context.get("deployment_id"),
@@ -282,6 +332,7 @@ class WorkflowLogger:
             "payload_storage_mode": summary["payload_storage_mode"],
             "started_at": datetime.now(timezone.utc),
         }
+        self._admit_run(data, canonical_trigger_mode)
         self._submit_log("log.create_run", data)
         return run_id
 

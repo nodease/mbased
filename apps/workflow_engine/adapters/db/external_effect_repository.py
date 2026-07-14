@@ -13,6 +13,9 @@ from sqlalchemy.orm import Session
 from apps.shared.db.models.workflow_node_effect_attempt import (
     WorkflowNodeEffectAttempt,
 )
+from apps.shared.services.app_lifecycle_admission import (
+    lock_app_workflow_for_admission,
+)
 from apps.workflow_engine.application.external_effect import (
     AcquireKind,
     AcquireResult,
@@ -207,6 +210,18 @@ class SQLAlchemyEffectAttemptRepository:
         del now
         try:
             with self._session() as session:
+                context = spec.context
+                if lock_app_workflow_for_admission(
+                    session,
+                    app_id=context.app_id,
+                    workflow_id=context.workflow_id,
+                    organization_id=context.organization_id,
+                ) is None:
+                    raise ExternalEffectError(
+                        "external_effect.stopped",
+                        retryable=False,
+                        node_id=context.node_id,
+                    )
                 row = self._locked_by_slot(session, spec)
                 db_now = self._database_now(session)
                 if row is None:

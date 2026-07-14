@@ -21,6 +21,9 @@ from apps.shared.domain.mail_processing import (
     MailDraftEffectStatus,
     MailProcessingStatus,
 )
+from apps.shared.services.app_lifecycle_admission import (
+    lock_app_workflow_for_admission,
+)
 from apps.workflow_engine.application.mail_processing import (
     AcknowledgementAdmission,
     DraftAdmission,
@@ -50,6 +53,22 @@ class SqlAlchemyMailProcessingRepository:
         source_reference: ProtectedReference,
     ) -> uuid.UUID:
         self._require_scope(registration)
+        app_id = (
+            self._db.query(Workflow.app_id)
+            .filter(
+                Workflow.id == registration.workflow_id,
+                Workflow.organization_id == registration.organization_id,
+            )
+            .scalar()
+        )
+        if app_id is None or lock_app_workflow_for_admission(
+            self._db,
+            app_id=app_id,
+            workflow_id=registration.workflow_id,
+            organization_id=registration.organization_id,
+        ) is None:
+            self._db.rollback()
+            raise MailProcessingApplicationError("mail.processing_not_available")
         processing_id = uuid.uuid4()
         now = self._clock()
         statement = (

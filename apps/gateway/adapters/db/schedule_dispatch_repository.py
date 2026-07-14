@@ -22,7 +22,12 @@ from apps.shared.db.models.workflow_deployment import (
     DeploymentType,
     WorkflowDeployment,
 )
+from apps.shared.db.models.workflow import Workflow
 from apps.shared.db.models.workflow_run import WorkflowRun
+from apps.shared.services.app_lifecycle_admission import (
+    AppWorkflowAdmissionUnavailable,
+    lock_app_workflow_for_admission,
+)
 from apps.shared.domain.schedule_dispatch import (
     REASON_BROKER_ENQUEUE_FAILED,
     REASON_BUDGET_EVALUATION_FAILED,
@@ -44,6 +49,7 @@ class SqlAlchemyScheduleDispatchRepository:
     def __init__(self, db: Session) -> None:
         self.db = db
         self._locked_claims: dict[uuid.UUID, ScheduleDispatchClaim] = {}
+        self._admission_app_ids_by_schedule: dict[uuid.UUID, uuid.UUID] = {}
 
     def database_now(self) -> datetime:
         return self.db.execute(select(func.clock_timestamp())).scalar_one()
@@ -63,13 +69,38 @@ class SqlAlchemyScheduleDispatchRepository:
     def lock_due_occurrences(
         self, *, now: datetime, limit: int
     ) -> tuple[ScheduleOccurrenceSnapshot, ...]:
-        rows = self.db.execute(
+        candidates = self.db.execute(
             self._active_schedule_statement()
             .where(Schedule.next_run_at.is_not(None), Schedule.next_run_at <= now)
-            .order_by(Schedule.next_run_at, Schedule.id)
+            .order_by(App.id, Schedule.next_run_at, Schedule.id)
             .limit(limit)
-            .with_for_update(of=Schedule, skip_locked=True)
         ).all()
+        rows = []
+        for row in candidates:
+            if row.App.workflow_id is None or row.App.organization_id is None:
+                continue
+            locked = lock_app_workflow_for_admission(
+                self.db,
+                app_id=row.App.id,
+                workflow_id=row.App.workflow_id,
+                organization_id=row.App.organization_id,
+            )
+            if locked is None:
+                continue
+            schedule = self.db.execute(
+                select(Schedule)
+                .where(
+                    Schedule.id == row.Schedule.id,
+                    Schedule.next_run_at.is_not(None),
+                    Schedule.next_run_at <= now,
+                )
+                .with_for_update(skip_locked=True)
+                .execution_options(populate_existing=True)
+            ).scalar_one_or_none()
+            if schedule is None:
+                continue
+            self._admission_app_ids_by_schedule[schedule.id] = row.App.id
+            rows.append(row)
         return tuple(
             ScheduleOccurrenceSnapshot(
                 **self._definition_values(row),
@@ -103,6 +134,25 @@ class SqlAlchemyScheduleDispatchRepository:
         safe_reason_code: str | None = None,
         next_attempt_at: datetime | None = None,
     ) -> uuid.UUID:
+        if occurrence.organization_id is None or occurrence.workflow_id is None:
+            raise AppWorkflowAdmissionUnavailable()
+        app_id = self._admission_app_ids_by_schedule.get(occurrence.schedule_id)
+        if app_id is None:
+            app_id = (
+                self.db.query(Workflow.app_id)
+                .filter(
+                    Workflow.id == occurrence.workflow_id,
+                    Workflow.organization_id == occurrence.organization_id,
+                )
+                .scalar()
+            )
+        if app_id is None or lock_app_workflow_for_admission(
+            self.db,
+            app_id=app_id,
+            workflow_id=occurrence.workflow_id,
+            organization_id=occurrence.organization_id,
+        ) is None:
+            raise AppWorkflowAdmissionUnavailable()
         claim_id = uuid.uuid4()
         self.db.add(
             ScheduleDispatchClaim(

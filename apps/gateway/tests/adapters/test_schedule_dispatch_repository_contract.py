@@ -15,6 +15,14 @@ def test_due_schedule_query_excludes_missing_organization_provenance():
     assert "configuration_error_code IS NULL" in where_sql
 
 
+def test_schedule_claim_admission_uses_app_workflow_lifecycle_lock():
+    source = __import__("inspect").getsource(
+        SqlAlchemyScheduleDispatchRepository.create_claim
+    )
+
+    assert "lock_app_workflow_for_admission" in source
+
+
 def test_visibility_gap_query_requires_admitted_claim_without_a_run_row():
     source = SqlAlchemyScheduleDispatchRepository.lock_workflow_run_visibility_gaps
     source_text = __import__("inspect").getsource(source)

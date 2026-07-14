@@ -253,6 +253,45 @@ class _Query:
         return []
 
 
+def test_create_run_enriches_existing_durable_admission(monkeypatch):
+    run = WorkflowRun(
+        id=uuid4(),
+        workflow_id=uuid4(),
+        app_id=uuid4(),
+        user_id=uuid4(),
+        trigger_mode=RunTriggerMode.MANUAL,
+        status=RunStatus.RUNNING,
+        inputs={},
+        trace_metadata={},
+    )
+    session = _QuerySession(run)
+    inserted_payloads = []
+    monkeypatch.setattr(log_tasks, "SessionLocal", lambda: session)
+    monkeypatch.setattr(
+        log_tasks,
+        "_insert_trace_payloads",
+        lambda *args: inserted_payloads.append(args),
+    )
+    data = _base_data(
+        run_id=str(run.id),
+        workflow_id=str(run.workflow_id),
+        app_id=str(run.app_id),
+        user_id=str(run.user_id),
+        trigger_mode="manual",
+        is_deployed=False,
+        durable_admission=True,
+        user_input={"safe": "input"},
+    )
+
+    result = log_tasks.create_run_log.__wrapped__(data)
+
+    assert result == {"status": "success", "run_id": str(run.id)}
+    assert run.status is RunStatus.RUNNING
+    assert run.inputs == {"safe": "input"}
+    assert session.committed is True
+    assert len(inserted_payloads) == 1
+
+
 def test_update_run_finish_clears_previous_error_message(monkeypatch):
     run = WorkflowRun(
         id=uuid4(),

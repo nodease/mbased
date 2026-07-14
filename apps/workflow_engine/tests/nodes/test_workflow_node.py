@@ -325,8 +325,8 @@ def test_workflow_node_error_no_db_session():
         node.execute({})
 
 
-def test_workflow_node_error_app_not_found():
-    """타겟 App을 찾을 수 없을 때 ValueError를 발생시키는지 테스트합니다."""
+def test_workflow_node_error_app_not_found_uses_safe_unavailable_code():
+    """삭제된 target은 내부 존재 정보를 노출하지 않는 safe code로 닫는다."""
     # Given
     node_data = WorkflowNodeData(
         title="App 없음", workflowId="wf-1", appId="nonexistent-app", inputs=[]
@@ -341,7 +341,7 @@ def test_workflow_node_error_app_not_found():
     # When / Then
     with pytest.raises(
         WorkflowNodeConfigurationError,
-        match="Target App .* not found",
+        match="workflow_node.target_unavailable",
     ):
         node.execute({})
 

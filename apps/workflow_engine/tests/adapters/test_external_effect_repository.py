@@ -27,6 +27,15 @@ def test_database_now_uses_postgresql_wall_clock() -> None:
     assert statements == ["SELECT clock_timestamp()"]
 
 
+def test_effect_admission_uses_app_workflow_lifecycle_lock() -> None:
+    source = __import__("inspect").getsource(
+        SQLAlchemyEffectAttemptRepository.acquire
+    )
+
+    assert "lock_app_workflow_for_admission" in source
+    assert "external_effect.stopped" in source
+
+
 def test_wait_does_not_sleep_past_task_deadline(monkeypatch) -> None:
     elapsed = [0.0]
     sleeps: list[float] = []
