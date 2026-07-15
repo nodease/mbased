@@ -10,6 +10,7 @@ from apps.gateway.services.agent_builder_intent_service import (
     LLMAgentBuilderIntentExtractor,
 )
 from apps.gateway.services.agent_builder_service import (
+    EXPECTED_APP_PRIMARY_WORKFLOW_ID,
     AgentBuilderService,
     calculate_graph_hash,
 )
@@ -839,6 +840,7 @@ def test_header_selection_stays_in_planner_while_new_agent_persists_recommendati
         node_detail_previews=[],
         validation_result={"valid": True, "issues": []},
         draft_metadata={
+            EXPECTED_APP_PRIMARY_WORKFLOW_ID: str(original_workflow.id),
             "workflow_scope": "new_workflow",
             "generated_node_ids": [node["id"] for node in preview_graph["nodes"]],
             "generated_edge_ids": [edge["id"] for edge in preview_graph["edges"]],
@@ -960,6 +962,7 @@ def test_agent_builder_new_workflow_apply_rebinds_session_scope(db_session):
         node_detail_previews=[],
         validation_result={"valid": True, "issues": []},
         draft_metadata={
+            EXPECTED_APP_PRIMARY_WORKFLOW_ID: str(original_workflow.id),
             "workflow_scope": "new_workflow",
             "generated_node_ids": ["new-start", "new-answer"],
             "generated_edge_ids": ["edge-new-start-answer"],

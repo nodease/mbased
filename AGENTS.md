@@ -161,7 +161,7 @@ Codex PR 리뷰는 한국어로 작성하고, 실제 장애나 제품 시연 실
 - Gateway: `cd apps/gateway && PYTHONPATH=$(git rev-parse --show-toplevel) .venv/bin/python -m pytest tests`
 - Workflow Engine: `cd apps/workflow_engine && PYTHONPATH=$(git rev-parse --show-toplevel) .venv/bin/python -m pytest tests`
 - Log System: `PYTHONPATH=$(git rev-parse --show-toplevel) apps/workflow_engine/.venv/bin/python -m pytest apps/log_system/tests`
-- Shared: `PYTHONPATH=$(git rev-parse --show-toplevel) apps/workflow_engine/.venv/bin/python -m pytest apps/shared/tests`
+- Shared: `PYTHONPATH=$(git rev-parse --show-toplevel) apps/gateway/.venv/bin/python -m pytest apps/shared/tests`
 - Sandbox: `PYTHONPATH=$(git rev-parse --show-toplevel) apps/workflow_engine/.venv/bin/python -m pytest apps/sandbox/tests`
 - Root Tests: `PYTHONPATH=$(git rev-parse --show-toplevel) apps/gateway/.venv/bin/python -m pytest tests/test_permission_schema.py tests/db tests/services tests/evaluation/test_rag_baseline.py`
 - Root Evaluation Benchmarks: `tests/evaluation/`에는 RAG 평가용 수동 벤치마크 도구가 있다. 데이터셋 준비, Knowledge Base 인덱싱, `run_benchmark.py` 실행, `reports/` 확인은 `tests/evaluation/README.md`를 따른다.

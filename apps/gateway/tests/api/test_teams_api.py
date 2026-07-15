@@ -1851,7 +1851,7 @@ class _Query:
         self.order_by_values.extend(args)
         return self
 
-    def with_for_update(self):
+    def with_for_update(self, *args, **kwargs):
         return self
 
     def options(self, *args):
