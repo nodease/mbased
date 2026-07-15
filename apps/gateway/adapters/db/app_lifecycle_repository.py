@@ -6,10 +6,13 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from apps.gateway.application.app_lifecycle.models import (
+    ActiveResourceDeletion,
     AppDeletionCounts,
+    DeletedWorkflowPermission,
     LockedApp,
     LockedWorkflow,
 )
+from apps.shared.audit.manual_ownership import register_manual_audit_ownership
 from apps.shared.db.models.app import App
 from apps.shared.db.models.llm_node_version import LLMNodeVersion
 from apps.shared.db.models.mail_processing import (
@@ -206,7 +209,7 @@ class SqlAlchemyAppLifecycleRepository:
         self,
         app: LockedApp,
         workflows: tuple[LockedWorkflow, ...],
-    ) -> AppDeletionCounts:
+    ) -> ActiveResourceDeletion:
         self._assert_locked_rows(app, workflows)
         workflow_ids = tuple(workflow.id for workflow in workflows)
 
@@ -238,6 +241,28 @@ class SqlAlchemyAppLifecycleRepository:
             .filter(LLMNodeVersion.app_id == app.id)
             .all()
         )
+        deleted_permissions = tuple(
+            DeletedWorkflowPermission(
+                id=row.id,
+                subject_type="team",
+                organization_id=app.organization_id,
+                workflow_id=row.workflow_id,
+                subject_id=row.team_id,
+            )
+            for row in team_permissions
+        ) + tuple(
+            DeletedWorkflowPermission(
+                id=row.id,
+                subject_type="user",
+                organization_id=app.organization_id,
+                workflow_id=row.workflow_id,
+                subject_id=row.user_id,
+            )
+            for row in user_permissions
+        )
+
+        for permission in (*team_permissions, *user_permissions):
+            register_manual_audit_ownership(self.db, permission, "deleted")
 
         # App.workflow_id와 Workflow.app_id가 서로를 가리키므로 먼저 한쪽을 끊는다.
         # flush는 같은 트랜잭션 안에 있어 이후 실패 시 함께 rollback된다.
@@ -250,21 +275,33 @@ class SqlAlchemyAppLifecycleRepository:
             team_permissions,
             user_permissions,
             budgets,
-            deployments,
             llm_node_versions,
-            self._workflow_rows,
         ):
             for row in rows:
                 self.db.delete(row)
+
+        # Flush lifecycle children before their DB-cascading parents. Otherwise
+        # PostgreSQL can remove a child first and SQLAlchemy may issue the same
+        # DELETE later, producing a misleading zero-row warning.
+        self.db.flush()
+        for deployment in deployments:
+            self.db.delete(deployment)
+        self.db.flush()
+        for workflow in self._workflow_rows:
+            self.db.delete(workflow)
+        self.db.flush()
         self.db.delete(self._app_row)
 
-        return AppDeletionCounts(
-            permissions=len(team_permissions) + len(user_permissions),
-            budgets=len(budgets),
-            deployments=len(deployments),
-            schedules=len(schedules),
-            active_routing_policies=len(routing_policies),
-            llm_node_versions=len(llm_node_versions),
+        return ActiveResourceDeletion(
+            counts=AppDeletionCounts(
+                permissions=len(team_permissions) + len(user_permissions),
+                budgets=len(budgets),
+                deployments=len(deployments),
+                schedules=len(schedules),
+                active_routing_policies=len(routing_policies),
+                llm_node_versions=len(llm_node_versions),
+            ),
+            permissions=deleted_permissions,
         )
 
     def _assert_locked_rows(

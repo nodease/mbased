@@ -53,8 +53,8 @@ class DeleteApp:
             if self.repository.has_active_blocker(app, workflows):
                 raise AppDeleteInProgress()
 
-            counts = self.repository.delete_active_resources(app, workflows)
-            self.audit.record_delete(command, app, workflows, counts)
+            deletion = self.repository.delete_active_resources(app, workflows)
+            self.audit.record_delete(command, app, workflows, deletion)
             self.unit_of_work.flush()
             self.unit_of_work.commit()
         except Exception:
@@ -64,7 +64,7 @@ class DeleteApp:
         return DeleteAppResult(
             app_id=app.id,
             workflow_ids=tuple(workflow.id for workflow in workflows),
-            counts=counts,
+            counts=deletion.counts,
         )
 
     @staticmethod

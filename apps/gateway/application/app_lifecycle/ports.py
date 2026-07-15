@@ -4,7 +4,7 @@ from typing import Protocol
 from uuid import UUID
 
 from .models import (
-    AppDeletionCounts,
+    ActiveResourceDeletion,
     DeleteAppCommand,
     LockedApp,
     LockedWorkflow,
@@ -31,7 +31,7 @@ class AppLifecycleRepositoryPort(Protocol):
         self,
         app: LockedApp,
         workflows: tuple[LockedWorkflow, ...],
-    ) -> AppDeletionCounts: ...
+    ) -> ActiveResourceDeletion: ...
 
 
 class AppLifecycleAuthorizationPort(Protocol):
@@ -46,7 +46,7 @@ class AppLifecycleAuditPort(Protocol):
         command: DeleteAppCommand,
         app: LockedApp,
         workflows: tuple[LockedWorkflow, ...],
-        counts: AppDeletionCounts,
+        deletion: ActiveResourceDeletion,
     ) -> None: ...
 
 

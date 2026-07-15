@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 from uuid import UUID
 
 
@@ -34,6 +35,21 @@ class AppDeletionCounts:
     schedules: int
     active_routing_policies: int
     llm_node_versions: int
+
+
+@dataclass(frozen=True)
+class DeletedWorkflowPermission:
+    id: UUID
+    subject_type: Literal["user", "team"]
+    organization_id: UUID | None
+    workflow_id: UUID
+    subject_id: UUID
+
+
+@dataclass(frozen=True)
+class ActiveResourceDeletion:
+    counts: AppDeletionCounts
+    permissions: tuple[DeletedWorkflowPermission, ...]
 
 
 @dataclass(frozen=True)
