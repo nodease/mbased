@@ -28,13 +28,13 @@ Security Alert MVP는 [ADR-0028](decisions/ADR-0028-security-alert-detection-and
 | Security Alert Admin Service | Gateway application/service boundary | organization owner/manager 전용 alert 조회·상태 변경, safe evidence projection, lifecycle audit transaction을 제공한다 |
 | Security Alert Notification Projection | Gateway/Client notification boundary | 영속 alert를 source of truth로 두고 Sidebar summary와 `notifications.changed` 재조회 신호를 제공한다 |
 
-App hard-delete 목표 구조는 [ADR-0045](decisions/ADR-0045-app-workflow-hard-delete-retention-boundary.md)을 따른다. 현재 `AppService.delete_app()`의 bulk delete가 이미 아래 구조를 구현했다는 뜻은 아니며 MBA-87이 migration과 use case를 순서대로 적용한다.
+App hard-delete 구조는 [ADR-0045](decisions/ADR-0045-app-workflow-hard-delete-retention-boundary.md)을 따른다. MBA-87은 lifecycle FK migration, Gateway 삭제 use case, Runtime admission guard를 아래 경계로 구현한다.
 
 | 구성요소 | 위치 | 책임 |
 | --- | --- | --- |
 | App Lifecycle Deletion Application | Gateway application boundary | active organization/manage 재검사, App→Workflow UUID exclusive lock 순서, bounded legacy 연결, 진행 중 operation 차단, active/history 삭제 계획과 단일 transaction을 조율한다 |
 | App Lifecycle Persistence Adapter | Gateway SQLAlchemy adapter | 연결 Workflow union, blocker/history 조회, permission·설정 delete와 history provenance 보존을 구현하며 repository 안에서 commit하지 않는다 |
-| App Lifecycle Audit Adapter | Gateway audit/outbox adapter | `app.delete`와 permission delete audit를 같은 transaction에 기록하고 성공 event는 commit 뒤에만 발행한다 |
+| App Lifecycle Audit Adapter | Gateway transaction-bound audit adapter | `app.delete`와 user/team Workflow permission delete audit를 같은 transaction에 기록하고 ORM 자동 audit의 중복 발행을 막는다. 삭제가 rollback되면 audit row도 함께 rollback된다 |
 | Runtime Lifecycle Admission/Target Guard | Gateway와 Workflow Engine admission/runtime | 새 run/schedule/Mail durable active 상태 전에 App→Workflow shared lifecycle lock과 resource 재검사를 수행한다. 다른 graph의 stale WorkflowNode target은 수정하지 않고 preflight `workflow_node_target_unavailable`, runtime `workflow_node.target_unavailable`로 provider effect 전에 차단한다 |
 
 Knowledge 통합 목표 구조에서는 Gateway/Shared/Workflow Engine 경계에 다음 domain service를 둔다. 아래 항목은 현재 구현 컴포넌트 전체가 아니라 [ADR-0014](decisions/ADR-0014-knowledge-base-document-atom-and-collection-boundary.md), [ADR-0015](decisions/ADR-0015-knowledge-skill-context-routing-boundary.md), [ADR-0017](decisions/ADR-0017-knowledge-integration-provisional-implementation-baseline.md), [ADR-0020](decisions/ADR-0020-knowledge-mcp-incremental-sync-boundary.md), [ADR-0036](decisions/ADR-0036-knowledge-runtime-candidate-resolution.md), [ADR-0039](decisions/ADR-0039-knowledge-workflow-collection-routing-integration.md)의 target component다.

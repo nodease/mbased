@@ -1,7 +1,7 @@
 # App Management Test Cases
 
 Status: Draft
-Verified Against: feature/mba-87 @ 5c850b2e37d3b29476d8427884cca0ca4345f05d
+Verified Against: feature/mba-87 @ bcf6072f30863d248c7f0ebc0cde38037f73ed32
 
 ## Acceptance Criteria
 
@@ -101,6 +101,8 @@ Verified Against: feature/mba-87 @ 5c850b2e37d3b29476d8427884cca0ca4345f05d
   - Given KST 월초 직후(예: 2026-07-31 16:00 UTC = 2026-08-01 01:00 KST), When rows를 생성하면, Then 8월 KST 비용 기준으로 `budget_status`를 계산한다.
 - App deletion use case
   - 연결 집합 union, 100개 상한, UUID lock 순서, 잠금 뒤 scope/permission 재검사를 검증한다.
+  - 정상 same-organization legacy 복수 Workflow는 모두 삭제하고, 100개 초과 또는 cross-organization 연결 손상은 `409 app.delete_requires_repair`로 무변경 rollback하는지 검증한다.
+  - 실제 PostgreSQL에서 Workflow budget, deployment/schedule, App-owned LLM node version이 함께 삭제되는지 검증한다.
   - admission shared lifecycle lock과 삭제 exclusive lock의 양쪽 승자 순서를 검증한다.
   - active/history 분류가 각 repository delete/detach/retain 계획으로 정확히 변환되는지 검증한다.
   - blocker 하나라도 있으면 mutation과 success audit가 모두 없는지 검증한다.
@@ -126,6 +128,9 @@ Verified Against: feature/mba-87 @ 5c850b2e37d3b29476d8427884cca0ca4345f05d
   - `X-Organization-Id`가 없으면 `400 organization.required`, UUID가 아니면 `422 validation.failed`다.
   - missing/cross-organization/repeated delete는 `404 resource.not_found`, same-organization 권한 부족은 `403 permission.denied`다.
   - active operation과 legacy repair 조건은 각각 정해진 `409` code이며 DB 내부 정보가 없다.
+  - safe error envelope는 `error.code`, `error.message`, opaque `error.request_id`, object `error.details`만 포함한다.
+  - 성공 시 `app.delete`, `user_workflow_permission.deleted`, `team_workflow_permission.deleted` audit가 resource 삭제와 같은 transaction에 저장된다.
+  - audit에는 검증된 ID와 정리 개수만 남고 graph, secret, credential, raw payload가 포함되지 않으며 삭제 flush 실패 시 audit도 rollback된다.
 
 ## E2E Tests
 
@@ -145,8 +150,8 @@ Verified Against: feature/mba-87 @ 5c850b2e37d3b29476d8427884cca0ca4345f05d
 - `GET /apps/operations` 조회와 예산 비활성화가 경합하면 row 자체는 기존 App/Workflow 접근 정책대로 유지하고, 예산 상태는 수정 전 값 또는 null 중 하나로 반환한다.
 - 동시에 여러 사용자가 `GET /apps/operations`를 호출해도 예산 조회는 read-only이며 budget/audit row를 생성하거나 갱신하지 않는다.
 - 같은 App을 동시에 DELETE하면 PostgreSQL row lock으로 직렬화되어 성공 1건과 `404` 1건만 발생한다.
-- DELETE가 진행 중 run/schedule/Mail/external effect 상태 전이와 경합하면 잠금·재검사 시점의 일관된 상태로 전체 성공 또는 `409` 전체 rollback 중 하나만 된다.
-- 삭제가 먼저 resource lock을 얻은 뒤에는 새 run/schedule/Mail admission이 provenance ID만으로 active row를 만들지 못한다.
+- DELETE가 run/schedule claim/Mail processing/external effect admission과 경합하면 admission이 먼저인 경우 `409` 전체 rollback, 삭제가 먼저인 경우 admission fail-closed 중 하나만 된다.
+- 삭제가 먼저 resource lock을 얻은 뒤에는 새 run/schedule/Mail/external effect admission이 provenance ID만으로 active row를 만들지 못한다.
 - PostgreSQL migration 검증은 permission이 있는 기본 App 삭제가 FK 오류 없이 끝나고, retained history의 resource ID가 변하지 않으며, migration downgrade/rollback 경계가 문서화됐는지 확인한다.
 
 ## Edge Cases

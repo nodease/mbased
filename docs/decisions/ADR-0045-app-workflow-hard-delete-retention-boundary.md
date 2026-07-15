@@ -94,5 +94,5 @@ manage는 organization manager 또는 App primary Workflow의 `manager` 권한�
 
 - 여러 FK를 lifecycle-free provenance ID로 바꾸는 호환 migration과 PostgreSQL 검증이 필요하다.
 - 보존 이력 조회는 삭제된 App/Workflow를 join하지 못할 수 있으므로 저장된 ID와 당시의 safe snapshot을 사용해야 한다.
-- `AppService.delete_app()`의 현재 bulk delete 구현은 이 결정을 충족하지 않는다. MBA-87 구현이 완료될 때까지 이 ADR은 target contract다.
+- MBA-87은 lifecycle FK migration, transaction-bound 삭제 use case, runtime admission guard로 이 결정을 구현했다. `AppService.delete_app()`은 해당 use case를 호출하는 호환 facade이며 더 이상 bulk delete를 직접 수행하지 않는다.
 - soft delete 복구 기능은 제공하지 않는다. 삭제 확인 UX나 별도 보존 기간 변경은 후속 요구사항이다.

@@ -84,6 +84,8 @@ Request body는 없고 `X-Organization-Id: <organization-uuid>` header가 필수
 
 성공 시 HTTP `200`이다. App/Workflow와 활성 편집·배포 설정은 hard delete하지만 run·trace·usage·audit·Cost Optimizer·model routing history·Mail/external effect/schedule claim은 retention 정책대로 남긴다. 다른 Workflow graph의 WorkflowNode reference는 수정하지 않는다.
 
+성공 transaction에는 canonical `app.delete`와 삭제된 `user_workflow_permission.deleted`/`team_workflow_permission.deleted` audit row를 함께 기록한다. `app.delete` metadata는 검증된 organization/actor/App/Workflow ID와 대상별 정리 개수만 포함한다. permission audit는 permission·organization·Workflow·user 또는 team ID만 기록하며 graph, secret, credential, raw payload는 기록하지 않는다. 삭제 또는 audit flush가 실패하면 resource와 audit row를 모두 rollback한다.
+
 오류는 공통 safe envelope를 사용한다.
 
 ```json
