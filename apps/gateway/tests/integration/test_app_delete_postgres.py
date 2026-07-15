@@ -1,10 +1,13 @@
+import json
 import os
 import subprocess
 import sys
 import threading
 import uuid
+import warnings
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -13,16 +16,23 @@ from alembic.config import Config
 from alembic.script import ScriptDirectory
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event, text
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import OperationalError, SAWarning
 from sqlalchemy.orm import sessionmaker
 
 import apps.gateway.utils.audit as audit_utils
+from apps.gateway.adapters.db.schedule_dispatch_repository import (
+    SqlAlchemyScheduleDispatchRepository,
+)
+from apps.gateway.application.deployment.schedule_models import (
+    ScheduleOccurrenceSnapshot,
+)
 from apps.gateway.auth.dependencies import get_current_user
 from apps.gateway.main import app as gateway_app
 from apps.gateway.services.app_service import AppService
 from apps.gateway.application.app_lifecycle.errors import AppDeleteInProgress
 from apps.shared.db.models.agent_builder import AgentBuilderSession
 from apps.shared.db.models.app import App
+from apps.shared.db.models.audit_log import AuditLog
 from apps.shared.db.models.cost_optimizer import (
     CostOptimizerCandidate,
     CostOptimizerExperiment,
@@ -34,6 +44,7 @@ from apps.shared.db.models.llm import (
     LLMProvider,
     LLMUsageLog,
 )
+from apps.shared.db.models.llm_node_version import LLMNodeVersion
 from apps.shared.db.models.mail_credential import MailCredential
 from apps.shared.db.models.mail_processing import MailDraftEffect, MailMessageProcessing
 from apps.shared.db.models.model_routing_policy import (
@@ -42,10 +53,16 @@ from apps.shared.db.models.model_routing_policy import (
 )
 from apps.shared.db.models.organization import Organization
 from apps.shared.db.models.organization_membership import OrganizationMembership
+from apps.shared.db.models.schedule import Schedule
 from apps.shared.db.models.schedule_dispatch import ScheduleDispatchClaim
-from apps.shared.db.models.team import UserWorkflowPermission
+from apps.shared.db.models.team import (
+    Team,
+    TeamWorkflowPermission,
+    UserWorkflowPermission,
+)
 from apps.shared.db.models.user import User
 from apps.shared.db.models.workflow import Workflow
+from apps.shared.db.models.workflow_budget import WorkflowBudget
 from apps.shared.db.models.workflow_deployment import DeploymentType, WorkflowDeployment
 from apps.shared.db.models.workflow_node_effect_attempt import WorkflowNodeEffectAttempt
 from apps.shared.db.models.workflow_run import (
@@ -59,9 +76,28 @@ from apps.shared.db.models.workflow_run import (
 )
 from apps.shared.db.session import get_db
 from apps.shared.schemas.app import AppCreateRequest, AppIcon
+from apps.shared.domain.mail_processing import MailSourceReference
+from apps.shared.domain.schedule_dispatch import STATUS_PENDING
 from apps.shared.services.app_lifecycle_admission import (
     AppWorkflowAdmissionUnavailable,
     admit_workflow_run,
+)
+from apps.workflow_engine.adapters.db.external_effect_repository import (
+    SQLAlchemyEffectAttemptRepository,
+)
+from apps.workflow_engine.adapters.mail_processing_repository import (
+    SqlAlchemyMailProcessingRepository,
+)
+from apps.workflow_engine.application.external_effect import EffectAttemptSpec
+from apps.workflow_engine.application.mail_processing import (
+    MailProcessingApplicationError,
+    ProcessingRegistration,
+    ProtectedReference,
+)
+from apps.workflow_engine.domain.external_effect import (
+    ExternalEffectContext,
+    ExternalEffectError,
+    provider_contract_registry,
 )
 from apps.shared.tests.helpers.disposable_postgres import (
     DisposablePostgresConfig,
@@ -301,9 +337,16 @@ def _new_deployment(db_session, context) -> WorkflowDeployment:
     return deployment
 
 
-def _error_code(response) -> str | None:
+def _assert_safe_error_envelope(response, expected_code: str) -> None:
     body = response.json()
-    return body.get("error", {}).get("code") if isinstance(body, dict) else None
+    assert set(body) == {"error"}
+    assert set(body["error"]) == {"code", "message", "request_id", "details"}
+    assert body["error"]["code"] == expected_code
+    assert isinstance(body["error"]["message"], str)
+    assert body["error"]["message"]
+    assert isinstance(body["error"]["request_id"], str)
+    assert body["error"]["request_id"]
+    assert isinstance(body["error"]["details"], dict)
 
 
 def _client(db_session, current_user, monkeypatch) -> TestClient:
@@ -375,6 +418,305 @@ def test_delete_default_app_with_creator_permission_succeeds(db_session):
         .count()
         == 0
     )
+
+
+def test_delete_removes_all_valid_legacy_workflows_connected_to_app(db_session):
+    context = _new_app_context(db_session)
+    legacy_workflows = [
+        Workflow(
+            organization_id=context.organization.id,
+            app_id=context.app.id,
+            created_by=context.actor.id,
+            graph={"nodes": [], "edges": []},
+        )
+        for _ in range(2)
+    ]
+    db_session.add_all(legacy_workflows)
+    db_session.commit()
+    workflow_ids = {context.workflow.id, *(row.id for row in legacy_workflows)}
+
+    assert (
+        AppService.delete_app(db_session, str(context.app.id), context.actor.id)
+        is True
+    )
+
+    assert db_session.get(App, context.app.id) is None
+    assert (
+        db_session.query(Workflow).filter(Workflow.id.in_(workflow_ids)).count()
+        == 0
+    )
+
+
+def test_delete_rejects_more_than_one_hundred_connected_workflows_for_repair(
+    db_session,
+    monkeypatch,
+):
+    context = _new_app_context(db_session)
+    db_session.add_all(
+        [
+            Workflow(
+                organization_id=context.organization.id,
+                app_id=context.app.id,
+                created_by=context.actor.id,
+                graph={"nodes": [], "edges": []},
+            )
+            for _ in range(100)
+        ]
+    )
+    db_session.commit()
+
+    client = _client(db_session, context.actor, monkeypatch)
+    try:
+        response = client.delete(
+            f"/api/v1/apps/{context.app.id}",
+            headers={"X-Organization-Id": str(context.organization.id)},
+        )
+    finally:
+        _close_client(client)
+
+    assert response.status_code == 409
+    _assert_safe_error_envelope(response, "app.delete_requires_repair")
+    assert db_session.get(App, context.app.id) is not None
+    assert (
+        db_session.query(Workflow).filter(Workflow.app_id == context.app.id).count()
+        == 101
+    )
+
+
+def test_delete_rejects_cross_organization_connected_workflow_for_repair(
+    db_session,
+    monkeypatch,
+):
+    context = _new_app_context(db_session)
+    other_actor = _new_user(db_session, "other-organization-actor")
+    other_organization = _new_organization(db_session, other_actor)
+    damaged_workflow = Workflow(
+        organization_id=other_organization.id,
+        app_id=context.app.id,
+        created_by=other_actor.id,
+        graph={"nodes": [], "edges": []},
+    )
+    db_session.add(damaged_workflow)
+    db_session.commit()
+
+    client = _client(db_session, context.actor, monkeypatch)
+    try:
+        response = client.delete(
+            f"/api/v1/apps/{context.app.id}",
+            headers={"X-Organization-Id": str(context.organization.id)},
+        )
+    finally:
+        _close_client(client)
+
+    assert response.status_code == 409
+    _assert_safe_error_envelope(response, "app.delete_requires_repair")
+    assert db_session.get(App, context.app.id) is not None
+    assert db_session.get(Workflow, context.workflow.id) is not None
+    assert db_session.get(Workflow, damaged_workflow.id) is not None
+
+
+def test_delete_removes_active_budget_schedule_and_llm_node_version(db_session):
+    context = _new_app_context(db_session)
+    deployment = _new_deployment(db_session, context)
+    schedule = Schedule(
+        deployment_id=deployment.id,
+        node_id="schedule-1",
+        cron_expression="0 * * * *",
+        timezone="UTC",
+    )
+    budget = WorkflowBudget(
+        organization_id=context.organization.id,
+        workflow_id=context.workflow.id,
+        monthly_budget_usd=Decimal("10.00"),
+        created_by=context.actor.id,
+        updated_by=context.actor.id,
+    )
+    llm_node_version = LLMNodeVersion(
+        app_id=context.app.id,
+        node_id="llm-1",
+        version_number=1,
+        source_workflow_id=context.workflow.id,
+        provider="test",
+        model_id="test-model",
+        created_by=context.actor.id,
+    )
+    db_session.add_all([schedule, budget, llm_node_version])
+    db_session.commit()
+    resource_ids = {
+        "deployment": deployment.id,
+        "schedule": schedule.id,
+        "budget": budget.id,
+        "llm_node_version": llm_node_version.id,
+    }
+
+    with warnings.catch_warnings(record=True) as emitted_warnings:
+        warnings.simplefilter("always", SAWarning)
+        assert (
+            AppService.delete_app(db_session, str(context.app.id), context.actor.id)
+            is True
+        )
+    sqlalchemy_warnings = [
+        warning
+        for warning in emitted_warnings
+        if issubclass(warning.category, SAWarning)
+    ]
+    assert sqlalchemy_warnings == [], [
+        str(warning.message) for warning in sqlalchemy_warnings
+    ]
+
+    assert db_session.get(WorkflowDeployment, resource_ids["deployment"]) is None
+    assert db_session.get(Schedule, resource_ids["schedule"]) is None
+    assert db_session.get(WorkflowBudget, resource_ids["budget"]) is None
+    assert db_session.get(LLMNodeVersion, resource_ids["llm_node_version"]) is None
+
+
+def test_delete_records_safe_transactional_app_and_permission_audits(
+    db_session,
+    monkeypatch,
+):
+    context = _new_app_context(
+        db_session,
+        graph={
+            "nodes": [
+                {
+                    "id": "sensitive-node",
+                    "data": {"secret": "must-not-appear-in-audit"},
+                }
+            ],
+            "edges": [],
+        },
+        with_creator_permission=True,
+    )
+    permission = (
+        db_session.query(UserWorkflowPermission)
+        .filter(UserWorkflowPermission.workflow_id == context.workflow.id)
+        .one()
+    )
+    team = Team(
+        organization_id=context.organization.id,
+        name=f"MBA-87 Audit Team {uuid.uuid4().hex}",
+        created_by=context.actor.id,
+        managed_by=context.actor.id,
+    )
+    db_session.add(team)
+    db_session.flush()
+    team_permission = TeamWorkflowPermission(
+        grantee_organization_id=context.organization.id,
+        workflow_id=context.workflow.id,
+        team_id=team.id,
+        auth_state="viewer",
+        assigned_by=context.actor.id,
+        options={},
+        flags=0,
+    )
+    db_session.add(team_permission)
+    db_session.commit()
+    permission_id = permission.id
+    team_permission_id = team_permission.id
+    team_id = team.id
+    app_id = context.app.id
+    workflow_id = context.workflow.id
+    organization_id = context.organization.id
+    actor_id = context.actor.id
+
+    client = _client(db_session, context.actor, monkeypatch)
+    try:
+        response = client.delete(
+            f"/api/v1/apps/{app_id}",
+            headers={"X-Organization-Id": str(organization_id)},
+        )
+    finally:
+        _close_client(client)
+
+    assert response.status_code == 200
+    assert response.json() == {"message": "App deleted successfully"}
+
+    app_audit = (
+        db_session.query(AuditLog)
+        .filter(
+            AuditLog.action == "app.delete",
+            AuditLog.target_id == str(app_id),
+        )
+        .one()
+    )
+    permission_audit = (
+        db_session.query(AuditLog)
+        .filter(
+            AuditLog.action == "user_workflow_permission.deleted",
+            AuditLog.target_id == str(permission_id),
+        )
+        .one()
+    )
+    team_permission_audit = (
+        db_session.query(AuditLog)
+        .filter(
+            AuditLog.action == "team_workflow_permission.deleted",
+            AuditLog.target_id == str(team_permission_id),
+        )
+        .one()
+    )
+
+    assert app_audit.actor_id == actor_id
+    assert app_audit.audit_metadata == {
+        "organization_id": str(organization_id),
+        "actor_id": str(actor_id),
+        "app_id": str(app_id),
+        "workflow_ids": [str(workflow_id)],
+        "deleted_counts": {
+            "permissions": 2,
+            "budgets": 0,
+            "deployments": 0,
+            "schedules": 0,
+            "active_routing_policies": 0,
+            "llm_node_versions": 0,
+        },
+    }
+    assert permission_audit.actor_id == actor_id
+    assert permission_audit.before == {
+        "organization_id": str(organization_id),
+        "workflow_id": str(workflow_id),
+        "user_id": str(actor_id),
+    }
+    assert permission_audit.after is None
+    assert permission_audit.audit_metadata == {
+        "organization_id": str(organization_id),
+        "actor_id": str(actor_id),
+        "app_id": str(app_id),
+        "workflow_id": str(workflow_id),
+    }
+    assert team_permission_audit.actor_id == actor_id
+    assert team_permission_audit.before == {
+        "organization_id": str(organization_id),
+        "workflow_id": str(workflow_id),
+        "team_id": str(team_id),
+    }
+    assert team_permission_audit.after is None
+    assert team_permission_audit.audit_metadata == {
+        "organization_id": str(organization_id),
+        "actor_id": str(actor_id),
+        "app_id": str(app_id),
+        "workflow_id": str(workflow_id),
+    }
+
+    serialized_audit = json.dumps(
+        {
+            "app": app_audit.audit_metadata,
+            "permission_before": permission_audit.before,
+            "permission_metadata": permission_audit.audit_metadata,
+            "team_permission_before": team_permission_audit.before,
+            "team_permission_metadata": team_permission_audit.audit_metadata,
+        },
+        sort_keys=True,
+    )
+    for forbidden in (
+        "must-not-appear-in-audit",
+        "graph",
+        "secret",
+        "credential",
+        "raw_payload",
+        "encrypted",
+    ):
+        assert forbidden not in serialized_audit
 
 
 def test_migration_reaches_repository_heads_and_detaches_history_lifecycle_fks(
@@ -847,7 +1189,7 @@ def test_delete_returns_409_without_mutation_for_active_operations(
         _close_client(client)
 
     assert response.status_code == 409
-    assert _error_code(response) == "app.delete_in_progress"
+    _assert_safe_error_envelope(response, "app.delete_in_progress")
     assert db_session.get(App, context.app.id) is not None
     assert db_session.get(Workflow, context.workflow.id) is not None
     assert db_session.get(type(blocker_row), blocker_row.id) is not None
@@ -862,7 +1204,7 @@ def test_delete_requires_active_organization_header(db_session, monkeypatch):
         _close_client(client)
 
     assert response.status_code == 400
-    assert _error_code(response) == "organization.required"
+    _assert_safe_error_envelope(response, "organization.required")
     assert db_session.get(App, context.app.id) is not None
 
 
@@ -892,7 +1234,7 @@ def test_delete_returns_safe_403_and_hidden_404(db_session, monkeypatch):
     finally:
         _close_client(same_org_client)
     assert forbidden.status_code == 403
-    assert _error_code(forbidden) == "permission.denied"
+    _assert_safe_error_envelope(forbidden, "permission.denied")
 
     other_org_client = _client(db_session, other_org_member, monkeypatch)
     try:
@@ -907,9 +1249,9 @@ def test_delete_returns_safe_403_and_hidden_404(db_session, monkeypatch):
     finally:
         _close_client(other_org_client)
     assert hidden.status_code == 404
-    assert _error_code(hidden) == "resource.not_found"
+    _assert_safe_error_envelope(hidden, "resource.not_found")
     assert missing.status_code == 404
-    assert _error_code(missing) == "resource.not_found"
+    _assert_safe_error_envelope(missing, "resource.not_found")
 
 
 def test_repeated_delete_returns_safe_404(db_session, monkeypatch):
@@ -925,7 +1267,7 @@ def test_repeated_delete_returns_safe_404(db_session, monkeypatch):
     assert first.status_code == 200
     assert first.json() == {"message": "App deleted successfully"}
     assert second.status_code == 404
-    assert _error_code(second) == "resource.not_found"
+    _assert_safe_error_envelope(second, "resource.not_found")
 
 
 def test_delete_rolls_back_every_change_when_final_app_delete_fails(
@@ -957,6 +1299,15 @@ def test_delete_rolls_back_every_change_when_final_app_delete_fails(
     try:
         assert observer.get(App, app_id) is not None
         assert observer.get(Workflow, workflow_id) is not None
+        assert (
+            observer.query(AuditLog)
+            .filter(
+                AuditLog.action == "app.delete",
+                AuditLog.target_id == str(app_id),
+            )
+            .count()
+            == 0
+        )
     finally:
         observer.close()
     assert db_session.in_transaction() is False
@@ -1066,6 +1417,254 @@ def test_delete_and_run_admission_race_is_atomic(db_session, db_runtime):
             assert deletion_result[0] == "blocked"
             assert observer.get(App, context.app.id) is not None
             assert observer.get(WorkflowRun, admission_result[1]) is not None
+        else:
+            assert admission_result == ("unavailable", None)
+            assert deletion_result == ("deleted", True)
+            assert observer.get(App, context.app.id) is None
+    finally:
+        observer.close()
+
+
+def test_delete_and_schedule_claim_admission_race_is_atomic(db_session, db_runtime):
+    context = _new_app_context(db_session)
+    deployment = _new_deployment(db_session, context)
+    deployment.type = DeploymentType.SCHEDULE
+    schedule = Schedule(
+        deployment_id=deployment.id,
+        node_id="schedule-1",
+        cron_expression="0 * * * *",
+        timezone="UTC",
+        next_run_at=datetime.now(timezone.utc),
+    )
+    db_session.add(schedule)
+    db_session.commit()
+    barrier = threading.Barrier(2)
+
+    def admit_once():
+        session = db_runtime.session_factory()
+        try:
+            barrier.wait(timeout=5)
+            repository = SqlAlchemyScheduleDispatchRepository(session)
+            now = datetime.now(timezone.utc)
+            claim_id = repository.create_claim(
+                ScheduleOccurrenceSnapshot(
+                    schedule_id=schedule.id,
+                    deployment_id=deployment.id,
+                    organization_id=context.organization.id,
+                    workflow_id=context.workflow.id,
+                    deployment_type=DeploymentType.SCHEDULE,
+                    cron_expression=schedule.cron_expression,
+                    timezone=schedule.timezone,
+                    scheduled_for=now,
+                ),
+                status=STATUS_PENDING,
+                idempotency_key=f"schedule:{uuid.uuid4()}",
+                now=now,
+            )
+            session.commit()
+            return ("admitted", claim_id)
+        except AppWorkflowAdmissionUnavailable:
+            return ("unavailable", None)
+        finally:
+            session.close()
+
+    def delete_once():
+        session = db_runtime.session_factory()
+        try:
+            barrier.wait(timeout=5)
+            try:
+                return (
+                    "deleted",
+                    AppService.delete_app(
+                        session,
+                        str(context.app.id),
+                        context.actor.id,
+                    ),
+                )
+            except AppDeleteInProgress:
+                return ("blocked", None)
+        finally:
+            session.close()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        admission_future = executor.submit(admit_once)
+        deletion_future = executor.submit(delete_once)
+        admission_result = admission_future.result(timeout=10)
+        deletion_result = deletion_future.result(timeout=10)
+
+    observer = db_runtime.session_factory()
+    try:
+        if admission_result[0] == "admitted":
+            assert deletion_result[0] == "blocked"
+            assert observer.get(App, context.app.id) is not None
+            assert observer.get(ScheduleDispatchClaim, admission_result[1]) is not None
+        else:
+            assert admission_result == ("unavailable", None)
+            assert deletion_result == ("deleted", True)
+            assert observer.get(App, context.app.id) is None
+    finally:
+        observer.close()
+
+
+def test_delete_and_mail_processing_admission_race_is_atomic(db_session, db_runtime):
+    context = _new_app_context(db_session)
+    mail_credential = MailCredential(
+        organization_id=context.organization.id,
+        credential_name="MBA-87 Mail Race",
+        provider="gmail",
+        email_address="mba87-race@example.invalid",
+        auth_type="password",
+        imap_host="imap.example.invalid",
+        imap_port=993,
+        use_ssl=True,
+        encrypted_secret="encrypted-test-placeholder",
+        encryption_key_version="v1",
+        encryption_algorithm="test",
+        status="active",
+        created_by=context.actor.id,
+    )
+    db_session.add(mail_credential)
+    db_session.commit()
+    barrier = threading.Barrier(2)
+
+    def admit_once():
+        session = db_runtime.session_factory()
+        try:
+            barrier.wait(timeout=5)
+            repository = SqlAlchemyMailProcessingRepository(session)
+            processing_id = repository.register_message(
+                registration=ProcessingRegistration(
+                    organization_id=context.organization.id,
+                    workflow_id=context.workflow.id,
+                    deployment_id=None,
+                    source_node_id="mail-source",
+                    credential_id=mail_credential.id,
+                    provider="gmail",
+                    source=MailSourceReference(provider_message_id=uuid.uuid4().hex),
+                ),
+                message_identity_hash=uuid.uuid4().hex.ljust(64, "0"),
+                source_reference=ProtectedReference(
+                    ciphertext="encrypted-test-placeholder",
+                    key_version="v1",
+                    algorithm="test",
+                ),
+            )
+            return ("admitted", processing_id)
+        except MailProcessingApplicationError as exc:
+            assert exc.reason_code == "mail.processing_not_available"
+            return ("unavailable", None)
+        finally:
+            session.close()
+
+    def delete_once():
+        session = db_runtime.session_factory()
+        try:
+            barrier.wait(timeout=5)
+            try:
+                return (
+                    "deleted",
+                    AppService.delete_app(
+                        session,
+                        str(context.app.id),
+                        context.actor.id,
+                    ),
+                )
+            except AppDeleteInProgress:
+                return ("blocked", None)
+        finally:
+            session.close()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        admission_future = executor.submit(admit_once)
+        deletion_future = executor.submit(delete_once)
+        admission_result = admission_future.result(timeout=10)
+        deletion_result = deletion_future.result(timeout=10)
+
+    observer = db_runtime.session_factory()
+    try:
+        if admission_result[0] == "admitted":
+            assert deletion_result[0] == "blocked"
+            assert observer.get(App, context.app.id) is not None
+            assert observer.get(MailMessageProcessing, admission_result[1]) is not None
+        else:
+            assert admission_result == ("unavailable", None)
+            assert deletion_result == ("deleted", True)
+            assert observer.get(App, context.app.id) is None
+    finally:
+        observer.close()
+
+
+def test_delete_and_external_effect_admission_race_is_atomic(db_session, db_runtime):
+    context = _new_app_context(db_session)
+    contracts = provider_contract_registry()
+    spec = EffectAttemptSpec(
+        context=ExternalEffectContext(
+            organization_id=context.organization.id,
+            app_id=context.app.id,
+            workflow_id=context.workflow.id,
+            execution_id=uuid.uuid4(),
+            node_invocation_id=uuid.uuid4(),
+            node_id="http-1",
+        ),
+        profile=contracts.active("generic_http", "generic_http.request"),
+        effect_sequence=0,
+        effect_input_digest="a" * 64,
+        replay_deadline_at=None,
+        key_version=None,
+        key_format_version=None,
+        idempotency_key_fingerprint=None,
+    )
+    barrier = threading.Barrier(2)
+
+    def admit_once():
+        repository = SQLAlchemyEffectAttemptRepository(
+            db_runtime.session_factory,
+            contracts=contracts,
+        )
+        barrier.wait(timeout=5)
+        try:
+            result = repository.acquire(
+                spec,
+                claim_owner=f"mba87-{uuid.uuid4().hex}",
+                claim_ttl=timedelta(minutes=1),
+                allow_retry=True,
+                now=datetime.now(timezone.utc),
+            )
+            return ("admitted", result.record.id)
+        except ExternalEffectError as exc:
+            assert exc.code == "external_effect.stopped"
+            return ("unavailable", None)
+
+    def delete_once():
+        session = db_runtime.session_factory()
+        try:
+            barrier.wait(timeout=5)
+            try:
+                return (
+                    "deleted",
+                    AppService.delete_app(
+                        session,
+                        str(context.app.id),
+                        context.actor.id,
+                    ),
+                )
+            except AppDeleteInProgress:
+                return ("blocked", None)
+        finally:
+            session.close()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        admission_future = executor.submit(admit_once)
+        deletion_future = executor.submit(delete_once)
+        admission_result = admission_future.result(timeout=10)
+        deletion_result = deletion_future.result(timeout=10)
+
+    observer = db_runtime.session_factory()
+    try:
+        if admission_result[0] == "admitted":
+            assert deletion_result[0] == "blocked"
+            assert observer.get(App, context.app.id) is not None
+            assert observer.get(WorkflowNodeEffectAttempt, admission_result[1]) is not None
         else:
             assert admission_result == ("unavailable", None)
             assert deletion_result == ("deleted", True)
