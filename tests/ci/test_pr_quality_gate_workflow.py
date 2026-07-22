@@ -1,7 +1,10 @@
 from pathlib import Path
 import re
 
-from scripts.ci.changed_scope import _WORKFLOW_POSTGRES_PATTERNS
+from scripts.ci.changed_scope import (
+    _KNOWLEDGE_POSTGRES_PATTERNS,
+    _WORKFLOW_POSTGRES_PATTERNS,
+)
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
@@ -406,6 +409,19 @@ def test_knowledge_postgres_dev_push_tracks_all_durable_ingestion_services():
     )[0]
 
     assert '- "apps/shared/services/knowledge_ingestion_*.py"' in push_paths
+
+
+def test_knowledge_postgres_dev_push_covers_selector_patterns():
+    workflow = KNOWLEDGE_POSTGRES_PATH.read_text(encoding="utf-8")
+    push_paths = workflow.split("  push:", maxsplit=1)[1].split(
+        "permissions:",
+        maxsplit=1,
+    )[0]
+    configured_paths = set(
+        re.findall(r'^\s*- "([^"]+)"', push_paths, flags=re.MULTILINE)
+    )
+
+    assert set(_KNOWLEDGE_POSTGRES_PATTERNS) <= configured_paths
 
 
 def test_workflow_postgres_dev_push_covers_selector_patterns():

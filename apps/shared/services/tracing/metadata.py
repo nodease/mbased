@@ -246,9 +246,11 @@ SPAN_SECTION_FIELDS = {
         "total_tokens",
     },
     "rag": {
+        "candidate_resolution_latency_ms",
         "citation_ids",
         "context_token_estimate",
         "document_ids",
+        "evidence_policy_latency_ms",
         "evidence_sufficient",
         "fanout_concurrency",
         "fanout_timeout_seconds",
@@ -262,10 +264,12 @@ SPAN_SECTION_FIELDS = {
         "permission_filter_applied",
         "latency_ms",
         "partial_result",
+        "query_embedding_latency_ms",
         "query_rewrite_applied",
         "query_rewrite_strategy",
         "raw_content_returned",
         "rag_mode",
+        "retrieval_fanout_latency_ms",
         "retrieval_payload_id",
         "retrieval_strategy",
         "retrieved_chunk_summary_truncated",
@@ -275,6 +279,7 @@ SPAN_SECTION_FIELDS = {
         "score_summary",
         "selected_kb_count",
         "selected_kb_count_bucket",
+        "slowest_search_latency_ms",
         "source_tier_policy",
         "source_tier_used",
         "stored_result_count",
@@ -303,6 +308,14 @@ SPAN_SECTION_FIELDS = {
         "latency_ms",
     },
 }
+RAG_STAGE_LATENCY_FIELDS = {
+    "candidate_resolution_latency_ms",
+    "query_embedding_latency_ms",
+    "retrieval_fanout_latency_ms",
+    "slowest_search_latency_ms",
+    "evidence_policy_latency_ms",
+}
+MAX_RAG_STAGE_LATENCY_MS = 300_000
 RAG_RESULT_FIELDS = {
     "document_id",
     "chunk_id",
@@ -780,6 +793,14 @@ class TraceMetadataSanitizer:
         sanitized: dict[str, Any] = {}
         for key in SPAN_SECTION_FIELDS["rag"]:
             if key in safe_value:
+                if key in RAG_STAGE_LATENCY_FIELDS:
+                    latency = safe_value[key]
+                    if (
+                        type(latency) is int
+                        and 0 <= latency <= MAX_RAG_STAGE_LATENCY_MS
+                    ):
+                        sanitized[key] = latency
+                    continue
                 sanitized_value = cls._sanitize_allowed_value(safe_value[key])
                 if sanitized_value is not None:
                     sanitized[key] = sanitized_value

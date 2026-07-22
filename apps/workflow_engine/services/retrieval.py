@@ -812,9 +812,9 @@ class RetrievalService:
                         if item["score"] > all_candidates[chunk_id]["score"]:
                             all_candidates[chunk_id] = item
 
-        except Exception as e:
-            logger.error(f"Search Failed: {e}")
-            raise e
+        except Exception as exc:
+            logger.error("Search failed: error_type=%s", type(exc).__name__)
+            raise
 
         final_list = []
         merged_candidates = sorted(
@@ -1037,6 +1037,9 @@ class RetrievalService:
         if not knowledge_base_id:
             logger.error("Missing knowledge_base_id")
             return []
+        if self.organization_id is None:
+            logger.error("Missing organization_id for synchronous retrieval")
+            return []
         hierarchy_mode = normalize_hierarchy_mode(hierarchy_mode)
         source_tier_policy = normalize_source_tier_policy(source_tier_policy)
 
@@ -1045,7 +1048,10 @@ class RetrievalService:
         try:
             kb = (
                 self.db.query(KnowledgeBase)
-                .filter(KnowledgeBase.id == knowledge_base_id)
+                .filter(
+                    KnowledgeBase.id == knowledge_base_id,
+                    KnowledgeBase.organization_id == self.organization_id,
+                )
                 .first()
             )
             if not kb or not kb.embedding_model:
@@ -1222,9 +1228,9 @@ class RetrievalService:
                     if item["score"] > all_candidates[chunk_id]["score"]:
                         all_candidates[chunk_id] = item
 
-        except Exception as e:
-            logger.error(f"Search Failed: {e}")
-            raise e
+        except Exception as exc:
+            logger.error("Search failed: error_type=%s", type(exc).__name__)
+            raise
 
         final_list = []
         merged_candidates = sorted(

@@ -1,12 +1,105 @@
 import asyncio
+import logging
 import uuid
 from types import SimpleNamespace
+
+import pytest
 
 from apps.shared.db.models.knowledge import KnowledgeBase
 from apps.shared.db.models.llm import LLMCredential, LLMModel, LLMProvider
 from apps.shared.schemas.rag import ChunkPreview
 from apps.workflow_engine.services.llm_service import LLMService
 from apps.workflow_engine.services.retrieval import RetrievalService
+
+
+@pytest.mark.parametrize("use_sync", [True, False])
+def test_retrieval_failure_log_does_not_include_raw_exception(
+    use_sync,
+    caplog,
+):
+    class FailingDb:
+        def query(self, _model):
+            raise RuntimeError("private-query-and-resource-detail")
+
+    service = RetrievalService(
+        FailingDb(),
+        uuid.uuid4(),
+        organization_id=uuid.uuid4(),
+    )
+
+    with caplog.at_level(
+        logging.ERROR,
+        logger="apps.workflow_engine.services.retrieval",
+    ):
+        with pytest.raises(RuntimeError):
+            if use_sync:
+                service.search_documents_sync(
+                    "private-query",
+                    knowledge_base_id=str(uuid.uuid4()),
+                )
+            else:
+                asyncio.run(
+                    service.search_documents(
+                        "private-query",
+                        knowledge_base_id=str(uuid.uuid4()),
+                    )
+                )
+
+    assert "private-query-and-resource-detail" not in " ".join(caplog.messages)
+    assert "error_type=RuntimeError" in " ".join(caplog.messages)
+
+
+def test_sync_retrieval_requires_organization_before_database_access() -> None:
+    class UnexpectedDb:
+        def query(self, _model):
+            raise AssertionError("organization-less retrieval must not query")
+
+    result = RetrievalService(
+        UnexpectedDb(),
+        uuid.uuid4(),
+        organization_id=None,
+    ).search_documents_sync(
+        "query",
+        knowledge_base_id=str(uuid.uuid4()),
+    )
+
+    assert result == []
+
+
+def test_sync_retrieval_scopes_knowledge_base_lookup_to_organization() -> None:
+    criteria = []
+
+    class ScopedQuery:
+        def filter(self, *values):
+            criteria.extend(values)
+            return self
+
+        def first(self):
+            return None
+
+    class ScopedDb:
+        def query(self, model):
+            assert model is KnowledgeBase
+            return ScopedQuery()
+
+    knowledge_base_id = str(uuid.uuid4())
+    organization_id = uuid.uuid4()
+    result = RetrievalService(
+        ScopedDb(),
+        uuid.uuid4(),
+        organization_id=organization_id,
+    ).search_documents_sync(
+        "query",
+        knowledge_base_id=knowledge_base_id,
+    )
+
+    assert result == []
+    assert _criterion_compares_column(criteria, "id", knowledge_base_id)
+    assert _criterion_compares_column(
+        criteria,
+        "organization_id",
+        organization_id,
+    )
 
 
 class _FakeQuery:
@@ -40,7 +133,10 @@ def _criterion_compares_column(criteria, column_name, value):
     for criterion in criteria:
         left = getattr(criterion, "left", None)
         right = getattr(criterion, "right", None)
-        if getattr(left, "name", None) == column_name and getattr(right, "value", None) == value:
+        if (
+            getattr(left, "name", None) == column_name
+            and getattr(right, "value", None) == value
+        ):
             return True
     return False
 
@@ -180,18 +276,24 @@ def test_rewrite_model_selection_filters_credentials_by_active_organization():
         organization_id=organization_id,
     )
 
-    assert service._get_efficient_rewrite_model() == LLMService.EFFICIENT_MODELS["openai"]
+    assert (
+        service._get_efficient_rewrite_model() == LLMService.EFFICIENT_MODELS["openai"]
+    )
     assert _criterion_compares_column(criteria, "organization_id", organization_id)
 
 
-def test_generate_answer_preserves_references_when_generation_model_missing(monkeypatch):
+def test_generate_answer_preserves_references_when_generation_model_missing(
+    monkeypatch,
+):
     chunk = ChunkPreview(
         content="검색 결과",
         document_id=uuid.uuid4(),
         filename="guide.md",
         similarity_score=0.9,
     )
-    service = RetrievalService(db=object(), user_id=uuid.uuid4(), organization_id=uuid.uuid4())
+    service = RetrievalService(
+        db=object(), user_id=uuid.uuid4(), organization_id=uuid.uuid4()
+    )
 
     async def fake_search_documents(*args, **kwargs):
         return [chunk]
@@ -200,7 +302,9 @@ def test_generate_answer_preserves_references_when_generation_model_missing(monk
     monkeypatch.setattr(
         LLMService,
         "get_client_for_user",
-        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("missing credential")),
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            RuntimeError("missing credential")
+        ),
     )
 
     response = asyncio.run(service.generate_answer("query", "kb-1"))
@@ -254,7 +358,11 @@ def test_search_documents_sync_filters_hybrid_rerank_results_by_threshold(
     low_chunk = fake_chunk("낮은 점수 근거")
     high_chunk = fake_chunk("충분한 점수 근거")
 
-    service = RetrievalService(db=FakeDb(), user_id=uuid.uuid4())
+    service = RetrievalService(
+        db=FakeDb(),
+        user_id=uuid.uuid4(),
+        organization_id=uuid.uuid4(),
+    )
     monkeypatch.setattr(service, "_has_valid_hierarchy", lambda *_args: False)
     monkeypatch.setattr(
         service,

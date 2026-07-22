@@ -32,9 +32,12 @@ _KNOWLEDGE_POSTGRES_PATTERNS = (
     "apps/shared/tests/domain/test_knowledge_runtime_candidates.py",
     "apps/shared/tests/services/test_knowledge_permission_runtime_bulk.py",
     "apps/workflow_engine/adapters/knowledge_runtime_candidates.py",
+    "apps/workflow_engine/adapters/rag_retrieval_session.py",
+    "apps/workflow_engine/application/rag_retrieval_fanout.py",
     "apps/workflow_engine/application/runtime_retrieval/**",
     "apps/workflow_engine/composition/runtime_retrieval.py",
     "apps/workflow_engine/tests/adapters/test_postgres_knowledge_runtime_candidate_adapter.py",
+    "apps/workflow_engine/tests/adapters/test_rag_retrieval_session_postgres.py",
     ".github/workflows/test-knowledge-runtime-postgres.yml",
 )
 

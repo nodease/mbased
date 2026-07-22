@@ -582,6 +582,43 @@ def test_rag_span_metadata_preserves_evidence_summary_fields_only():
     assert "raw_rewritten_query" not in metadata["rag"]
 
 
+def test_rag_span_metadata_allows_only_bounded_integer_stage_latencies():
+    metadata = TraceMetadataSanitizer.sanitize_span_metadata(
+        "llmNode",
+        {
+            "rag": {
+                "candidate_resolution_latency_ms": 0,
+                "query_embedding_latency_ms": 12,
+                "retrieval_fanout_latency_ms": 34,
+                "slowest_search_latency_ms": 56,
+                "evidence_policy_latency_ms": 300_000,
+                "per_kb_latency_ms": {"hidden-resource": 99},
+            }
+        },
+    )
+
+    assert metadata["rag"] == {
+        "candidate_resolution_latency_ms": 0,
+        "query_embedding_latency_ms": 12,
+        "retrieval_fanout_latency_ms": 34,
+        "slowest_search_latency_ms": 56,
+        "evidence_policy_latency_ms": 300_000,
+    }
+
+
+@pytest.mark.parametrize(
+    "invalid_value",
+    [True, -1, 1.5, "12", float("nan"), float("inf"), 300_001],
+)
+def test_rag_span_metadata_drops_invalid_stage_latency(invalid_value):
+    metadata = TraceMetadataSanitizer.sanitize_span_metadata(
+        "llmNode",
+        {"rag": {"retrieval_fanout_latency_ms": invalid_value}},
+    )
+
+    assert metadata.get("rag", {}) == {}
+
+
 def test_trace_detail_metadata_view_hides_error_message_and_sanitizes_metadata():
     run = SimpleNamespace(
         id=uuid.uuid4(),
