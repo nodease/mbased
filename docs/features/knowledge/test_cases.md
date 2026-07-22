@@ -1,7 +1,7 @@
 # Knowledge Test Cases
 
 Status: Draft
-Verified Against: feature/mba-359 @ 504f418ac708a2dc541a5283f1ad8e97da0869a2
+Verified Against: feature/mba-354 @ 1bf745609a6ea85574bd49219e29e83c1ace2819
 이 문서는 현재 RAG 동작과 목표 KB 통합 모델에 필요한 테스트 범위를 함께 기록한다. MBA-105 목표 모델 테스트는 [ADR-0017](../../decisions/ADR-0017-knowledge-integration-provisional-implementation-baseline.md)과 [implementation_baseline.md](implementation_baseline.md)의 임시 baseline을 기준으로 구현 blocker가 된다.
 KC sync의 실행·복구·snapshot·versioned finalization 검증은 [ADR-0048](../../decisions/ADR-0048-knowledge-collection-sync-execution-boundary.md)을 따른다.
 Organization Detector Provider와 embedding 전 local masking Target 테스트는 [ADR-0070](../../decisions/ADR-0070-organization-detector-provider-and-pre-embedding-local-masking-boundary.md)을 따른다. MBA-362가 runtime/persistence/provider adapter 테스트를 TDD로 구현하기 전에는 완료 증거가 아니다.
@@ -524,6 +524,17 @@ Organization Detector Provider와 embedding 전 local masking Target 테스트�
 - Explicit verified model과 authorized candidate 0건은 model projection query를 실행하지 않아야 한다.
 - Query count는 회귀 차단 기준이며, 실제 PostgreSQL 환경에서는 변경 전 per-KB lookup 대비 query 수와 latency를 관찰한다. 환경 변동이 큰 단일 latency threshold는 merge gate로 사용하지 않는다.
 - MBA-289가 Authorized Retrieval Port를 도입할 때 projection은 권한 판정을 복제하지 않고 authorized candidate 이후 adapter 내부 단계로 이동해야 한다.
+
+### MBA-354 Precomputed Query Embedding KB Fanout
+
+- Authorized candidate가 0개면 query embedding, fanout scheduler, child DB session과 generation provider를 모두 호출하지 않는다. Candidate가 있으면 ADR-0071의 distinct-model capability/provider attempt와 invocation-local vector를 그대로 소비하며 KB별 embedding을 다시 만들지 않는다.
+- 사전 계산 query vector를 사용하는 2개 이상 KB search는 실제 native worker에서 겹쳐 실행되고 active worker는 5개를 넘지 않는다. Barrier 기반 test로 overlap을 검증하며 우연한 wall-clock 단축만 성공 기준으로 사용하지 않는다.
+- Aggregate deadline은 executor/task 제출 전에 시작한다. Queue 대기, active search, cancellation과 cleanup 대기를 포함해 caller 기준 30초를 넘기지 않고 마지막 1초에는 새 DB search를 시작하지 않는다. Cancellation에 협조하지 않는 worker를 기다리느라 caller deadline을 연장하지 않으며 late result를 폐기하는 test를 포함한다.
+- 각 worker는 별도 session에서 `organization_id + knowledge_base_id` 조건, read-only transaction과 남은 budget 이하의 transaction-local statement timeout을 적용한다. Success, empty, DB error, per-KB timeout, aggregate cancel과 rollback error 모두 close를 시도한다. Disposable PostgreSQL test는 `pg_sleep` cancel 뒤 rollback, connection 재사용과 timeout 설정 비누출을 확인한다.
+- Reverse completion, partial timeout과 mixed success에서도 candidate ordinal을 거쳐 기존 global score/source-tier 정렬, dedupe, top-k, evidence sufficiency와 citation 결과가 순차 기준 fixture와 같아야 한다. `fail_node`는 partial evidence를 사용하지 않고 남은 task에 cancellation을 요청한다.
+- RetrievalService의 sync/async exception log와 fanout error projection에는 raw query, SQL/parameter, KB/document/chunk identity, provider payload와 raw exception 문자열이 없어야 한다. `fail_node`도 실패 정책은 유지하지만 child 원문 예외 대신 고정된 safe fanout error를 반환한다.
+- Authorization된 RAG trace에는 실행된 stage의 `candidate_resolution_latency_ms`, `query_embedding_latency_ms`, `retrieval_fanout_latency_ms`, `slowest_search_latency_ms`, `evidence_policy_latency_ms`만 0~300,000 범위 integer로 남긴다. Unknown/negative/non-finite/bool/per-KB timing은 제거하고 일반 Workflow result metadata, chatbot/SSE와 citation에는 이 필드가 없어야 한다.
+- Synthetic benchmark는 KB 1/2/4/10개에서 동일 delay profile의 p50/p95, max active worker와 search/provider call count를 기록한다. 절대 latency threshold는 merge gate가 아니며 overlap, concurrency, 호출 수와 deterministic 결과를 회귀 gate로 사용한다. Slow/timeout 동작은 별도의 deterministic scheduler test로 검증한다.
 
 ### MBA-288 Durable Document Ingestion
 

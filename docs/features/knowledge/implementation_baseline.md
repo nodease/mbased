@@ -46,8 +46,8 @@ MBA-105에서 구현하지 않는 범위:
 | Chunk size / overlap | child chunk 800-1,200 tokens, overlap 10-20% |
 | Parent/child hierarchy | parent 2,000-4,000 tokens, child 500-1,000 tokens |
 | Candidate caps | `max_candidate_kbs=5000`, `max_route_collections=20`, `max_retrieval_kbs=20`, `max_chunks_per_kb=8`, `max_total_chunks=50`. Collection/KB candidate cap은 임의 row를 먼저 자른 뒤 authorization하는 방식이 아니라, route/use/source ACL helper를 통과한 authorized subset에 적용한다 |
-| Fanout | 단일 filtered vector/keyword query 우선, 불가하면 concurrency 5 bounded fanout |
-| Retrieval timeout | 호출당 5-10s, aggregate interactive path 15-30s |
+| Fanout | 단일 filtered vector/keyword query 우선. Workflow의 per-KB fallback은 native blocking-I/O worker 최대 5개이며 authorized candidate ordinal을 보존한다 |
+| Retrieval timeout | Workflow per-KB fallback은 호출당 10s, 최초 제출 전부터 caller aggregate 30s, 마지막 1s cleanup reserve. Queue 대기와 cleanup 대기를 aggregate에 포함하되 non-DB 작업이 cancellation에 협조하지 않아도 caller deadline을 연장하지 않고 late result를 폐기한다 |
 | Runtime authorization batch | `check_access_batch` 50-200 source item 후보. Batch 미지원 source는 bounded single check fallback만 허용 |
 | Runtime authorization fallback | per-source concurrency 3-5, per-call timeout 3-5s, aggregate timeout 10-20s 후보. Timeout/unknown은 private evidence fail-closed |
 | Runtime access cache | `allowed`/`denied` 1-5m, `unknown`/timeout 30-60s 후보. Source ACL/mapping epoch 변경 시 즉시 무효화 |
