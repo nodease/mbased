@@ -80,6 +80,7 @@ from apps.workflow_engine.adapters.rag_retrieval_executor import (
     NativeThreadRAGRetrievalCancellation,
 )
 from apps.workflow_engine.adapters.rag_retrieval_session import (
+    RAGRetrievalSessionError,
     RAGRetrievalSessionRunner,
 )
 from apps.workflow_engine.application.provider_execution import (
@@ -3087,7 +3088,12 @@ class LLMNode(Node[LLMNodeData]):
         override = getattr(self, "_rag_retrieval_session_runner_override", None)
         if override is not None:
             return override
-        return RAGRetrievalSessionRunner(session_factory=SessionLocal)
+        session_factory = self.execution_context.get("db_session_factory")
+        if session_factory is None:
+            session_factory = SessionLocal
+        elif not callable(session_factory):
+            raise RAGRetrievalSessionError()
+        return RAGRetrievalSessionRunner(session_factory=session_factory)
 
     def _search_single_rag_kb(
         self,

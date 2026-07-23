@@ -76,6 +76,9 @@ from apps.workflow_engine.application.rag_retrieval_fanout import (  # noqa: E40
 from apps.workflow_engine.adapters.rag_retrieval_executor import (  # noqa: E402
     NativeThreadRAGRetrievalCancellation,
 )
+from apps.workflow_engine.adapters.rag_retrieval_session import (  # noqa: E402
+    RAGRetrievalSessionError,
+)
 from apps.workflow_engine.composition.provider_execution import (  # noqa: E402
     build_provider_execution_runtime,
     build_provider_usage_recorder,
@@ -4280,6 +4283,49 @@ def test_llm_node_rag_single_kb_uses_scheduler(monkeypatch):
 
     assert search_calls == [kb_id]
     assert result.failed_count == 0
+
+
+def test_llm_node_rag_session_runner_uses_injected_session_factory(monkeypatch):
+    def injected_factory():
+        return object()
+
+    node = LLMNode(
+        "llm-1",
+        LLMNodeData(
+            title="LLM",
+            provider="openai",
+            model_id="gpt-4o",
+            user_prompt="user",
+        ),
+        execution_context={"db_session_factory": injected_factory},
+    )
+    captured_factories = []
+    runner = object()
+
+    monkeypatch.setattr(
+        "apps.workflow_engine.workflow.nodes.llm.llm_node."
+        "RAGRetrievalSessionRunner",
+        lambda *, session_factory: captured_factories.append(session_factory) or runner,
+    )
+
+    assert node._get_rag_retrieval_session_runner() is runner  # noqa: SLF001
+    assert captured_factories == [injected_factory]
+
+
+def test_llm_node_rag_session_runner_rejects_invalid_injected_factory():
+    node = LLMNode(
+        "llm-1",
+        LLMNodeData(
+            title="LLM",
+            provider="openai",
+            model_id="gpt-4o",
+            user_prompt="user",
+        ),
+        execution_context={"db_session_factory": "invalid"},
+    )
+
+    with pytest.raises(RAGRetrievalSessionError):
+        node._get_rag_retrieval_session_runner()  # noqa: SLF001
 
 
 def test_llm_node_rag_fails_closed_when_scheduler_is_unavailable(monkeypatch):

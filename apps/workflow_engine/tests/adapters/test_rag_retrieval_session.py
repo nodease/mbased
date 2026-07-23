@@ -11,6 +11,9 @@ from apps.workflow_engine.adapters.rag_retrieval_session import (
     RAGRetrievalSessionTimeout,
     _StatementDeadlineGuard,
 )
+from apps.workflow_engine.adapters.rag_retrieval_connection_acquirer import (
+    RAGRetrievalConnectionAcquisitionTimeout,
+)
 from apps.workflow_engine.adapters.rag_retrieval_executor import (
     NativeThreadRAGRetrievalCancellation,
 )
@@ -289,6 +292,40 @@ def test_session_runner_removes_statement_guard_before_connection_reuse() -> Non
         assert session.sql_connection.execute(text("SELECT 2")).scalar_one() == 2
     finally:
         session.dispose()
+
+
+def test_session_runner_maps_acquisition_timeout_to_safe_session_timeout() -> None:
+    class TimeoutAcquirer:
+        @staticmethod
+        def acquire(**_kwargs):
+            raise RAGRetrievalConnectionAcquisitionTimeout()
+
+    with pytest.raises(RAGRetrievalSessionTimeout):
+        RAGRetrievalSessionRunner(
+            session_factory=lambda: (_ for _ in ()).throw(
+                RuntimeError("private-factory-detail")
+            ),
+            connection_acquirer=TimeoutAcquirer(),
+        ).run(
+            timeout_ms=125,
+            cancellation=NativeThreadRAGRetrievalCancellation(),
+            operation=lambda _session: None,
+        )
+
+
+def test_session_runner_redacts_session_factory_failure() -> None:
+    with pytest.raises(RAGRetrievalSessionError) as captured:
+        RAGRetrievalSessionRunner(
+            session_factory=lambda: (_ for _ in ()).throw(
+                RuntimeError("private-factory-detail")
+            )
+        ).run(
+            timeout_ms=125,
+            cancellation=NativeThreadRAGRetrievalCancellation(),
+            operation=lambda _session: None,
+        )
+
+    assert "private-factory-detail" not in str(captured.value)
 
 
 @pytest.mark.parametrize("timeout_ms", [0, -1, True, 30001])

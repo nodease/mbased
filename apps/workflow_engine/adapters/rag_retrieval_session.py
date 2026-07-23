@@ -8,6 +8,10 @@ from typing import Callable, TypeVar
 from sqlalchemy import event, text
 from sqlalchemy.engine import Connection
 
+from apps.workflow_engine.adapters.rag_retrieval_connection_acquirer import (
+    RAGRetrievalConnectionAcquirer,
+    get_process_rag_retrieval_connection_acquirer,
+)
 from apps.workflow_engine.application.rag_retrieval_fanout import (
     RAGRetrievalCancellation,
 )
@@ -88,11 +92,15 @@ class RAGRetrievalSessionRunner:
         *,
         session_factory: Callable[[], object],
         monotonic_ns: Callable[[], int] | None = None,
+        connection_acquirer: RAGRetrievalConnectionAcquirer | None = None,
     ) -> None:
         if not callable(session_factory):
             raise RAGRetrievalSessionError()
         self._session_factory = session_factory
         self._monotonic_ns = monotonic_ns or time.monotonic_ns
+        self._connection_acquirer = (
+            connection_acquirer or get_process_rag_retrieval_connection_acquirer()
+        )
 
     def run(
         self,
@@ -110,26 +118,31 @@ class RAGRetrievalSessionRunner:
         ):
             raise RAGRetrievalSessionError()
 
+        deadline_ns = (
+            self._monotonic_ns()
+            + timeout_ms * _StatementDeadlineGuard._NANOSECONDS_PER_MILLISECOND
+        )
         deadline_guard = _StatementDeadlineGuard(
             cancellation=cancellation,
-            deadline_ns=(
-                self._monotonic_ns()
-                + timeout_ms * _StatementDeadlineGuard._NANOSECONDS_PER_MILLISECOND
-            ),
+            deadline_ns=deadline_ns,
             monotonic_ns=self._monotonic_ns,
         )
-        try:
-            session = self._session_factory()
-        except Exception:
-            raise RAGRetrievalSessionError() from None
 
+        session = None
         unregister: Callable[[], None] = _noop
         unregister_statement_guard: Callable[[], None] = _noop
         result: T | None = None
         failure: Exception | None = None
         cleanup_failed = False
         try:
-            connection = session.connection()
+            acquired = self._connection_acquirer.acquire(
+                session_factory=self._session_factory,
+                cancellation=cancellation,
+                deadline_ns=deadline_ns,
+                monotonic_ns=self._monotonic_ns,
+            )
+            session = acquired.session
+            connection = acquired.connection
             cancel = self._driver_cancel_callback(connection)
             if cancel is not None:
                 unregister = cancellation.register(cancel)
@@ -160,14 +173,15 @@ class RAGRetrievalSessionRunner:
                 unregister_statement_guard()
             except Exception:
                 cleanup_failed = True
-            try:
-                session.rollback()
-            except Exception:
-                cleanup_failed = True
-            try:
-                session.close()
-            except Exception:
-                cleanup_failed = True
+            if session is not None:
+                try:
+                    session.rollback()
+                except Exception:
+                    cleanup_failed = True
+                try:
+                    session.close()
+                except Exception:
+                    cleanup_failed = True
 
         if failure is not None:
             raise failure from None

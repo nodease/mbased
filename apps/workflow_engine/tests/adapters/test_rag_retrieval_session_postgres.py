@@ -1,6 +1,8 @@
 # ruff: noqa: E402
 
 import os
+import threading
+import time
 from uuid import uuid4
 
 import pytest
@@ -148,3 +150,53 @@ def test_rag_statement_timeout_shrinks_across_multiple_statements(
 
     with session_factory() as session:
         assert session.execute(text("SELECT 1")).scalar_one() == 1
+
+
+def test_rag_connection_checkout_returns_before_shared_pool_timeout(
+    disposable_rag_database,
+):
+    bounded_engine = create_engine(
+        disposable_rag_database.url,
+        pool_size=1,
+        max_overflow=0,
+        pool_timeout=2,
+    )
+    session_factory = sessionmaker(bind=bounded_engine)
+    runner = RAGRetrievalSessionRunner(session_factory=session_factory)
+    held_connection = bounded_engine.connect()
+    caller_finished = threading.Event()
+    failures = []
+
+    def run():
+        try:
+            runner.run(
+                timeout_ms=50,
+                cancellation=NativeThreadRAGRetrievalCancellation(),
+                operation=lambda session: session.execute(
+                    text("SELECT 1")
+                ).scalar_one(),
+            )
+        except Exception as exc:  # pragma: no cover - asserted below
+            failures.append(exc)
+        finally:
+            caller_finished.set()
+
+    caller = threading.Thread(target=run)
+    try:
+        caller.start()
+
+        assert caller_finished.wait(timeout=0.5)
+        assert len(failures) == 1
+        assert isinstance(failures[0], RAGRetrievalSessionTimeout)
+    finally:
+        held_connection.close()
+        caller.join(timeout=1)
+
+        cleanup_deadline = time.monotonic() + 1
+        while bounded_engine.pool.checkedout() and time.monotonic() < cleanup_deadline:
+            time.sleep(0.01)
+        checked_out = bounded_engine.pool.checkedout()
+        bounded_engine.dispose()
+
+    assert caller.is_alive() is False
+    assert checked_out == 0
