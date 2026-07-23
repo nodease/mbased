@@ -26,6 +26,7 @@ Status: Draft
 - 공통 Trace redaction은 숫자 또는 null인 명시적 token limit/usage allowlist(`max_tokens`, prompt/completion/input/output/total token count 등)는 보존하되, 인증 token 문자열과 알 수 없는 `*_token`, 문자열로 들어온 token count, 정책이 지정한 민감 경로는 계속 마스킹한다.
 - Conversation Memory sanitizer는 raw transcript/Memory content, Access Grant token/hash, prompt, private source identity와 provider raw error를 제거하고 session/grant lifecycle의 safe opaque reference, audience, status, reason과 bucketed count만 허용한다.
 - Hidden/denied/resource-hidden summary allowlist는 sanitized reason class, actor/org scope, request/correlation id, coarse retryability만 허용하고 exact hidden/denied count나 hidden KB id를 거부한다.
+- Candidate 0건 또는 empty query의 RAG `safe_no_result` trace는 `candidate_resolution_latency_ms`를 포함한 exact stage latency를 모두 생략한다.
 - Partial result summary는 `partial_result=true`, bucketed reason summary, retryability, request/correlation id만 허용한다.
 - Run trigger pure policy는 `manual`/`test`/`manual_compare`/`cost_optimizer_compare`를 MANUAL, `api`/`app`/`deployed`/`api_secret`을 API, `webhook`을 WEBHOOK, `schedule`/`scheduler`를 SCHEDULER로 정규화한다. String은 trim/lowercase하고, Log System adapter가 이미 받은 `RunTriggerMode` enum은 string alias policy를 거치지 않고 exact 값을 보존한다.
 - Trigger 누락 또는 `None`은 legacy compatibility로 deployed면 API, 아니면 MANUAL이지만 blank/unknown/non-string explicit input은 fallback하지 않고 permanent contract error다.

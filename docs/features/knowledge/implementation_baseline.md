@@ -46,7 +46,7 @@ MBA-105에서 구현하지 않는 범위:
 | Chunk size / overlap | child chunk 800-1,200 tokens, overlap 10-20% |
 | Parent/child hierarchy | parent 2,000-4,000 tokens, child 500-1,000 tokens |
 | Candidate caps | `max_candidate_kbs=5000`, `max_route_collections=20`, `max_retrieval_kbs=20`, `max_chunks_per_kb=8`, `max_total_chunks=50`. Collection/KB candidate cap은 임의 row를 먼저 자른 뒤 authorization하는 방식이 아니라, route/use/source ACL helper를 통과한 authorized subset에 적용한다 |
-| Fanout | 단일 filtered vector/keyword query 우선. Workflow의 per-KB fallback은 native blocking-I/O worker 최대 5개이며 authorized candidate ordinal을 보존한다 |
+| Fanout | 단일 filtered vector/keyword query 우선. Workflow의 per-KB fallback은 invocation당 동시 검색과 프로세스 전체 native blocking-I/O data worker를 각각 최대 5개로 제한하고 authorized candidate ordinal을 보존한다. DB cancel은 별도 bounded native control worker에서 처리한다 |
 | Retrieval timeout | Workflow per-KB fallback은 호출당 10s, 최초 제출 전부터 caller aggregate 30s, 마지막 1s cleanup reserve. Queue 대기와 cleanup 대기를 aggregate에 포함하되 non-DB 작업이 cancellation에 협조하지 않아도 caller deadline을 연장하지 않고 late result를 폐기한다 |
 | Runtime authorization batch | `check_access_batch` 50-200 source item 후보. Batch 미지원 source는 bounded single check fallback만 허용 |
 | Runtime authorization fallback | per-source concurrency 3-5, per-call timeout 3-5s, aggregate timeout 10-20s 후보. Timeout/unknown은 private evidence fail-closed |
@@ -326,7 +326,7 @@ Hidden/resource-hidden path의 external `reason_code`는 항상 `resource.hidden
 - Legal/regulatory evidence는 strict use 전에 jurisdiction, effective date, version, review-required state를 가져야 한다.
 - Query rewrite 기본값은 `off`다. MBA-105 runtime은 deterministic/template rewrite를 opt-in으로 구현하고, LLM-assisted rewrite는 LLMOps/cost/security gate가 닫히기 전까지 범위 밖이다.
 - Raw rewritten query는 raw prompt와 같은 민감 입력으로 보고 durable audit, trace, usage, cache key, summary에 저장하지 않는다.
-- CrossEncoder rerank는 기본값 `off`다. Worker image에서 reranker dependency를 포함하려면 `INSTALL_RAG_RERANKER=true` build arg를 명시하고, runtime에서 `RAG_CROSS_ENCODER_RERANK_ENABLED=true`를 설정해야 한다. dependency가 없거나 model load/predict가 실패하면 retrieval은 원래 candidate 순서로 fallback하며, 이 fallback은 operational error가 아니라 degraded ranking path로 기록한다. 기본 local/demo/production path는 cold start와 image size를 피하기 위해 reranker를 로드하지 않는다.
+- CrossEncoder rerank는 기본값 `off`다. Worker image에서 reranker dependency를 포함하려면 `INSTALL_RAG_RERANKER=true` build arg를 명시하고, runtime에서 `RAG_CROSS_ENCODER_RERANK_ENABLED=true`를 설정해야 한다. 프로세스 cache 초기화는 native worker 사이에서 직렬화하고 완성된 model만 게시한다. Dependency가 없거나 model load/predict가 실패하면 retrieval은 원래 candidate 순서로 fallback하며, 이 fallback은 operational error가 아니라 degraded ranking path로 기록한다. 기본 local/demo/production path는 cold start와 image size를 피하기 위해 reranker를 로드하지 않는다.
 
 Slack/meeting source item의 effective ACL baseline:
 
