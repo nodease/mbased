@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Callable, Generic, TypeVar
 
 import gevent
-from gevent.event import AsyncResult
+from gevent.lock import BoundedSemaphore
 from gevent.monkey import get_original
 from gevent.threadpool import ThreadPool
 
@@ -17,6 +17,73 @@ from apps.workflow_engine.application.rag_retrieval_fanout import (
 
 T = TypeVar("T")
 _allocate_native_lock = get_original("_thread", "allocate_lock")
+_native_get_ident = get_original("_thread", "get_ident")
+
+PROCESS_RAG_RETRIEVAL_MAX_WORKERS = 5
+PROCESS_RAG_RETRIEVAL_CONTROL_MAX_WORKERS = 2
+_IDLE_TASK_TIMEOUT_SECONDS = 0.1
+
+_process_pool_lock = _allocate_native_lock()
+_process_data_pool: ThreadPool | None = None
+_process_control_pool: ThreadPool | None = None
+
+
+def _get_process_data_pool() -> ThreadPool:
+    global _process_data_pool
+    with _process_pool_lock:
+        if _process_data_pool is None:
+            _process_data_pool = ThreadPool(
+                PROCESS_RAG_RETRIEVAL_MAX_WORKERS,
+                idle_task_timeout=_IDLE_TASK_TIMEOUT_SECONDS,
+            )
+        return _process_data_pool
+
+
+def _get_process_control_pool() -> ThreadPool:
+    global _process_control_pool
+    with _process_pool_lock:
+        if _process_control_pool is None:
+            _process_control_pool = ThreadPool(
+                PROCESS_RAG_RETRIEVAL_CONTROL_MAX_WORKERS,
+                idle_task_timeout=_IDLE_TASK_TIMEOUT_SECONDS,
+            )
+        return _process_control_pool
+
+
+class _RegisteredCancellationCallback:
+    """Keep an asynchronously dispatched callback inside its resource lifetime."""
+
+    def __init__(self, callback: Callable[[], None]) -> None:
+        self._lock = _allocate_native_lock()
+        self._completion = _allocate_native_lock()
+        self._completion.acquire()
+        self._callback: Callable[[], None] | None = callback
+        self._active = True
+        self._running = False
+
+    def invoke(self) -> None:
+        with self._lock:
+            callback = self._callback
+            if not self._active or callback is None:
+                return
+            self._active = False
+            self._running = True
+            self._callback = None
+        try:
+            callback()
+        finally:
+            with self._lock:
+                self._running = False
+            self._completion.release()
+
+    def deactivate(self) -> None:
+        with self._lock:
+            self._active = False
+            self._callback = None
+            running = self._running
+        if running:
+            self._completion.acquire()
+            self._completion.release()
 
 
 class NativeThreadRAGRetrievalCancellation:
@@ -26,7 +93,9 @@ class NativeThreadRAGRetrievalCancellation:
         self._lock = _allocate_native_lock()
         self._cancelled = False
         self._next_token = 0
-        self._callbacks: dict[int, Callable[[], None]] = {}
+        self._callbacks: dict[int, _RegisteredCancellationCallback] = {}
+        self._owner_thread_id = _native_get_ident()
+        self._control_pool = _get_process_control_pool()
 
     @property
     def cancelled(self) -> bool:
@@ -36,21 +105,22 @@ class NativeThreadRAGRetrievalCancellation:
     def register(self, callback: Callable[[], None]) -> Callable[[], None]:
         if not callable(callback):
             raise RAGRetrievalFanoutConfigurationError()
+        registered = _RegisteredCancellationCallback(callback)
         with self._lock:
             if self._cancelled:
                 token = None
             else:
                 token = self._next_token
                 self._next_token += 1
-                self._callbacks[token] = callback
+                self._callbacks[token] = registered
         if token is None:
-            self._invoke_safely(callback)
+            self._invoke_or_dispatch(registered.invoke)
 
         def unregister() -> None:
-            if token is None:
-                return
-            with self._lock:
-                self._callbacks.pop(token, None)
+            if token is not None:
+                with self._lock:
+                    self._callbacks.pop(token, None)
+            registered.deactivate()
 
         return unregister
 
@@ -62,7 +132,19 @@ class NativeThreadRAGRetrievalCancellation:
             callbacks = tuple(self._callbacks.values())
             self._callbacks.clear()
         for callback in callbacks:
+            self._invoke_or_dispatch(callback.invoke)
+
+    def _invoke_or_dispatch(self, callback: Callable[[], None]) -> None:
+        if _native_get_ident() != self._owner_thread_id:
             self._invoke_safely(callback)
+            return
+        try:
+            self._control_pool.apply_async(
+                self._invoke_safely,
+                args=(callback,),
+            )
+        except Exception:
+            return
 
     @staticmethod
     def _invoke_safely(callback: Callable[[], None]) -> None:
@@ -73,7 +155,7 @@ class NativeThreadRAGRetrievalCancellation:
 
 
 class GeventNativeThreadJob(Generic[T]):
-    def __init__(self, result: AsyncResult) -> None:
+    def __init__(self, result) -> None:
         self._result = result
 
     def ready(self) -> bool:
@@ -84,9 +166,7 @@ class GeventNativeThreadJob(Generic[T]):
 
 
 class GeventNativeThreadRAGRetrievalExecutor:
-    """Use gevent's dedicated native thread pool without blocking its hub."""
-
-    _IDLE_TASK_TIMEOUT_SECONDS = 0.1
+    """Coordinate one invocation through the process-wide native data pool."""
 
     def __init__(self, max_workers: int) -> None:
         if (
@@ -95,16 +175,20 @@ class GeventNativeThreadRAGRetrievalExecutor:
             or not 1 <= max_workers <= 20
         ):
             raise RAGRetrievalFanoutConfigurationError()
-        self._pool = ThreadPool(
-            max_workers,
-            idle_task_timeout=self._IDLE_TASK_TIMEOUT_SECONDS,
-        )
+        self._pool = _get_process_data_pool()
+        self._invocation_slots = BoundedSemaphore(max_workers)
         self._closed = False
 
     def submit(self, callback: Callable[[], T]) -> RAGRetrievalJob[T]:
         if self._closed or not callable(callback):
             raise RAGRetrievalFanoutConfigurationError()
-        return GeventNativeThreadJob(self._pool.spawn(callback))
+        return GeventNativeThreadJob(
+            gevent.spawn(self._run_with_invocation_slot, callback)
+        )
+
+    def _run_with_invocation_slot(self, callback: Callable[[], T]) -> T:
+        with self._invocation_slots:
+            return self._pool.apply(callback)
 
     def wait(
         self,
@@ -124,20 +208,11 @@ class GeventNativeThreadRAGRetrievalExecutor:
         if self._closed:
             return
         self._closed = True
-        pool = self._pool
-        try:
-            # ThreadPool.kill() waits when called from an ordinary greenlet.
-            # Scheduling it on the hub makes close non-blocking; an active native
-            # worker then exits after its task or the short idle timeout.
-            pool.hub.loop.run_callback(pool.kill)
-        except Exception:
-            try:
-                pool.fork_watcher.close()
-            except Exception:
-                pass
 
 
 __all__ = [
+    "PROCESS_RAG_RETRIEVAL_CONTROL_MAX_WORKERS",
+    "PROCESS_RAG_RETRIEVAL_MAX_WORKERS",
     "GeventNativeThreadJob",
     "GeventNativeThreadRAGRetrievalExecutor",
     "NativeThreadRAGRetrievalCancellation",

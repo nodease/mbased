@@ -1,5 +1,7 @@
 import asyncio
 import logging
+import sys
+import threading
 import uuid
 from types import SimpleNamespace
 
@@ -228,6 +230,56 @@ def test_search_method_labels_hierarchical_paths(monkeypatch):
         )
         == "hierarchical"
     )
+
+
+def test_cross_encoder_model_initializes_once_across_native_workers(monkeypatch):
+    constructor_entered = threading.Event()
+    duplicate_constructor_entered = threading.Event()
+    release_constructor = threading.Event()
+    constructor_calls = []
+
+    class FakeCrossEncoder:
+        def __init__(self, model_name, *, max_length):
+            constructor_calls.append((model_name, max_length))
+            constructor_entered.set()
+            if len(constructor_calls) > 1:
+                duplicate_constructor_entered.set()
+            release_constructor.wait(timeout=1)
+
+    monkeypatch.setitem(
+        sys.modules,
+        "sentence_transformers",
+        SimpleNamespace(CrossEncoder=FakeCrossEncoder),
+    )
+    monkeypatch.setattr(RetrievalService, "_cross_encoder_model", None)
+    monkeypatch.setattr(RetrievalService, "_cross_encoder_model_name", None)
+
+    barrier = threading.Barrier(2)
+    results = []
+    errors = []
+
+    def load_model():
+        try:
+            barrier.wait(timeout=1)
+            results.append(RetrievalService._get_cross_encoder_model())
+        except Exception as exc:  # pragma: no cover - asserted below
+            errors.append(exc)
+
+    workers = [threading.Thread(target=load_model) for _ in range(2)]
+    for worker in workers:
+        worker.start()
+
+    assert constructor_entered.wait(timeout=1)
+    duplicate_started = duplicate_constructor_entered.wait(timeout=0.1)
+    release_constructor.set()
+    for worker in workers:
+        worker.join(timeout=1)
+
+    assert duplicate_started is False
+    assert errors == []
+    assert len(constructor_calls) == 1
+    assert len(results) == 2
+    assert results[0] is results[1]
 
 
 def test_rewrite_query_passes_active_organization_to_llm(monkeypatch):

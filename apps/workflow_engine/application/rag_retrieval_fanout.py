@@ -269,7 +269,7 @@ class RAGRetrievalFanoutScheduler:
                 if fail_fast_triggered:
                     break
                 if not running:
-                    continue
+                    break
                 executor.wait(
                     tuple(job for job, _state in running),
                     timeout_seconds=min(
@@ -322,6 +322,8 @@ class RAGRetrievalFanoutScheduler:
             raise RAGRetrievalFanoutError() from None
         finally:
             self._cancel_safely(stop_signal)
+            for _job, state in running:
+                self._cancel_safely(state.cancellation)
             try:
                 executor.close()
             except Exception:

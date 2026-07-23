@@ -75,6 +75,7 @@ from apps.workflow_engine.adapters.knowledge_runtime_citations import (
     WorkflowCitationProjector,
 )
 from apps.workflow_engine.adapters.rag_retrieval_executor import (
+    PROCESS_RAG_RETRIEVAL_MAX_WORKERS,
     GeventNativeThreadRAGRetrievalExecutor,
     NativeThreadRAGRetrievalCancellation,
 )
@@ -147,7 +148,7 @@ logger = logging.getLogger(__name__)
 _jinja_env = Environment(autoescape=False)
 MEMORY_RUN_LIMIT = 5  # 최근 실행 몇 건을 기억 컨텍스트에 반영할지 결정
 MAX_RAG_TRACE_RETRIEVED_CHUNKS = 20
-MAX_RAG_FANOUT_CONCURRENCY = 5
+MAX_RAG_FANOUT_CONCURRENCY = PROCESS_RAG_RETRIEVAL_MAX_WORKERS
 RAG_FANOUT_AGGREGATE_TIMEOUT_SECONDS = 30.0
 RAG_FANOUT_PER_KB_TIMEOUT_SECONDS = 10.0
 MAX_RAG_STAGE_LATENCY_MS = 300_000
@@ -1383,8 +1384,7 @@ class LLMNode(Node[LLMNodeData]):
             )
             if not candidate_resolution.candidates:
                 knowledge_result = self._knowledge_candidate_safe_no_result(
-                    candidate_resolution,
-                    candidate_resolution_latency_ms=candidate_resolution_latency_ms,
+                    candidate_resolution
                 )
                 self._trace_payloads = [
                     {
@@ -1482,10 +1482,7 @@ class LLMNode(Node[LLMNodeData]):
                         knowledge_metadata = knowledge_result.metadata
                     else:
                         knowledge_result = self._knowledge_candidate_safe_no_result(
-                            candidate_resolution,
-                            candidate_resolution_latency_ms=(
-                                candidate_resolution_latency_ms
-                            ),
+                            candidate_resolution
                         )
                         if self.data.ragFailurePolicy == "fail_node":
                             raise NonRetryableWorkflowError(
@@ -2676,10 +2673,7 @@ class LLMNode(Node[LLMNodeData]):
         bucket_kb_counts = "collection" in candidate_kind_by_kb_id.values()
         kb_ids = list(candidate_kind_by_kb_id)
         if not kb_ids:
-            return self._knowledge_candidate_safe_no_result(
-                resolution,
-                candidate_resolution_latency_ms=candidate_resolution_latency_ms,
-            )
+            return self._knowledge_candidate_safe_no_result(resolution)
         query_embedding_started_at = time.perf_counter()
         if query_embedding_plan is None:
             query_embedding_plan = self._preflight_query_embedding(
@@ -3452,15 +3446,8 @@ class LLMNode(Node[LLMNodeData]):
     def _knowledge_candidate_safe_no_result(
         self,
         resolution: KnowledgeRuntimeCandidateResolution,
-        *,
-        candidate_resolution_latency_ms: int | None = None,
     ) -> WorkflowRAGSearchResult:
         trace_summary = self._knowledge_candidate_trace_summary(resolution)
-        trace_summary.update(
-            self._rag_stage_latency_summary(
-                candidate_resolution_latency_ms=candidate_resolution_latency_ms,
-            )
-        )
         return WorkflowRAGSearchResult(
             context="",
             metadata=[],

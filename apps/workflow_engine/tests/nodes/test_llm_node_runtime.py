@@ -6286,6 +6286,8 @@ def test_collection_only_zero_candidates_skips_retrieval_embedding_and_provider(
     assert result["metadata"]["rag"]["candidate_resolution_status"] == (
         "safe_no_result"
     )
+    trace_payload = node._trace_payloads[0]["payload"]  # noqa: SLF001
+    assert "candidate_resolution_latency_ms" not in trace_payload
     safe_output = json.dumps(
         {
             "result": result,

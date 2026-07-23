@@ -197,6 +197,117 @@ def test_scheduler_redacts_executor_coordination_failure() -> None:
     assert "private-executor-detail" not in str(captured.value)
 
 
+def test_scheduler_stops_when_queued_task_has_insufficient_start_budget() -> None:
+    class RecordingCancellation:
+        def __init__(self):
+            self.cancelled = False
+
+        def register(self, _callback):
+            return lambda: None
+
+        def cancel(self):
+            self.cancelled = True
+
+    class UnusedExecutor:
+        def __init__(self):
+            self.closed = False
+
+        def submit(self, _callback):
+            raise AssertionError("insufficient-budget task must not be submitted")
+
+        def wait(self, _jobs, *, timeout_seconds):
+            raise AssertionError("scheduler must not wait without running tasks")
+
+        def close(self):
+            self.closed = True
+
+    class FrozenBudgetClock:
+        def __init__(self):
+            self.calls = 0
+
+        def __call__(self):
+            self.calls += 1
+            if self.calls > 8:
+                raise AssertionError("scheduler busy-spun without clock progress")
+            return 0.0 if self.calls == 1 else 0.45
+
+    executor = UnusedExecutor()
+    clock = FrozenBudgetClock()
+    result = RAGRetrievalFanoutScheduler(
+        executor_factory=lambda _max_workers: executor,
+        cancellation_factory=RecordingCancellation,
+        aggregate_timeout_seconds=1,
+        cleanup_reserve_seconds=0.1,
+        minimum_start_budget_ms=500,
+        clock=clock,
+    ).execute(tasks=_tasks(1), worker=lambda *_args: None)
+
+    assert result.results == ()
+    assert result.failed_count == 1
+    assert result.timeout_count == 1
+    assert executor.closed is True
+    assert clock.calls <= 8
+
+
+def test_scheduler_external_base_exception_cancels_all_running_tasks() -> None:
+    class ExternalAbort(BaseException):
+        pass
+
+    class RecordingCancellation:
+        def __init__(self):
+            self.cancelled = False
+
+        def register(self, _callback):
+            return lambda: None
+
+        def cancel(self):
+            self.cancelled = True
+
+    class NeverReadyJob:
+        def ready(self):
+            return False
+
+        def result(self):
+            raise AssertionError("unfinished job must not be consumed")
+
+    class AbortingExecutor:
+        def __init__(self):
+            self.closed = False
+
+        def submit(self, _callback):
+            return NeverReadyJob()
+
+        def wait(self, _jobs, *, timeout_seconds):
+            assert timeout_seconds > 0
+            raise ExternalAbort()
+
+        def close(self):
+            self.closed = True
+
+    cancellations = []
+
+    def cancellation_factory():
+        cancellation = RecordingCancellation()
+        cancellations.append(cancellation)
+        return cancellation
+
+    executor = AbortingExecutor()
+    scheduler = RAGRetrievalFanoutScheduler(
+        executor_factory=lambda _max_workers: executor,
+        cancellation_factory=cancellation_factory,
+        aggregate_timeout_seconds=1,
+        cleanup_reserve_seconds=0.1,
+        minimum_start_budget_ms=1,
+    )
+
+    with pytest.raises(ExternalAbort):
+        scheduler.execute(tasks=_tasks(1), worker=lambda *_args: None)
+
+    assert len(cancellations) == 2
+    assert all(cancellation.cancelled for cancellation in cancellations)
+    assert executor.closed is True
+
+
 def test_scheduler_rejects_more_than_runtime_candidate_cap() -> None:
     scheduler = RAGRetrievalFanoutScheduler(
         executor_factory=GeventNativeThreadRAGRetrievalExecutor,

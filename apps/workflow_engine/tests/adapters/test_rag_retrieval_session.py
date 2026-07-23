@@ -1,5 +1,7 @@
+import threading
 from types import SimpleNamespace
 
+import gevent
 import pytest
 
 from apps.workflow_engine.adapters.rag_retrieval_session import (
@@ -15,9 +17,11 @@ from apps.workflow_engine.adapters.rag_retrieval_executor import (
 class _DriverConnection:
     def __init__(self) -> None:
         self.cancel_count = 0
+        self.cancelled = threading.Event()
 
     def cancel(self) -> None:
         self.cancel_count += 1
+        self.cancelled.set()
 
 
 class _FakeSession:
@@ -96,21 +100,38 @@ def test_session_runner_opens_and_closes_one_session_per_invocation() -> None:
 def test_session_runner_cancellation_calls_driver_and_returns_safe_timeout() -> None:
     session = _FakeSession()
     cancellation = NativeThreadRAGRetrievalCancellation()
+    operation_started = threading.Event()
+    failures = []
 
     def operation(_session):
-        cancellation.cancel()
+        operation_started.set()
+        session.driver.cancelled.wait(timeout=1)
         return "late-result"
 
-    with pytest.raises(RAGRetrievalSessionTimeout) as captured:
-        RAGRetrievalSessionRunner(session_factory=lambda: session).run(
-            timeout_ms=125,
-            cancellation=cancellation,
-            operation=operation,
-        )
+    def run():
+        try:
+            RAGRetrievalSessionRunner(session_factory=lambda: session).run(
+                timeout_ms=125,
+                cancellation=cancellation,
+                operation=operation,
+            )
+        except Exception as exc:  # pragma: no cover - asserted below
+            failures.append(exc)
 
+    worker = threading.Thread(target=run)
+    worker.start()
+    assert operation_started.wait(timeout=1)
+
+    cancellation.cancel()
+    gevent.sleep(0)
+    worker.join(timeout=1)
+
+    assert worker.is_alive() is False
     assert session.driver.cancel_count == 1
     assert session.events[-2:] == ["rollback", "close"]
-    assert "late-result" not in str(captured.value)
+    assert len(failures) == 1
+    assert isinstance(failures[0], RAGRetrievalSessionTimeout)
+    assert "late-result" not in str(failures[0])
 
 
 def test_session_runner_redacts_operation_and_cleanup_failures() -> None:
