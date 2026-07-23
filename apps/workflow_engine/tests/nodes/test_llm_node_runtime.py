@@ -6364,6 +6364,8 @@ def test_empty_rendered_rag_query_never_invokes_provider():
     assert len(resolver.calls) == 1
     assert client.calls == []
     assert result["text"] == RAG_NO_EVIDENCE_MESSAGE
+    trace_payload = node._trace_payloads[0]["payload"]  # noqa: SLF001
+    assert "candidate_resolution_latency_ms" not in trace_payload
 
 
 def test_runtime_candidate_infrastructure_error_bypasses_rag_failure_policy():
