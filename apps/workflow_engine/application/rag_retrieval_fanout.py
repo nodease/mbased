@@ -9,6 +9,7 @@ from typing import Callable, Generic, Protocol, TypeVar, runtime_checkable
 
 
 T = TypeVar("T")
+DEFAULT_RAG_FANOUT_MAX_WORKERS = 5
 
 
 class RAGRetrievalFanoutConfigurationError(ValueError):
@@ -120,7 +121,7 @@ class RAGRetrievalFanoutScheduler:
         *,
         executor_factory: RAGRetrievalExecutorFactory,
         cancellation_factory: RAGRetrievalCancellationFactory,
-        max_workers: int = 5,
+        max_workers: int = DEFAULT_RAG_FANOUT_MAX_WORKERS,
         per_task_timeout_seconds: float = 10.0,
         aggregate_timeout_seconds: float = 30.0,
         cleanup_reserve_seconds: float = 1.0,
@@ -462,6 +463,7 @@ class RAGRetrievalFanoutScheduler:
 
 
 __all__ = [
+    "DEFAULT_RAG_FANOUT_MAX_WORKERS",
     "RAGRetrievalCancellation",
     "RAGRetrievalCancellationFactory",
     "RAGRetrievalExecutor",

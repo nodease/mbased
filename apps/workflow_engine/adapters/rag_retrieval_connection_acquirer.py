@@ -7,10 +7,8 @@ from typing import Callable, Protocol
 
 from gevent.monkey import get_original
 
-from apps.workflow_engine.adapters.rag_retrieval_executor import (
-    PROCESS_RAG_RETRIEVAL_MAX_WORKERS,
-)
 from apps.workflow_engine.application.rag_retrieval_fanout import (
+    DEFAULT_RAG_FANOUT_MAX_WORKERS,
     RAGRetrievalCancellation,
 )
 
@@ -226,7 +224,7 @@ class NativeThreadRAGRetrievalConnectionAcquirer:
 
 
 _process_connection_acquirer = NativeThreadRAGRetrievalConnectionAcquirer(
-    max_workers=PROCESS_RAG_RETRIEVAL_MAX_WORKERS
+    max_workers=DEFAULT_RAG_FANOUT_MAX_WORKERS
 )
 
 

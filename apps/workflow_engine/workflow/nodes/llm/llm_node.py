@@ -5,7 +5,7 @@ import re
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from jinja2 import Environment
 from sqlalchemy.exc import SQLAlchemyError
@@ -74,15 +74,6 @@ from apps.workflow_engine.adapters.knowledge_runtime_citations import (
     PromptEvidence,
     WorkflowCitationProjector,
 )
-from apps.workflow_engine.adapters.rag_retrieval_executor import (
-    PROCESS_RAG_RETRIEVAL_MAX_WORKERS,
-    GeventNativeThreadRAGRetrievalExecutor,
-    NativeThreadRAGRetrievalCancellation,
-)
-from apps.workflow_engine.adapters.rag_retrieval_session import (
-    RAGRetrievalSessionError,
-    RAGRetrievalSessionRunner,
-)
 from apps.workflow_engine.application.provider_execution import (
     LLMCredentialNotAvailableError,
     ProviderExecutionAttribution,
@@ -109,6 +100,7 @@ from apps.workflow_engine.application.query_embedding_execution import (
     QueryEmbeddingPreflight,
 )
 from apps.workflow_engine.application.rag_retrieval_fanout import (
+    DEFAULT_RAG_FANOUT_MAX_WORKERS,
     RAGRetrievalCancellation,
     RAGRetrievalFanoutScheduler,
     RAGRetrievalFanoutTask,
@@ -131,7 +123,6 @@ from apps.workflow_engine.services.model_routing_judge_first_policy import (
     build_judge_first_active_policy,
     select_runtime_judge_model_id,
 )
-from apps.workflow_engine.services.retrieval import RetrievalService
 from apps.workflow_engine.workflow.errors import (
     NonRetryableWorkflowError,
     ProviderOutcomeUnknownWorkflowError,
@@ -144,12 +135,18 @@ from .entities import (
     LLMNodeData,
 )
 
+if TYPE_CHECKING:
+    from apps.workflow_engine.adapters.rag_retrieval_session import (
+        RAGRetrievalSessionRunner,
+    )
+    from apps.workflow_engine.services.retrieval import RetrievalService
+
 logger = logging.getLogger(__name__)
 
 _jinja_env = Environment(autoescape=False)
 MEMORY_RUN_LIMIT = 5  # 최근 실행 몇 건을 기억 컨텍스트에 반영할지 결정
 MAX_RAG_TRACE_RETRIEVED_CHUNKS = 20
-MAX_RAG_FANOUT_CONCURRENCY = PROCESS_RAG_RETRIEVAL_MAX_WORKERS
+MAX_RAG_FANOUT_CONCURRENCY = DEFAULT_RAG_FANOUT_MAX_WORKERS
 RAG_FANOUT_AGGREGATE_TIMEOUT_SECONDS = 30.0
 RAG_FANOUT_PER_KB_TIMEOUT_SECONDS = 10.0
 MAX_RAG_STAGE_LATENCY_MS = 300_000
@@ -3039,6 +3036,11 @@ class LLMNode(Node[LLMNodeData]):
         override = getattr(self, "_rag_retrieval_fanout_scheduler_override", None)
         if override is not None:
             return override
+        from apps.workflow_engine.adapters.rag_retrieval_executor import (
+            GeventNativeThreadRAGRetrievalExecutor,
+            NativeThreadRAGRetrievalCancellation,
+        )
+
         return RAGRetrievalFanoutScheduler(
             executor_factory=GeventNativeThreadRAGRetrievalExecutor,
             cancellation_factory=NativeThreadRAGRetrievalCancellation,
@@ -3063,6 +3065,8 @@ class LLMNode(Node[LLMNodeData]):
         timeout_ms: int,
     ) -> List[ChunkPreview]:
         def search(session) -> List[ChunkPreview]:
+            from apps.workflow_engine.services.retrieval import RetrievalService
+
             retrieval = RetrievalService(
                 session,
                 user_id,
@@ -3084,10 +3088,15 @@ class LLMNode(Node[LLMNodeData]):
             operation=search,
         )
 
-    def _get_rag_retrieval_session_runner(self) -> RAGRetrievalSessionRunner:
+    def _get_rag_retrieval_session_runner(self) -> "RAGRetrievalSessionRunner":
         override = getattr(self, "_rag_retrieval_session_runner_override", None)
         if override is not None:
             return override
+        from apps.workflow_engine.adapters.rag_retrieval_session import (
+            RAGRetrievalSessionError,
+            RAGRetrievalSessionRunner,
+        )
+
         session_factory = self.execution_context.get("db_session_factory")
         if session_factory is None:
             session_factory = SessionLocal
@@ -3097,7 +3106,7 @@ class LLMNode(Node[LLMNodeData]):
 
     def _search_single_rag_kb(
         self,
-        retrieval: RetrievalService,
+        retrieval: "RetrievalService",
         *,
         query: str,
         knowledge_base_id: str,

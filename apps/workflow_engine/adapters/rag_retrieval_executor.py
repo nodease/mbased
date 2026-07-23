@@ -10,6 +10,7 @@ from gevent.monkey import get_original
 from gevent.threadpool import ThreadPool
 
 from apps.workflow_engine.application.rag_retrieval_fanout import (
+    DEFAULT_RAG_FANOUT_MAX_WORKERS,
     RAGRetrievalFanoutConfigurationError,
     RAGRetrievalJob,
 )
@@ -19,7 +20,7 @@ T = TypeVar("T")
 _allocate_native_lock = get_original("_thread", "allocate_lock")
 _native_get_ident = get_original("_thread", "get_ident")
 
-PROCESS_RAG_RETRIEVAL_MAX_WORKERS = 5
+PROCESS_RAG_RETRIEVAL_MAX_WORKERS = DEFAULT_RAG_FANOUT_MAX_WORKERS
 PROCESS_RAG_RETRIEVAL_CONTROL_MAX_WORKERS = 2
 _IDLE_TASK_TIMEOUT_SECONDS = 0.1
 

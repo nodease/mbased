@@ -3045,7 +3045,7 @@ def test_llm_node_rag_partial_retrieval_failure_uses_safe_partial_result(
             ]
 
     monkeypatch.setattr(
-        "apps.workflow_engine.workflow.nodes.llm.llm_node.RetrievalService",
+        "apps.workflow_engine.services.retrieval.RetrievalService",
         FakeRetrievalService,
     )
     monkeypatch.setattr(
@@ -3128,7 +3128,7 @@ def test_llm_node_rag_preserves_explicit_zero_score_threshold(monkeypatch):
             ]
 
     monkeypatch.setattr(
-        "apps.workflow_engine.workflow.nodes.llm.llm_node.RetrievalService",
+        "apps.workflow_engine.services.retrieval.RetrievalService",
         FakeRetrievalService,
     )
     monkeypatch.setattr(
@@ -3215,7 +3215,7 @@ def test_llm_node_rag_source_tier_breaks_equal_score_ties(monkeypatch):
             ]
 
     monkeypatch.setattr(
-        "apps.workflow_engine.workflow.nodes.llm.llm_node.RetrievalService",
+        "apps.workflow_engine.services.retrieval.RetrievalService",
         FakeRetrievalService,
     )
     monkeypatch.setattr(
@@ -3305,7 +3305,7 @@ def test_llm_node_rag_source_tier_policy_off_preserves_score_order(monkeypatch):
             ]
 
     monkeypatch.setattr(
-        "apps.workflow_engine.workflow.nodes.llm.llm_node.RetrievalService",
+        "apps.workflow_engine.services.retrieval.RetrievalService",
         FakeRetrievalService,
     )
     monkeypatch.setattr(
@@ -3380,7 +3380,7 @@ def test_llm_node_reuses_query_embedding_across_same_model_kbs(monkeypatch):
             ]
 
     monkeypatch.setattr(
-        "apps.workflow_engine.workflow.nodes.llm.llm_node.RetrievalService",
+        "apps.workflow_engine.services.retrieval.RetrievalService",
         FakeRetrievalService,
     )
     monkeypatch.setattr(
@@ -4303,7 +4303,7 @@ def test_llm_node_rag_session_runner_uses_injected_session_factory(monkeypatch):
     runner = object()
 
     monkeypatch.setattr(
-        "apps.workflow_engine.workflow.nodes.llm.llm_node."
+        "apps.workflow_engine.adapters.rag_retrieval_session."
         "RAGRetrievalSessionRunner",
         lambda *, session_factory: captured_factories.append(session_factory) or runner,
     )
@@ -4423,7 +4423,7 @@ def test_llm_node_rag_partial_retrieval_failure_respects_fail_node_policy(
             raise RuntimeError("vector store unavailable")
 
     monkeypatch.setattr(
-        "apps.workflow_engine.workflow.nodes.llm.llm_node.RetrievalService",
+        "apps.workflow_engine.services.retrieval.RetrievalService",
         FakeRetrievalService,
     )
 
@@ -6785,7 +6785,7 @@ def test_workflow_llm_node_empty_retrieval_result_skips_llm_call(monkeypatch):
             return []
 
     monkeypatch.setattr(
-        "apps.workflow_engine.workflow.nodes.llm.llm_node.RetrievalService",
+        "apps.workflow_engine.services.retrieval.RetrievalService",
         FakeRetrievalService,
     )
     fake_db = _patch_allowed_knowledge_permissions(monkeypatch, [kb_id])
@@ -6850,7 +6850,7 @@ def test_workflow_llm_node_wraps_prompt_injection_chunk_as_untrusted_knowledge(
             ]
 
     monkeypatch.setattr(
-        "apps.workflow_engine.workflow.nodes.llm.llm_node.RetrievalService",
+        "apps.workflow_engine.services.retrieval.RetrievalService",
         FakeRetrievalService,
     )
     monkeypatch.setattr(
@@ -6929,7 +6929,7 @@ def test_workflow_llm_node_rag_trace_redacts_raw_content_and_sensitive_metadata(
             ]
 
     monkeypatch.setattr(
-        "apps.workflow_engine.workflow.nodes.llm.llm_node.RetrievalService",
+        "apps.workflow_engine.services.retrieval.RetrievalService",
         FakeRetrievalService,
     )
     monkeypatch.setattr(
@@ -7018,7 +7018,7 @@ def test_knowledge_search_limits_context_chars_across_multiple_kbs(monkeypatch):
             ]
 
     monkeypatch.setattr(
-        "apps.workflow_engine.workflow.nodes.llm.llm_node.RetrievalService",
+        "apps.workflow_engine.services.retrieval.RetrievalService",
         FakeRetrievalService,
     )
     monkeypatch.setattr(
@@ -7092,7 +7092,7 @@ def test_workflow_llm_node_embedding_credential_failure_returns_safe_no_result(
             )
 
     monkeypatch.setattr(
-        "apps.workflow_engine.workflow.nodes.llm.llm_node.RetrievalService",
+        "apps.workflow_engine.services.retrieval.RetrievalService",
         FakeRetrievalService,
     )
     fake_db = _patch_allowed_knowledge_permissions(monkeypatch, [kb_id])
@@ -7152,7 +7152,7 @@ def test_workflow_graph_llm_nodes_use_only_their_assigned_kbs(monkeypatch):
             raise AssertionError(f"unexpected KB: {kwargs['knowledge_base_id']}")
 
     monkeypatch.setattr(
-        "apps.workflow_engine.workflow.nodes.llm.llm_node.RetrievalService",
+        "apps.workflow_engine.services.retrieval.RetrievalService",
         FakeRetrievalService,
     )
     monkeypatch.setattr(
@@ -7250,7 +7250,7 @@ def test_workflow_llm_node_fail_node_redacts_retrieval_failures(
             raise exception
 
     monkeypatch.setattr(
-        "apps.workflow_engine.workflow.nodes.llm.llm_node.RetrievalService",
+        "apps.workflow_engine.services.retrieval.RetrievalService",
         FakeRetrievalService,
     )
     node = LLMNode(
@@ -7353,7 +7353,7 @@ def test_workflow_llm_node_ignores_stale_kb_display_name_at_runtime(monkeypatch)
             return [_chunk_preview("현재 근거", filename="current.md")]
 
     monkeypatch.setattr(
-        "apps.workflow_engine.workflow.nodes.llm.llm_node.RetrievalService",
+        "apps.workflow_engine.services.retrieval.RetrievalService",
         FakeRetrievalService,
     )
     monkeypatch.setattr(
@@ -7430,7 +7430,7 @@ def test_knowledge_search_deduplicates_retrieved_context_when_enabled(monkeypatc
             ]
 
     monkeypatch.setattr(
-        "apps.workflow_engine.workflow.nodes.llm.llm_node.RetrievalService",
+        "apps.workflow_engine.services.retrieval.RetrievalService",
         FakeRetrievalService,
     )
     fake_db = _patch_allowed_knowledge_permissions(monkeypatch, [kb_id])
@@ -7498,7 +7498,7 @@ def test_knowledge_search_limits_retrieved_context_chars(monkeypatch):
             ]
 
     monkeypatch.setattr(
-        "apps.workflow_engine.workflow.nodes.llm.llm_node.RetrievalService",
+        "apps.workflow_engine.services.retrieval.RetrievalService",
         FakeRetrievalService,
     )
     fake_db = _patch_allowed_knowledge_permissions(monkeypatch, [kb_id])
@@ -7576,7 +7576,7 @@ def test_knowledge_search_compresses_retrieved_context_by_query(monkeypatch):
             ]
 
     monkeypatch.setattr(
-        "apps.workflow_engine.workflow.nodes.llm.llm_node.RetrievalService",
+        "apps.workflow_engine.services.retrieval.RetrievalService",
         FakeRetrievalService,
     )
     fake_db = _patch_allowed_knowledge_permissions(monkeypatch, [kb_id])
@@ -7642,7 +7642,7 @@ def test_llm_node_records_answer_grounding_check_metadata(monkeypatch):
             ]
 
     monkeypatch.setattr(
-        "apps.workflow_engine.workflow.nodes.llm.llm_node.RetrievalService",
+        "apps.workflow_engine.services.retrieval.RetrievalService",
         FakeRetrievalService,
     )
     fake_db = _patch_allowed_knowledge_permissions(monkeypatch, [kb_id])
