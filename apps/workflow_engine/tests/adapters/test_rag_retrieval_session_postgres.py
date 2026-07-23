@@ -102,7 +102,9 @@ def test_rag_session_is_read_only_and_local_timeout_does_not_leak(
         ),
     )
 
-    assert settings == ("on", "500ms")
+    assert settings[0] == "on"
+    assert settings[1].endswith("ms")
+    assert 1 <= int(settings[1][:-2]) <= 500
     with session_factory() as session:
         assert session.execute(text("SHOW statement_timeout")).scalar_one() == "0"
         assert session.execute(text("SELECT 1")).scalar_one() == 1
@@ -121,6 +123,27 @@ def test_rag_statement_timeout_rolls_back_before_connection_reuse(
             operation=lambda session: session.execute(
                 text("SELECT pg_sleep(0.2)")
             ).scalar_one(),
+        )
+
+    with session_factory() as session:
+        assert session.execute(text("SELECT 1")).scalar_one() == 1
+
+
+def test_rag_statement_timeout_shrinks_across_multiple_statements(
+    disposable_rag_database,
+):
+    session_factory = sessionmaker(bind=disposable_rag_database)
+    runner = RAGRetrievalSessionRunner(session_factory=session_factory)
+
+    def exceed_cumulative_budget(session):
+        session.execute(text("SELECT pg_sleep(0.03)")).scalar_one()
+        session.execute(text("SELECT pg_sleep(0.03)")).scalar_one()
+
+    with pytest.raises(RAGRetrievalSessionTimeout):
+        runner.run(
+            timeout_ms=50,
+            cancellation=NativeThreadRAGRetrievalCancellation(),
+            operation=exceed_cumulative_budget,
         )
 
     with session_factory() as session:

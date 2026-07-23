@@ -3,11 +3,13 @@ from types import SimpleNamespace
 
 import gevent
 import pytest
+from sqlalchemy import create_engine, text
 
 from apps.workflow_engine.adapters.rag_retrieval_session import (
     RAGRetrievalSessionError,
     RAGRetrievalSessionRunner,
     RAGRetrievalSessionTimeout,
+    _StatementDeadlineGuard,
 )
 from apps.workflow_engine.adapters.rag_retrieval_executor import (
     NativeThreadRAGRetrievalCancellation,
@@ -53,11 +55,43 @@ class _FakeSession:
             raise RuntimeError("private-close-detail")
 
 
+class _SQLAlchemyBackedSession:
+    def __init__(self) -> None:
+        self.engine = create_engine("sqlite:///:memory:")
+        self.sql_connection = self.engine.connect()
+        self.events: list[object] = []
+
+    def connection(self):
+        self.events.append("connection")
+        return self.sql_connection
+
+    def execute(self, statement, parameters=None):
+        rendered = str(statement)
+        self.events.append((rendered, parameters))
+        if rendered.startswith("SET TRANSACTION") or "set_config" in rendered:
+            return SimpleNamespace()
+        return self.sql_connection.execute(statement, parameters or {})
+
+    def rollback(self):
+        self.events.append("rollback")
+        self.sql_connection.rollback()
+
+    def close(self):
+        self.events.append("close")
+
+    def dispose(self) -> None:
+        self.sql_connection.close()
+        self.engine.dispose()
+
+
 def test_session_runner_applies_read_only_timeout_and_always_rolls_back() -> None:
     session = _FakeSession()
     cancellation = NativeThreadRAGRetrievalCancellation()
 
-    result = RAGRetrievalSessionRunner(session_factory=lambda: session).run(
+    result = RAGRetrievalSessionRunner(
+        session_factory=lambda: session,
+        monotonic_ns=lambda: 0,
+    ).run(
         timeout_ms=125,
         cancellation=cancellation,
         operation=lambda current: current is session,
@@ -150,6 +184,111 @@ def test_session_runner_redacts_operation_and_cleanup_failures() -> None:
     assert "private-query-detail" not in str(captured.value)
     assert "private-rollback-detail" not in str(captured.value)
     assert "private-close-detail" not in str(captured.value)
+
+
+def test_session_runner_blocks_next_statement_after_cancellation() -> None:
+    session = _SQLAlchemyBackedSession()
+    cancellation = NativeThreadRAGRetrievalCancellation()
+    second_statement_reached = False
+
+    def operation(current):
+        nonlocal second_statement_reached
+        assert current.execute(text("SELECT 1")).scalar_one() == 1
+        cancellation.cancel()
+        current.execute(text("SELECT 2"))
+        second_statement_reached = True
+
+    try:
+        with pytest.raises(RAGRetrievalSessionTimeout):
+            RAGRetrievalSessionRunner(session_factory=lambda: session).run(
+                timeout_ms=125,
+                cancellation=cancellation,
+                operation=operation,
+            )
+
+        assert second_statement_reached is False
+        assert session.events[-2:] == ["rollback", "close"]
+    finally:
+        session.dispose()
+
+
+def test_session_runner_blocks_next_statement_after_absolute_deadline() -> None:
+    session = _SQLAlchemyBackedSession()
+    now_ns = 0
+
+    def monotonic_ns() -> int:
+        return now_ns
+
+    def operation(current):
+        nonlocal now_ns
+        assert current.execute(text("SELECT 1")).scalar_one() == 1
+        now_ns = 126_000_000
+        current.execute(text("SELECT 2"))
+
+    try:
+        with pytest.raises(RAGRetrievalSessionTimeout):
+            RAGRetrievalSessionRunner(
+                session_factory=lambda: session,
+                monotonic_ns=monotonic_ns,
+            ).run(
+                timeout_ms=125,
+                cancellation=NativeThreadRAGRetrievalCancellation(),
+                operation=operation,
+            )
+
+        assert session.events[-2:] == ["rollback", "close"]
+    finally:
+        session.dispose()
+
+
+def test_postgres_statement_guard_uses_remaining_absolute_budget() -> None:
+    now_ns = 40_000_000
+    cancellation = NativeThreadRAGRetrievalCancellation()
+    cursor_calls = []
+    cursor = SimpleNamespace(
+        execute=lambda statement, parameters: cursor_calls.append(
+            (statement, parameters)
+        )
+    )
+    connection = SimpleNamespace(dialect=SimpleNamespace(name="postgresql"))
+    guard = _StatementDeadlineGuard(
+        cancellation=cancellation,
+        deadline_ns=125_000_000,
+        monotonic_ns=lambda: now_ns,
+    )
+
+    guard(connection, cursor, "SELECT 1", (), None, False)
+
+    assert cursor_calls == [
+        (
+            "SELECT set_config('statement_timeout', %s, true)",
+            ("85ms",),
+        )
+    ]
+
+    now_ns = 126_000_000
+    with pytest.raises(RAGRetrievalSessionTimeout):
+        guard(connection, cursor, "SELECT 2", (), None, False)
+
+    assert len(cursor_calls) == 1
+
+
+def test_session_runner_removes_statement_guard_before_connection_reuse() -> None:
+    session = _SQLAlchemyBackedSession()
+    cancellation = NativeThreadRAGRetrievalCancellation()
+
+    try:
+        result = RAGRetrievalSessionRunner(session_factory=lambda: session).run(
+            timeout_ms=125,
+            cancellation=cancellation,
+            operation=lambda current: current.execute(text("SELECT 1")).scalar_one(),
+        )
+        cancellation.cancel()
+
+        assert result == 1
+        assert session.sql_connection.execute(text("SELECT 2")).scalar_one() == 2
+    finally:
+        session.dispose()
 
 
 @pytest.mark.parametrize("timeout_ms", [0, -1, True, 30001])
