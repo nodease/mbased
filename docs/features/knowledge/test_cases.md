@@ -1,7 +1,7 @@
 # Knowledge Test Cases
 
 Status: Draft
-Verified Against: feature/mba-354 @ cb54e838fdf3b6cf4cb15fab60e030d40d5df4d0
+Verified Against: feature/mba-354 @ 788c840ff15ad921f75160a011505c6020beebe4
 이 문서는 현재 RAG 동작과 목표 KB 통합 모델에 필요한 테스트 범위를 함께 기록한다. MBA-105 목표 모델 테스트는 [ADR-0017](../../decisions/ADR-0017-knowledge-integration-provisional-implementation-baseline.md)과 [implementation_baseline.md](implementation_baseline.md)의 임시 baseline을 기준으로 구현 blocker가 된다.
 KC sync의 실행·복구·snapshot·versioned finalization 검증은 [ADR-0048](../../decisions/ADR-0048-knowledge-collection-sync-execution-boundary.md)을 따른다.
 Organization Detector Provider와 embedding 전 local masking Target 테스트는 [ADR-0070](../../decisions/ADR-0070-organization-detector-provider-and-pre-embedding-local-masking-boundary.md)을 따른다. MBA-362가 runtime/persistence/provider adapter 테스트를 TDD로 구현하기 전에는 완료 증거가 아니다.
@@ -528,7 +528,7 @@ Organization Detector Provider와 embedding 전 local masking Target 테스트�
 ### MBA-354 Precomputed Query Embedding KB Fanout
 
 - Authorized candidate가 0개면 query embedding, fanout scheduler, child DB session과 generation provider를 모두 호출하지 않는다. Candidate가 있으면 ADR-0071의 distinct-model capability/provider attempt와 invocation-local vector를 그대로 소비하며 KB별 embedding을 다시 만들지 않는다.
-- 사전 계산 query vector를 사용하는 2개 이상 KB search는 실제 native worker에서 겹쳐 실행된다. Invocation당 동시 검색과 여러 invocation을 합친 프로세스 전체 native data worker가 모두 5개를 넘지 않아야 한다. Barrier 기반 test로 overlap을, 두 executor 동시 제출 test로 process-wide 상한을 검증하며 우연한 wall-clock 단축만 성공 기준으로 사용하지 않는다.
+- 사전 계산 query vector를 사용하는 2개 이상 KB search는 실제 native worker에서 겹쳐 실행된다. Invocation당 동시 검색과 여러 invocation을 합친 프로세스 전체 native data worker 및 제출 admission이 모두 5개를 넘지 않아야 한다. Callback greenlet 생성 전에 두 admission을 예약하고, 공용 pool 포화 시 추가 callback을 실행하거나 대기 greenlet을 만들지 않아야 한다. 기존 job이 끝나면 slot이 회수되어 후속 제출이 성공해야 한다. Barrier 기반 test로 overlap을, 두 executor 동시 제출과 포화·회복 test로 process-wide 상한을 검증하며 우연한 wall-clock 단축만 성공 기준으로 사용하지 않는다.
 - Aggregate deadline은 executor/task 제출 전에 시작한다. Queue 대기, active search, cancellation과 cleanup 대기를 포함해 caller 기준 30초를 넘기지 않고 마지막 1초에는 새 DB search를 시작하지 않는다. Running task 없이 queued task의 start budget만 부족한 경우 busy-spin 없이 timeout으로 수렴한다. Cancellation에 협조하지 않는 worker를 기다리느라 caller deadline을 연장하지 않으며 late result를 폐기하는 test를 포함한다. `gevent.Timeout` 등 `BaseException` 계열 외부 종료도 실행 중인 모든 child cancellation을 요청하고 원래 예외를 전파해야 한다.
 - 각 worker는 candidate resolution/query embedding과 동일한 주입 `db_session_factory`에서 별도 session을 만들고 `organization_id + knowledge_base_id` 조건과 read-only transaction을 적용한다. Invalid explicit factory는 전역 DB fallback 없이 차단한다. Session factory와 connection checkout은 프로세스 전체 최대 5개의 native acquisition worker로 제한한다. Pool을 소진한 PostgreSQL test에서 per-KB deadline이 공용 `pool_timeout`보다 먼저 caller를 반환하고, 늦게 획득된 session은 획득 thread가 rollback/close하며 acquisition slot과 checked-out connection이 복구되어야 한다. 단조시계 절대 deadline을 기준으로 operation의 모든 SQL 직전에 cancellation과 남은 budget을 재검증하고 transaction-local statement timeout은 각 SQL마다 남은 budget 이하로 축소한다. 단일 timeout 안에서는 각각 성공할 두 `pg_sleep`의 합이 절대 deadline을 넘는 경우 후속 SQL이 timeout되고, 취소 뒤 다음 SQL은 DBAPI 실행 전에 차단되어야 한다. DB cancel callback은 프로세스 전체 최대 2개의 별도 native control worker에서 실행해 gevent hub를 막지 않아야 한다. Dispatch 뒤 등록 해제된 callback은 실행하지 않고 이미 실행 중인 callback은 완료 뒤에만 statement guard를 제거하고 session을 rollback/close한다. Success, empty, DB error, per-KB timeout, aggregate cancel과 rollback error 모두 close를 시도한다. Disposable PostgreSQL test는 checkout deadline, cumulative statement timeout, `pg_sleep` cancel 뒤 rollback, connection 재사용과 timeout/guard 비누출을 확인한다.
 - Reverse completion, partial timeout과 mixed success에서도 candidate ordinal을 거쳐 기존 global score/source-tier 정렬, dedupe, top-k, evidence sufficiency와 citation 결과가 순차 기준 fixture와 같아야 한다. `fail_node`는 partial evidence를 사용하지 않고 남은 task에 cancellation을 요청한다.
@@ -536,6 +536,7 @@ Organization Detector Provider와 embedding 전 local masking Target 테스트�
 - 하나 이상의 authorized candidate가 retrieval에 진입한 RAG trace에는 실행된 stage의 `candidate_resolution_latency_ms`, `query_embedding_latency_ms`, `retrieval_fanout_latency_ms`, `slowest_search_latency_ms`, `evidence_policy_latency_ms`만 0~300,000 범위 integer로 남긴다. Candidate 0건 또는 empty query의 구분 불가능한 `safe_no_result`는 exact stage latency를 모두 생략한다. Unknown/negative/non-finite/bool/per-KB timing은 제거하고 일반 Workflow result metadata, chatbot/SSE와 citation에는 이 필드가 없어야 한다.
 - 첫 multi-KB CrossEncoder rerank에서 여러 native worker가 동시에 model을 요청해도 constructor는 한 번만 실행되고 완성된 동일 cache instance를 사용해야 한다.
 - Synthetic benchmark는 KB 1/2/4/10개에서 동일 delay profile의 p50/p95, 프로세스 전체 max active data worker와 search/provider call count를 기록한다. 절대 latency threshold는 merge gate가 아니며 overlap, concurrency, 호출 수와 deterministic 결과를 회귀 gate로 사용한다. Slow/timeout 동작은 별도의 deterministic scheduler test로 검증한다.
+- `rag_retrieval_connection_acquirer.py` 또는 `rag_retrieval_executor.py`만 바뀌어도 Knowledge disposable PostgreSQL checkout/cancel/connection 복구 계약을 선택한다. LLM node import 경계, `NodeFactory` 또는 RAG adapter 변경은 Gateway architecture import-boundary test도 선택해 Gateway graph 검증이 worker-only `gevent` 의존성을 요구하지 않는지 확인한다.
 
 ### MBA-288 Durable Document Ingestion
 
