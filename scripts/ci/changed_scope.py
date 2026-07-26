@@ -32,6 +32,8 @@ _KNOWLEDGE_POSTGRES_PATTERNS = (
     "apps/shared/tests/domain/test_knowledge_runtime_candidates.py",
     "apps/shared/tests/services/test_knowledge_permission_runtime_bulk.py",
     "apps/workflow_engine/adapters/knowledge_runtime_candidates.py",
+    "apps/workflow_engine/adapters/rag_retrieval_connection_acquirer.py",
+    "apps/workflow_engine/adapters/rag_retrieval_executor.py",
     "apps/workflow_engine/adapters/rag_retrieval_session.py",
     "apps/workflow_engine/application/rag_retrieval_fanout.py",
     "apps/workflow_engine/application/runtime_retrieval/**",
@@ -39,6 +41,14 @@ _KNOWLEDGE_POSTGRES_PATTERNS = (
     "apps/workflow_engine/tests/adapters/test_postgres_knowledge_runtime_candidate_adapter.py",
     "apps/workflow_engine/tests/adapters/test_rag_retrieval_session_postgres.py",
     ".github/workflows/test-knowledge-runtime-postgres.yml",
+)
+
+_GATEWAY_WORKFLOW_IMPORT_BOUNDARY_PATTERNS = (
+    # Gateway graph validation imports these Workflow definitions without
+    # installing worker-only runtime dependencies such as gevent.
+    "apps/workflow_engine/adapters/rag_retrieval_*.py",
+    "apps/workflow_engine/workflow/core/workflow_node_factory.py",
+    "apps/workflow_engine/workflow/nodes/llm/**",
 )
 
 _WORKFLOW_POSTGRES_PATTERNS = (
@@ -439,6 +449,8 @@ def classify_paths(raw_paths: Iterable[str]) -> ChangeScope:
 
         if _matches_any(path, _KNOWLEDGE_POSTGRES_PATTERNS):
             scope.knowledge_postgres = True
+        if _matches_any(path, _GATEWAY_WORKFLOW_IMPORT_BOUNDARY_PATTERNS):
+            scope.gateway_tests = True
         if _matches_any(path, _WORKFLOW_POSTGRES_PATTERNS):
             scope.workflow_postgres = True
         if _matches_any(path, _AGENT_BUILDER_POSTGRES_PATTERNS):

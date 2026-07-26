@@ -142,6 +142,8 @@ def test_agent_builder_usage_change_selects_agent_builder_postgres(path: str):
     [
         "apps/workflow_engine/application/runtime_retrieval/knowledge_candidates.py",
         "apps/workflow_engine/application/rag_retrieval_fanout.py",
+        "apps/workflow_engine/adapters/rag_retrieval_connection_acquirer.py",
+        "apps/workflow_engine/adapters/rag_retrieval_executor.py",
         "apps/workflow_engine/adapters/rag_retrieval_session.py",
         "apps/workflow_engine/tests/adapters/test_rag_retrieval_session_postgres.py",
     ],
@@ -152,6 +154,22 @@ def test_knowledge_runtime_change_selects_knowledge_postgres(path: str):
     assert scope.workflow_tests is True
     assert scope.knowledge_postgres is True
     assert scope.workflow_postgres is False
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "apps/workflow_engine/workflow/core/workflow_node_factory.py",
+        "apps/workflow_engine/workflow/nodes/llm/__init__.py",
+        "apps/workflow_engine/adapters/rag_retrieval_connection_acquirer.py",
+        "apps/workflow_engine/adapters/rag_retrieval_executor.py",
+    ],
+)
+def test_worker_import_boundary_change_selects_gateway_contract(path: str):
+    scope = classify_paths([path])
+
+    assert scope.workflow_tests is True
+    assert scope.gateway_tests is True
 
 
 @pytest.mark.parametrize(

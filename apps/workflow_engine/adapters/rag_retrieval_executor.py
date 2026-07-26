@@ -5,13 +5,13 @@ from __future__ import annotations
 from typing import Callable, Generic, TypeVar
 
 import gevent
-from gevent.lock import BoundedSemaphore
 from gevent.monkey import get_original
 from gevent.threadpool import ThreadPool
 
 from apps.workflow_engine.application.rag_retrieval_fanout import (
     DEFAULT_RAG_FANOUT_MAX_WORKERS,
     RAGRetrievalFanoutConfigurationError,
+    RAGRetrievalFanoutError,
     RAGRetrievalJob,
 )
 
@@ -25,8 +25,25 @@ PROCESS_RAG_RETRIEVAL_CONTROL_MAX_WORKERS = 2
 _IDLE_TASK_TIMEOUT_SECONDS = 0.1
 
 _process_pool_lock = _allocate_native_lock()
+_process_data_admission_lock = _allocate_native_lock()
 _process_data_pool: ThreadPool | None = None
 _process_control_pool: ThreadPool | None = None
+_process_admitted_data_jobs = 0
+
+
+def _reserve_process_data_job() -> bool:
+    global _process_admitted_data_jobs
+    with _process_data_admission_lock:
+        if _process_admitted_data_jobs >= PROCESS_RAG_RETRIEVAL_MAX_WORKERS:
+            return False
+        _process_admitted_data_jobs += 1
+        return True
+
+
+def _release_process_data_job() -> None:
+    global _process_admitted_data_jobs
+    with _process_data_admission_lock:
+        _process_admitted_data_jobs -= 1
 
 
 def _get_process_data_pool() -> ThreadPool:
@@ -177,19 +194,43 @@ class GeventNativeThreadRAGRetrievalExecutor:
         ):
             raise RAGRetrievalFanoutConfigurationError()
         self._pool = _get_process_data_pool()
-        self._invocation_slots = BoundedSemaphore(max_workers)
+        self._max_workers = max_workers
+        self._state_lock = _allocate_native_lock()
+        self._active_jobs = 0
         self._closed = False
 
     def submit(self, callback: Callable[[], T]) -> RAGRetrievalJob[T]:
-        if self._closed or not callable(callback):
+        if not callable(callback):
             raise RAGRetrievalFanoutConfigurationError()
-        return GeventNativeThreadJob(
-            gevent.spawn(self._run_with_invocation_slot, callback)
-        )
+        self._reserve_invocation_job()
+        if not _reserve_process_data_job():
+            self._release_invocation_job()
+            raise RAGRetrievalFanoutError()
+        try:
+            return GeventNativeThreadJob(gevent.spawn(self._run_admitted, callback))
+        except BaseException:
+            _release_process_data_job()
+            self._release_invocation_job()
+            raise
 
-    def _run_with_invocation_slot(self, callback: Callable[[], T]) -> T:
-        with self._invocation_slots:
+    def _run_admitted(self, callback: Callable[[], T]) -> T:
+        try:
             return self._pool.apply(callback)
+        finally:
+            _release_process_data_job()
+            self._release_invocation_job()
+
+    def _reserve_invocation_job(self) -> None:
+        with self._state_lock:
+            if self._closed:
+                raise RAGRetrievalFanoutConfigurationError()
+            if self._active_jobs >= self._max_workers:
+                raise RAGRetrievalFanoutError()
+            self._active_jobs += 1
+
+    def _release_invocation_job(self) -> None:
+        with self._state_lock:
+            self._active_jobs -= 1
 
     def wait(
         self,
@@ -206,9 +247,8 @@ class GeventNativeThreadRAGRetrievalExecutor:
             gevent.wait(raw_results, timeout=max(0.0, timeout_seconds), count=1)
 
     def close(self) -> None:
-        if self._closed:
-            return
-        self._closed = True
+        with self._state_lock:
+            self._closed = True
 
 
 __all__ = [

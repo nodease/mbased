@@ -118,12 +118,15 @@ def test_executors_share_process_wide_native_worker_cap() -> None:
         second = GeventNativeThreadRAGRetrievalExecutor(
             PROCESS_RAG_RETRIEVAL_MAX_WORKERS
         )
+        first_job_count = PROCESS_RAG_RETRIEVAL_MAX_WORKERS // 2
         jobs = [
             first.submit(work)
-            for _ in range(PROCESS_RAG_RETRIEVAL_MAX_WORKERS)
+            for _ in range(first_job_count)
         ] + [
             second.submit(work)
-            for _ in range(PROCESS_RAG_RETRIEVAL_MAX_WORKERS)
+            for _ in range(
+                PROCESS_RAG_RETRIEVAL_MAX_WORKERS - first_job_count
+            )
         ]
         gevent.spawn_later(0.1, gate.release)
         try:
@@ -135,6 +138,68 @@ def test_executors_share_process_wide_native_worker_cap() -> None:
 
         if state['max_active'] > PROCESS_RAG_RETRIEVAL_MAX_WORKERS:
             raise SystemExit(1)
+        """
+    )
+
+
+def test_process_pool_rejects_overflow_before_spawning_and_recovers() -> None:
+    _assert_isolated_script_succeeds(
+        """
+        from gevent import monkey
+        monkey.patch_all()
+
+        allocate_native_lock = monkey.get_original('_thread', 'allocate_lock')
+        from apps.workflow_engine.adapters.rag_retrieval_executor import (
+            PROCESS_RAG_RETRIEVAL_MAX_WORKERS,
+            GeventNativeThreadRAGRetrievalExecutor,
+        )
+        from apps.workflow_engine.application.rag_retrieval_fanout import (
+            RAGRetrievalFanoutError,
+        )
+
+        gate = allocate_native_lock()
+        gate.acquire()
+        first = GeventNativeThreadRAGRetrievalExecutor(
+            PROCESS_RAG_RETRIEVAL_MAX_WORKERS
+        )
+
+        def blocked_work():
+            gate.acquire()
+            gate.release()
+            return True
+
+        jobs = [
+            first.submit(blocked_work)
+            for _ in range(PROCESS_RAG_RETRIEVAL_MAX_WORKERS)
+        ]
+
+        overflow_callback_calls = []
+
+        def overflow_callback():
+            overflow_callback_calls.append(True)
+            return True
+
+        overflow = GeventNativeThreadRAGRetrievalExecutor(1)
+        try:
+            try:
+                overflow.submit(overflow_callback)
+            except RAGRetrievalFanoutError:
+                pass
+            else:
+                raise SystemExit(1)
+            if overflow_callback_calls:
+                raise SystemExit(2)
+
+            gate.release()
+            if not all(job.result() for job in jobs):
+                raise SystemExit(3)
+
+            recovered = overflow.submit(lambda: True)
+            if not recovered.result():
+                raise SystemExit(4)
+        finally:
+            first.close()
+            overflow.close()
         """
     )
 
