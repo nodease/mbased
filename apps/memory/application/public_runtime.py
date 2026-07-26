@@ -33,13 +33,29 @@ from apps.memory.domain.conversation import (
 )
 from apps.memory.domain.errors import (
     AccessGrantNotUsableError,
+    MemoryAdapterUnavailableError,
     PublicConversationFeatureDisabledError,
+    PublicConversationTurnLimitExceededError,
+    WorkflowBudgetBlockedError,
+    WorkflowBudgetUnavailableError,
 )
 from apps.memory.domain.public_access import AccessGrantState
 
 
+MAX_PUBLIC_COMPLETED_TURNS = 100
+
+
 class RuntimeFingerprintPort(Protocol):
-    def fingerprint(self, **kwargs) -> tuple[str, str]: ...
+    def fingerprint(
+        self,
+        *,
+        key_version: str | None = None,
+        **kwargs,
+    ) -> tuple[str, str]: ...
+
+
+class WorkflowBudgetDecisionPort(Protocol):
+    def evaluate(self, *, workflow_id: uuid.UUID, now: datetime): ...
 
 
 class MemoryContentCipherPort(Protocol):
@@ -121,6 +137,7 @@ class StartPublicConversationTurnUseCase:
         secrets,
         content_cipher: MemoryContentCipherPort,
         fingerprinter: RuntimeFingerprintPort,
+        budget: WorkflowBudgetDecisionPort,
         admission=None,
         dispatch_publisher: TurnDispatchPublisherPort | None = None,
         minimum_worker_capability: str,
@@ -133,6 +150,7 @@ class StartPublicConversationTurnUseCase:
         self.secrets = secrets
         self.content_cipher = content_cipher
         self.fingerprinter = fingerprinter
+        self.budget = budget
         self.admission = admission
         self.dispatch_publisher = dispatch_publisher
         self.minimum_worker_capability = minimum_worker_capability
@@ -143,6 +161,11 @@ class StartPublicConversationTurnUseCase:
         command: StartPublicConversationTurnCommand,
     ) -> StartPublicConversationTurnResult:
         preflight = self._execute(lambda: self._preflight(command))
+        if (
+            preflight.disposition
+            is PublicConversationAdmissionDisposition.LOGICAL_REQUEST
+        ):
+            self._require_budget_allows(preflight.binding, command.now)
         if self.admission is not None:
             self.admission.admit(
                 operation="conversation.run",
@@ -159,11 +182,16 @@ class StartPublicConversationTurnUseCase:
                 disposition=preflight.disposition,
             )
         result = self._execute(lambda: self._start(command, preflight))
-        if self.dispatch_publisher is not None and result.dispatch_publish_required and result.turn_state not in {
-            TurnStatus.COMPLETED,
-            TurnStatus.FAILED,
-            TurnStatus.CANCELLED,
-        }:
+        if (
+            self.dispatch_publisher is not None
+            and result.dispatch_publish_required
+            and result.turn_state
+            not in {
+                TurnStatus.COMPLETED,
+                TurnStatus.FAILED,
+                TurnStatus.CANCELLED,
+            }
+        ):
             self.dispatch_publisher.publish(
                 organization_id=preflight.binding.organization_id,
                 session_id=preflight.session_id,
@@ -187,24 +215,23 @@ class StartPublicConversationTurnUseCase:
             expected_lifecycle_revision=command.expected_lifecycle_revision,
             now=command.now,
         )
-        key_version, fingerprint = self.fingerprinter.fingerprint(
-            organization_id=binding.organization_id,
-            deployment_id=binding.deployment_id,
-            deployment_version=binding.deployment_version,
-            grant_id=grant.id,
-            session_id=session.id,
-            expected_lifecycle_revision=command.expected_lifecycle_revision,
-            mapping_version=binding.mapping_version,
-            memory_policy_version=binding.memory_policy_version,
-            memory_contract_version=binding.memory_contract_version,
-            storage_generation=binding.storage_generation,
-            input_variable=binding.runtime_input_variable,
-            input_text=input_text,
-        )
         existing = self.repository.find_turn_by_request(
             organization_id=binding.organization_id,
             session_id=session.id,
             idempotency_key_hash=command.idempotency_key_hash,
+        )
+        stored_key_version = (
+            existing.request_fingerprint_key_version if existing is not None else None
+        )
+        if existing is not None and stored_key_version is None:
+            raise MemoryAdapterUnavailableError()
+        key_version, fingerprint = self._fingerprint(
+            binding=binding,
+            grant_id=grant.id,
+            session_id=session.id,
+            expected_lifecycle_revision=command.expected_lifecycle_revision,
+            input_text=input_text,
+            key_version=stored_key_version,
         )
         disposition = PublicConversationAdmissionDisposition.LOGICAL_REQUEST
         if existing is not None:
@@ -212,6 +239,14 @@ class StartPublicConversationTurnUseCase:
             if existing.access_grant_id != grant.id:
                 raise AccessGrantNotUsableError()
             disposition = PublicConversationAdmissionDisposition.EXACT_RETRY
+        elif (
+            self.repository.count_completed_turns(
+                organization_id=binding.organization_id,
+                session_id=session.id,
+            )
+            >= MAX_PUBLIC_COMPLETED_TURNS
+        ):
+            raise PublicConversationTurnLimitExceededError()
         return _Preflight(
             binding=binding,
             grant_id=grant.id,
@@ -239,22 +274,6 @@ class StartPublicConversationTurnUseCase:
         )
         if grant.id != preflight.grant_id or session.id != preflight.session_id:
             raise AccessGrantNotUsableError()
-        key_version, fingerprint = self.fingerprinter.fingerprint(
-            organization_id=binding.organization_id,
-            deployment_id=binding.deployment_id,
-            deployment_version=binding.deployment_version,
-            grant_id=grant.id,
-            session_id=session.id,
-            expected_lifecycle_revision=command.expected_lifecycle_revision,
-            mapping_version=binding.mapping_version,
-            memory_policy_version=binding.memory_policy_version,
-            memory_contract_version=binding.memory_contract_version,
-            storage_generation=binding.storage_generation,
-            input_variable=binding.runtime_input_variable,
-            input_text=preflight.input_text,
-        )
-        if key_version != preflight.fingerprint_key_version or fingerprint != preflight.request_fingerprint:
-            raise AccessGrantNotUsableError()
         existing = self.repository.find_turn_by_request(
             organization_id=binding.organization_id,
             session_id=session.id,
@@ -267,6 +286,25 @@ class StartPublicConversationTurnUseCase:
                 turn_id=existing.id,
             )
             if turn is None:
+                raise AccessGrantNotUsableError()
+            if turn.request_fingerprint_key_version is None:
+                raise MemoryAdapterUnavailableError()
+            key_version, fingerprint = self._fingerprint(
+                binding=binding,
+                grant_id=grant.id,
+                session_id=session.id,
+                expected_lifecycle_revision=command.expected_lifecycle_revision,
+                input_text=preflight.input_text,
+                key_version=turn.request_fingerprint_key_version,
+            )
+            if (
+                preflight.disposition
+                is PublicConversationAdmissionDisposition.EXACT_RETRY
+                and (
+                    key_version != preflight.fingerprint_key_version
+                    or fingerprint != preflight.request_fingerprint
+                )
+            ):
                 raise AccessGrantNotUsableError()
             turn.request_identity.ensure_replay_matches(fingerprint)
             if turn.access_grant_id != grant.id:
@@ -300,9 +338,7 @@ class StartPublicConversationTurnUseCase:
                 )
                 self.repository.save_dispatch_job(dispatch)
             if dispatch.status is DispatchStatus.TERMINAL and not turn.terminal:
-                safe_reason = (
-                    dispatch.safe_failure_reason or "memory.dispatch_terminal"
-                )
+                safe_reason = dispatch.safe_failure_reason or "memory.dispatch_terminal"
                 turn.fail(
                     expected_version=turn.version,
                     safe_reason_code=safe_reason,
@@ -330,6 +366,28 @@ class StartPublicConversationTurnUseCase:
                     )
                 ),
             )
+
+        key_version, fingerprint = self._fingerprint(
+            binding=binding,
+            grant_id=grant.id,
+            session_id=session.id,
+            expected_lifecycle_revision=command.expected_lifecycle_revision,
+            input_text=preflight.input_text,
+            key_version=preflight.fingerprint_key_version,
+        )
+        if (
+            key_version != preflight.fingerprint_key_version
+            or fingerprint != preflight.request_fingerprint
+        ):
+            raise AccessGrantNotUsableError()
+        if (
+            self.repository.count_completed_turns(
+                organization_id=binding.organization_id,
+                session_id=session.id,
+            )
+            >= MAX_PUBLIC_COMPLETED_TURNS
+        ):
+            raise PublicConversationTurnLimitExceededError()
 
         turn_id = uuid.uuid4()
         user_entry_id = uuid.uuid4()
@@ -409,6 +467,53 @@ class StartPublicConversationTurnUseCase:
             dispatch_publish_required=True,
         )
 
+    def _fingerprint(
+        self,
+        *,
+        binding: PublicDeploymentBinding,
+        grant_id: uuid.UUID,
+        session_id: uuid.UUID,
+        expected_lifecycle_revision: int,
+        input_text: str,
+        key_version: str | None,
+    ) -> tuple[str, str]:
+        try:
+            return self.fingerprinter.fingerprint(
+                key_version=key_version,
+                organization_id=binding.organization_id,
+                deployment_id=binding.deployment_id,
+                deployment_version=binding.deployment_version,
+                grant_id=grant_id,
+                session_id=session_id,
+                expected_lifecycle_revision=expected_lifecycle_revision,
+                mapping_version=binding.mapping_version,
+                memory_policy_version=binding.memory_policy_version,
+                memory_contract_version=binding.memory_contract_version,
+                storage_generation=binding.storage_generation,
+                input_variable=binding.runtime_input_variable,
+                input_text=input_text,
+            )
+        except (KeyError, ValueError) as exc:
+            raise MemoryAdapterUnavailableError() from exc
+
+    def _require_budget_allows(
+        self,
+        binding: PublicDeploymentBinding,
+        now: datetime,
+    ) -> None:
+        try:
+            decision = self.budget.evaluate(
+                workflow_id=binding.workflow_id,
+                now=now,
+            )
+        except Exception as exc:
+            raise WorkflowBudgetUnavailableError() from exc
+        if decision.status == "allowed":
+            return
+        if decision.status == "blocked":
+            raise WorkflowBudgetBlockedError()
+        raise WorkflowBudgetUnavailableError()
+
     def _binding(self, url_slug: str, *, for_update: bool) -> PublicDeploymentBinding:
         resolver = (
             self.repository.lock_public_deployment
@@ -477,7 +582,9 @@ class StartPublicConversationTurnUseCase:
             raise
 
 
-def _mapped_input(binding: PublicDeploymentBinding, inputs: Mapping[str, object]) -> str:
+def _mapped_input(
+    binding: PublicDeploymentBinding, inputs: Mapping[str, object]
+) -> str:
     variable = binding.runtime_input_variable
     if not isinstance(inputs, Mapping) or not variable or set(inputs) != {variable}:
         raise ValueError("memory.input_mapping_invalid")
@@ -524,7 +631,9 @@ def _scope_digest(*, binding, grant_id, session_id) -> str:
 class GetPublicTurnStatusUseCase:
     """Resolve one grant-bound turn without exposing non-display projections."""
 
-    def __init__(self, *, repository, uow, secrets, content_cipher: MemoryContentCipherPort) -> None:
+    def __init__(
+        self, *, repository, uow, secrets, content_cipher: MemoryContentCipherPort
+    ) -> None:
         self.repository = repository
         self.uow = uow
         self.secrets = secrets
@@ -587,7 +696,11 @@ class GetPublicTurnStatusUseCase:
         if grant is None:
             raise AccessGrantNotUsableError()
         candidate = next(
-            (digest for version, digest in verifiers if version == grant.verifier_key_version),
+            (
+                digest
+                for version, digest in verifiers
+                if version == grant.verifier_key_version
+            ),
             None,
         )
         if candidate is None or not hmac.compare_digest(candidate, grant.verifier_hash):
@@ -604,7 +717,8 @@ class GetPublicTurnStatusUseCase:
         )
         if (
             session is None
-            or session.lifecycle not in {SessionLifecycle.ACTIVE, SessionLifecycle.CLOSED}
+            or session.lifecycle
+            not in {SessionLifecycle.ACTIVE, SessionLifecycle.CLOSED}
             or not _session_matches(session, binding)
         ):
             raise AccessGrantNotUsableError()

@@ -6,6 +6,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Mapping
 
+from apps.memory.domain.errors import WorkflowBudgetBlockedError
 from apps.shared.domain.workflow_execution_identity import InvocationSegment
 from apps.workflow_engine.application.conversation_memory_execution import (
     ConversationExecutionBinding,
@@ -88,9 +89,7 @@ class ConversationMemoryProviderAdapter:
         del deployment_config
         model_id = node_data.get("model_id")
         if not isinstance(model_id, str) or not model_id:
-            raise ConversationProviderExecutionError(
-                "memory.llm_behavior_unsupported"
-            )
+            raise ConversationProviderExecutionError("memory.llm_behavior_unsupported")
         control = NodeExecutionControl(
             execution_id=execution_id,
             invocation_path_prefix=(
@@ -168,9 +167,7 @@ class ConversationMemoryProviderAdapter:
         model_id = node_data.get("model_id")
         parameters = node_data.get("parameters", {})
         if not isinstance(model_id, str) or not isinstance(parameters, Mapping):
-            raise ConversationProviderExecutionError(
-                "memory.llm_behavior_unsupported"
-            )
+            raise ConversationProviderExecutionError("memory.llm_behavior_unsupported")
         lease = self.runtime.resolve(
             ProviderExecutionRequest(
                 plan=state.plan,
@@ -182,9 +179,7 @@ class ConversationMemoryProviderAdapter:
         )
         attribution = lease.finalize_request()
         if attribution is None or attribution.usage_context is None:
-            raise ConversationProviderExecutionError(
-                "provider_usage.binding_mismatch"
-            )
+            raise ConversationProviderExecutionError("provider_usage.binding_mismatch")
         try:
             usage_attempt = self.usage_recorder.begin(
                 ProviderUsageIntent(
@@ -199,15 +194,18 @@ class ConversationMemoryProviderAdapter:
                 raise ProviderInvocationOutcomeUnknownError() from exc
             raise ConversationProviderExecutionError(exc.code) from exc
         if not usage_attempt.durable or not usage_attempt.operation_reference:
-            raise ConversationProviderExecutionError(
-                "provider_usage.binding_mismatch"
-            )
+            raise ConversationProviderExecutionError("provider_usage.binding_mismatch")
         current_attribution = lease.revalidate_current_binding()
         if current_attribution != attribution:
-            raise ConversationProviderExecutionError(
-                "provider_usage.binding_mismatch"
-            )
-        before_provider_start(usage_attempt.operation_reference)
+            raise ConversationProviderExecutionError("provider_usage.binding_mismatch")
+        try:
+            before_provider_start(usage_attempt.operation_reference)
+        except WorkflowBudgetBlockedError:
+            try:
+                usage_attempt.record_definitive_failure(reason_code="budget.exceeded")
+            except ProviderUsageRuntimeError as terminal_error:
+                raise ProviderInvocationOutcomeUnknownError() from terminal_error
+            raise
         try:
             usage_attempt.mark_provider_started()
         except ProviderUsageRuntimeError as exc:
@@ -243,9 +241,7 @@ class ConversationMemoryProviderAdapter:
     def record_success(self, result: ConversationProviderResult) -> None:
         usage_attempt = result.state
         if not hasattr(usage_attempt, "record_success"):
-            raise ConversationProviderExecutionError(
-                "provider_usage.binding_mismatch"
-            )
+            raise ConversationProviderExecutionError("provider_usage.binding_mismatch")
         try:
             latency_value = result.usage.get("latency_ms", 0)
             latency_ms = (
@@ -269,9 +265,7 @@ class ConversationMemoryProviderAdapter:
         organization_id: uuid.UUID | None = None,
     ) -> None:
         if organization_id is None:
-            raise ConversationProviderExecutionError(
-                "provider_usage.binding_mismatch"
-            )
+            raise ConversationProviderExecutionError("provider_usage.binding_mismatch")
         try:
             self.usage_recorder.resume_checkpoint(
                 organization_id=organization_id,

@@ -22,6 +22,9 @@ from apps.workflow_engine.adapters.conversation_memory_runtime import (
 from apps.workflow_engine.adapters.conversation_execution_observer import (
     SqlAlchemyConversationExecutionJournalObserver,
 )
+from apps.workflow_engine.adapters.workflow_budget import (
+    DisposableWorkflowBudgetDecisionAdapter,
+)
 from apps.workflow_engine.application.conversation_memory_execution import (
     ExecuteConversationTurnUseCase,
 )
@@ -40,9 +43,7 @@ _COST_CAP_ENV = "MEMORY_RUNTIME_PROVIDER_COST_CAP_MICROUSD"
 _INT32_MAX = 2_147_483_647
 _INT64_MAX = 9_223_372_036_854_775_807
 CONVERSATION_PROVIDER_MAX_TIMEOUT_SECONDS = 180
-CONVERSATION_EXECUTION_LEASE_SECONDS = (
-    CONVERSATION_PROVIDER_MAX_TIMEOUT_SECONDS + 30
-)
+CONVERSATION_EXECUTION_LEASE_SECONDS = CONVERSATION_PROVIDER_MAX_TIMEOUT_SECONDS + 30
 
 
 class _TiktokenCounter:
@@ -95,9 +96,7 @@ def build_conversation_turn_use_case(
         from apps.shared.db.session import SessionLocal
 
         session_factory = SessionLocal
-    limits = provider_limits or conversation_provider_limits_from_environment(
-        values
-    )
+    limits = provider_limits or conversation_provider_limits_from_environment(values)
     runtime_clock = clock or (lambda: datetime.now(timezone.utc))
     cipher = content_cipher or FernetMemoryContentCipher.from_environment(values)
     counter = token_counter or _TiktokenCounter()
@@ -125,6 +124,9 @@ def build_conversation_turn_use_case(
             usage_recorder=recorder,
             limits=limits,
         ),
+        budget=DisposableWorkflowBudgetDecisionAdapter(
+            session_factory=session_factory,
+        ),
         observer=SqlAlchemyConversationExecutionJournalObserver(
             session_factory=session_factory,
         ),
@@ -133,9 +135,7 @@ def build_conversation_turn_use_case(
             "MEMORY_RUNTIME_MINIMUM_WORKER_CAPABILITY",
             "memory-runtime-v1",
         ),
-        lease_duration=timedelta(
-            seconds=CONVERSATION_EXECUTION_LEASE_SECONDS
-        ),
+        lease_duration=timedelta(seconds=CONVERSATION_EXECUTION_LEASE_SECONDS),
         context_lease_duration=timedelta(seconds=20),
     )
 

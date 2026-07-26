@@ -45,8 +45,10 @@ from apps.memory.application.public_runtime import (
     StartPublicConversationTurnUseCase,
 )
 from apps.memory.domain.errors import PublicConversationFeatureDisabledError
+from apps.gateway.services.workflow_budget_service import WorkflowBudgetDecisionAdapter
 from apps.shared.celery_app import celery_app
 from apps.shared.db.session import SessionLocal
+from apps.shared.domain.conversation_memory_task import CONVERSATION_TURN_TASK_QUEUE
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,6 +83,11 @@ def build_public_conversation_application(
     uow = SqlAlchemyMemoryUnitOfWork(db)
     secrets = HmacPublicSecretIssuer.from_environment(values)
     replay_cipher = FernetSecretReplayCipher.from_environment(values)
+    content_cipher = (
+        FernetMemoryContentCipher.from_environment(values)
+        if public_conversation_runtime_enabled_from_environment(values)
+        else None
+    )
     admission_key = _admission_key(values)
     admission = RedisPublicConversationAdmission(
         redis_client if redis_client is not None else _redis_client(values),
@@ -100,6 +107,7 @@ def build_public_conversation_application(
         "uow": uow,
         "secrets": secrets,
         "replay_cipher": replay_cipher,
+        "content_cipher": content_cipher,
         "audit": audit,
         "policy": policy,
         "admission": admission,
@@ -149,6 +157,7 @@ def build_public_conversation_runtime_application(
             secrets=secrets,
             content_cipher=content_cipher,
             fingerprinter=fingerprinter,
+            budget=WorkflowBudgetDecisionAdapter(db),
             admission=admission,
             dispatch_publisher=CeleryConversationTurnPublisher(
                 celery_app=celery_app,
@@ -188,7 +197,9 @@ def public_conversation_runtime_required(url_slug: str) -> bool:
 def start_public_conversation_turn(command):
     """Construct and execute a public turn in one thread-owned DB session."""
     with SessionLocal() as db:
-        return build_public_conversation_runtime_application(db).start_turn.execute(command)
+        return build_public_conversation_runtime_application(db).start_turn.execute(
+            command
+        )
 
 
 def public_conversation_runtime_enabled_from_environment(
@@ -217,6 +228,12 @@ def validate_public_conversation_runtime_configuration(
     }:
         raise RuntimeError(
             "MEMORY_PUBLIC_RUNTIME_WORKER_READY must be true before activation"
+        )
+    if values.get("MEMORY_PUBLIC_RUNTIME_WORKER_QUEUE", "").strip() != (
+        CONVERSATION_TURN_TASK_QUEUE
+    ):
+        raise RuntimeError(
+            "MEMORY_PUBLIC_RUNTIME_WORKER_QUEUE must name the versioned capable queue"
         )
     secrets = HmacPublicSecretIssuer.from_environment(values)
     replay_cipher = FernetSecretReplayCipher.from_environment(values)

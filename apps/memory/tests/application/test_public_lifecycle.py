@@ -11,7 +11,11 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from cryptography.fernet import Fernet, InvalidToken
 
-from apps.memory.adapters.security import HmacPublicSecretIssuer
+from apps.memory.adapters.security import (
+    FernetMemoryContentCipher,
+    HmacPublicSecretIssuer,
+)
+from apps.memory.application.content import memory_content_aad
 from apps.memory.application.public_lifecycle import (
     ClosePublicConversationUseCase,
     CreatePublicConversationCommand,
@@ -24,11 +28,20 @@ from apps.memory.application.public_lifecycle import (
     LifecycleCommand,
     PublicConversationPolicy,
     PublicDeploymentBinding,
+    PublicTranscriptTurnSource,
     ResetPublicConversationUseCase,
     SecretCiphertext,
     _secret_replay_associated_data_digest,
 )
-from apps.memory.domain.conversation import ConversationPurgeJob, ConversationSession
+from apps.memory.domain.conversation import (
+    ConversationMemoryEntry,
+    ConversationPurgeJob,
+    ConversationSession,
+    ConversationTurn,
+    ProtectedEntryContent,
+    RequestIdentity,
+    TurnStatus,
+)
 from apps.memory.domain.errors import (
     AccessGrantNotUsableError,
     DuplicateRequestConflictError,
@@ -63,6 +76,7 @@ class _Repository:
         ] = {}
         self.replays: dict[uuid.UUID, EncryptedSecretReplay] = {}
         self.purge_jobs: dict[uuid.UUID, ConversationPurgeJob] = {}
+        self.transcript_rows: list[PublicTranscriptTurnSource] = []
 
     def resolve_public_deployment(self, url_slug: str):
         return self.binding if url_slug == "public-chatbot" else None
@@ -151,6 +165,26 @@ class _Repository:
 
     def save_session(self, session: ConversationSession) -> None:
         self.sessions[session.id] = session
+
+    def list_public_transcript_turns(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        session_id: uuid.UUID,
+        after_sequence: int,
+        limit: int,
+    ):
+        rows = sorted(
+            (
+                row
+                for row in self.transcript_rows
+                if row.turn.organization_id == organization_id
+                and row.turn.session_id == session_id
+                and row.turn.sequence > after_sequence
+            ),
+            key=lambda row: (row.turn.sequence, row.turn.id),
+        )
+        return tuple(rows[:limit])
 
     def add_access_grant(self, grant: ConversationAccessGrant) -> None:
         self.grants[(grant.verifier_key_version, grant.verifier_hash)] = grant
@@ -331,7 +365,7 @@ def _application(*, policy: PublicConversationPolicy | None = None):
     )
 
 
-def _use_case(cls, components, *, admission=None, clock=None):
+def _use_case(cls, components, *, admission=None, clock=None, content_cipher=None):
     repository, uow, secrets_port, cipher, audit, policy = components
     kwargs = dict(
         repository=repository,
@@ -343,6 +377,8 @@ def _use_case(cls, components, *, admission=None, clock=None):
         admission=admission,
         clock=clock or _now,
     )
+    if content_cipher is not None:
+        kwargs["content_cipher"] = content_cipher
     return cls(**kwargs)
 
 
@@ -1348,3 +1384,255 @@ def test_admission_unavailable_rolls_back_pending_create_idempotency_record():
 
     assert repository.sessions == {}
     assert repository.idempotency == {}
+
+
+def _content_cipher() -> FernetMemoryContentCipher:
+    return FernetMemoryContentCipher(
+        Fernet.generate_key(),
+        digest_hmac_key=secrets.token_bytes(32),
+    )
+
+
+def _terminal_transcript_source(
+    *,
+    repository: _Repository,
+    cipher: FernetMemoryContentCipher,
+    sequence: int,
+    status: TurnStatus = TurnStatus.COMPLETED,
+) -> PublicTranscriptTurnSource:
+    session = next(iter(repository.sessions.values()))
+    turn_id = uuid.uuid4()
+    user_entry_id = uuid.uuid4()
+    user_content = ProtectedEntryContent(
+        display=cipher.protect(
+            f"public user {sequence}",
+            associated_data=memory_content_aad(
+                organization_id=session.organization_id,
+                session_id=session.id,
+                turn_id=turn_id,
+                entry_id=user_entry_id,
+                projection="display",
+            ),
+        ),
+        model=cipher.protect(
+            f"raw user {sequence}",
+            associated_data=memory_content_aad(
+                organization_id=session.organization_id,
+                session_id=session.id,
+                turn_id=turn_id,
+                entry_id=user_entry_id,
+                projection="model",
+            ),
+        ),
+    )
+    user_entry = ConversationMemoryEntry.provisional_user(
+        entry_id=user_entry_id,
+        organization_id=session.organization_id,
+        session_id=session.id,
+        turn_id=turn_id,
+        sequence=sequence * 2 - 1,
+        channel="conversation",
+        content=user_content,
+        idempotency_key_hash=f"{sequence:064x}",
+        now=_now(),
+    )
+    user_entry.approve(content_revision=sequence, now=_now())
+    turn = ConversationTurn.start(
+        turn_id=turn_id,
+        organization_id=session.organization_id,
+        session_id=session.id,
+        sequence=sequence,
+        started_lifecycle_revision=session.lifecycle_revision,
+        request_identity=RequestIdentity(
+            idempotency_key_hash=f"{sequence:064x}",
+            request_fingerprint=f"{sequence + 1000:064x}",
+        ),
+        user_entry_id=user_entry_id,
+        dispatch_id=uuid.uuid4(),
+        now=_now(),
+    )
+    if status is not TurnStatus.COMPLETED:
+        turn.fail(
+            expected_version=turn.version,
+            safe_reason_code="memory.safe_terminal_failure",
+            now=_now(),
+        )
+        return PublicTranscriptTurnSource(
+            turn=turn,
+            user_entry=user_entry,
+            assistant_entry=None,
+        )
+    assistant_entry_id = uuid.uuid4()
+    assistant_entry = ConversationMemoryEntry.approved_assistant(
+        entry_id=assistant_entry_id,
+        organization_id=session.organization_id,
+        session_id=session.id,
+        turn_id=turn_id,
+        sequence=sequence * 2,
+        channel="conversation",
+        content=ProtectedEntryContent(
+            display=cipher.protect(
+                f"public assistant {sequence}",
+                associated_data=memory_content_aad(
+                    organization_id=session.organization_id,
+                    session_id=session.id,
+                    turn_id=turn_id,
+                    entry_id=assistant_entry_id,
+                    projection="display",
+                ),
+            ),
+            model=cipher.protect(
+                f"raw assistant {sequence}",
+                associated_data=memory_content_aad(
+                    organization_id=session.organization_id,
+                    session_id=session.id,
+                    turn_id=turn_id,
+                    entry_id=assistant_entry_id,
+                    projection="model",
+                ),
+            ),
+        ),
+        content_revision=sequence,
+        idempotency_key_hash=f"{sequence + 2000:064x}",
+        now=_now(),
+    )
+    turn.mark_queued(expected_version=turn.version, now=_now())
+    turn.mark_running(
+        expected_version=turn.version,
+        execution_id=uuid.uuid4(),
+        attempt_id=uuid.uuid4(),
+        now=_now(),
+    )
+    turn.complete(
+        expected_version=turn.version,
+        assistant_entry_id=assistant_entry_id,
+        now=_now(),
+    )
+    return PublicTranscriptTurnSource(
+        turn=turn,
+        user_entry=user_entry,
+        assistant_entry=assistant_entry,
+    )
+
+
+def test_transcript_projects_only_aad_bound_display_content_and_safe_failures():
+    components = _application()
+    repository = components[0]
+    created = _use_case(CreatePublicConversationUseCase, components).execute(
+        _create_command(suffix="transcript-content")
+    )
+    cipher = _content_cipher()
+    repository.transcript_rows.extend(
+        (
+            _terminal_transcript_source(
+                repository=repository,
+                cipher=cipher,
+                sequence=1,
+            ),
+            _terminal_transcript_source(
+                repository=repository,
+                cipher=cipher,
+                sequence=2,
+                status=TurnStatus.FAILED,
+            ),
+        )
+    )
+    transcript = _use_case(
+        GetPublicTranscriptUseCase,
+        components,
+        content_cipher=cipher,
+    )
+
+    result = transcript.execute(
+        url_slug="public-chatbot",
+        access_token=created.access_token,
+        now=_now(),
+    )
+
+    completed, failed = result.turns
+    assert completed.user_content == "public user 1"
+    assert completed.assistant_content == "public assistant 1"
+    assert completed.safe_failure_reason is None
+    assert failed.state is TurnStatus.FAILED
+    assert failed.user_content is None
+    assert failed.assistant_content is None
+    assert failed.safe_failure_reason == "memory.safe_terminal_failure"
+    assert "raw user" not in repr(result)
+    assert "raw assistant" not in repr(result)
+
+
+def test_transcript_is_stably_paginated_with_an_opaque_cursor():
+    components = _application()
+    repository = components[0]
+    created = _use_case(CreatePublicConversationUseCase, components).execute(
+        _create_command(suffix="transcript-page")
+    )
+    cipher = _content_cipher()
+    repository.transcript_rows.extend(
+        _terminal_transcript_source(
+            repository=repository,
+            cipher=cipher,
+            sequence=sequence,
+            status=TurnStatus.FAILED,
+        )
+        for sequence in range(1, 52)
+    )
+    transcript = _use_case(
+        GetPublicTranscriptUseCase,
+        components,
+        content_cipher=cipher,
+    )
+
+    first = transcript.execute(
+        url_slug="public-chatbot",
+        access_token=created.access_token,
+        now=_now(),
+    )
+    second = transcript.execute(
+        url_slug="public-chatbot",
+        access_token=created.access_token,
+        cursor=first.next_cursor,
+        now=_now(),
+    )
+
+    assert [turn.sequence for turn in first.turns] == list(range(1, 51))
+    assert first.next_cursor is not None
+    assert "50" not in first.next_cursor
+    assert [turn.sequence for turn in second.turns] == [51]
+    assert second.next_cursor is None
+
+
+def test_transcript_fails_closed_when_completed_display_ciphertext_is_tampered():
+    components = _application()
+    repository = components[0]
+    created = _use_case(CreatePublicConversationUseCase, components).execute(
+        _create_command(suffix="transcript-tamper")
+    )
+    cipher = _content_cipher()
+    source = _terminal_transcript_source(
+        repository=repository,
+        cipher=cipher,
+        sequence=1,
+    )
+    assert source.assistant_entry is not None
+    assert source.assistant_entry.content is not None
+    source.assistant_entry.content = replace(
+        source.assistant_entry.content,
+        display=replace(
+            source.assistant_entry.content.display,
+            ciphertext=b"tampered",
+        ),
+    )
+    repository.transcript_rows.append(source)
+    transcript = _use_case(
+        GetPublicTranscriptUseCase,
+        components,
+        content_cipher=cipher,
+    )
+
+    with pytest.raises(MemoryAdapterUnavailableError):
+        transcript.execute(
+            url_slug="public-chatbot",
+            access_token=created.access_token,
+            now=_now(),
+        )

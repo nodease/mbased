@@ -24,7 +24,11 @@ from apps.memory.application.dispatch import (
     RecordTurnDispatchPublishFailureUseCase,
 )
 from apps.memory.domain.conversation import DispatchStatus
-from apps.shared.domain.conversation_memory_task import ConversationTurnTaskEnvelope
+from apps.shared.domain.conversation_memory_task import (
+    CONVERSATION_TURN_TASK_NAME,
+    CONVERSATION_TURN_TASK_QUEUE,
+    ConversationTurnTaskEnvelope,
+)
 from apps.shared.services.workflow_task_publisher import send_workflow_task
 
 
@@ -83,9 +87,10 @@ class CeleryConversationTurnPublisher:
             try:
                 send_workflow_task(
                     self._celery_app,
-                    "workflow.execute_conversation_turn",
+                    CONVERSATION_TURN_TASK_NAME,
                     args=[envelope.to_payload()],
                     task_id=message_id,
+                    queue=CONVERSATION_TURN_TASK_QUEUE,
                     ignore_result=True,
                     retry=False,
                 )

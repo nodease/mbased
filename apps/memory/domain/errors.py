@@ -94,3 +94,15 @@ class PublicConversationRateLimitedError(MemoryDomainError):
     def __init__(self, retry_after_seconds: int = 1) -> None:
         self.retry_after_seconds = max(1, min(3600, int(retry_after_seconds)))
         super().__init__()
+
+
+class PublicConversationTurnLimitExceededError(MemoryDomainError):
+    code = "memory.turn_limit_exceeded"
+
+
+class WorkflowBudgetBlockedError(MemoryDomainError):
+    code = "budget.exceeded"
+
+
+class WorkflowBudgetUnavailableError(MemoryDomainError):
+    code = "budget.unavailable"

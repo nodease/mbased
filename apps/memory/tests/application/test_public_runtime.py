@@ -26,9 +26,14 @@ from apps.memory.domain.conversation import (
 from apps.memory.domain.errors import (
     AccessGrantNotUsableError,
     DuplicateRequestConflictError,
+    MemoryAdapterUnavailableError,
     PublicConversationFeatureDisabledError,
+    PublicConversationTurnLimitExceededError,
+    WorkflowBudgetBlockedError,
+    WorkflowBudgetUnavailableError,
 )
 from apps.memory.domain.public_access import ConversationAccessGrant
+from apps.shared.domain.workflow_budget import BudgetExecutionDecision
 
 
 def _now() -> datetime:
@@ -97,6 +102,7 @@ class _Repository:
         self.entries = {}
         self.dispatches = {}
         self.now = _now()
+        self.completed_turn_count = 0
 
     def resolve_public_deployment(self, url_slug):
         return self.binding if url_slug == "chatbot" else None
@@ -127,11 +133,13 @@ class _Repository:
                 for turn in self.turns.values()
                 if turn.organization_id == organization_id
                 and turn.session_id == session_id
-                and turn.request_identity.idempotency_key_hash
-                == idempotency_key_hash
+                and turn.request_identity.idempotency_key_hash == idempotency_key_hash
             ),
             None,
         )
+
+    def count_completed_turns(self, *, organization_id, session_id):
+        return self.completed_turn_count
 
     def add_turn(self, turn):
         self.turns[turn.id] = turn
@@ -198,9 +206,38 @@ class _Secrets:
 
 
 class _Fingerprinter:
-    def fingerprint(self, **kwargs):
+    def fingerprint(self, *, key_version=None, **kwargs):
+        if key_version not in {None, "admission-v1"}:
+            raise ValueError("unknown fingerprint key")
         input_text = kwargs["input_text"]
         return "admission-v1", ("a" if input_text == "hello" else "b") * 64
+
+
+class _RotatingFingerprinter:
+    def __init__(self):
+        self.primary = "admission-v1"
+        self.available = {"admission-v1", "admission-v2"}
+
+    def fingerprint(self, *, key_version=None, **kwargs):
+        version = key_version or self.primary
+        if version not in self.available:
+            raise ValueError("unknown fingerprint key")
+        input_text = kwargs["input_text"]
+        marker = "a" if input_text == "hello" else "b"
+        return version, marker * 64
+
+
+class _Budget:
+    def __init__(self, status="allowed", on_evaluate=None):
+        self.status = status
+        self.calls = []
+        self.on_evaluate = on_evaluate
+
+    def evaluate(self, **kwargs):
+        self.calls.append(kwargs)
+        if self.on_evaluate is not None:
+            self.on_evaluate()
+        return BudgetExecutionDecision(status=self.status)
 
 
 class _Cipher:
@@ -280,7 +317,14 @@ def _command(input_text="hello") -> StartPublicConversationTurnCommand:
     )
 
 
-def _use_case(repository, *, publisher=None, max_dispatch_attempts=5):
+def _use_case(
+    repository,
+    *,
+    publisher=None,
+    max_dispatch_attempts=5,
+    fingerprinter=None,
+    budget=None,
+):
     cipher = _Cipher()
     admission = _Admission()
     return (
@@ -289,8 +333,9 @@ def _use_case(repository, *, publisher=None, max_dispatch_attempts=5):
             uow=_Uow(),
             secrets=_Secrets(),
             content_cipher=cipher,
-            fingerprinter=_Fingerprinter(),
+            fingerprinter=fingerprinter or _Fingerprinter(),
             admission=admission,
+            budget=budget or _Budget(),
             dispatch_publisher=publisher,
             minimum_worker_capability="memory-runtime-v1",
             max_dispatch_attempts=max_dispatch_attempts,
@@ -427,7 +472,10 @@ def test_same_key_and_input_replays_turn_without_second_content_write() -> None:
     assert len(repository.turns) == 1
     assert len(repository.dispatches) == 1
     assert len(cipher.values) == 2
-    assert admission.calls[-1]["disposition"] is PublicConversationAdmissionDisposition.EXACT_RETRY
+    assert (
+        admission.calls[-1]["disposition"]
+        is PublicConversationAdmissionDisposition.EXACT_RETRY
+    )
 
 
 def test_exact_retry_republishes_after_initial_publish_failure() -> None:
@@ -599,3 +647,182 @@ def test_invalid_or_expired_grant_is_resource_hidden_without_turn() -> None:
 
     assert repository.turns == {}
     assert admission.calls == []
+
+
+def test_exact_retry_uses_the_stored_fingerprint_key_after_primary_rotation() -> None:
+    repository = _Repository(_binding())
+    fingerprinter = _RotatingFingerprinter()
+    use_case, _cipher, admission = _use_case(
+        repository,
+        fingerprinter=fingerprinter,
+    )
+    first = use_case.execute(_command())
+    fingerprinter.primary = "admission-v2"
+
+    replay = use_case.execute(_command())
+
+    assert replay.replayed is True
+    assert replay.turn_id == first.turn_id
+    assert repository.turns[first.turn_id].request_fingerprint_key_version == (
+        "admission-v1"
+    )
+    assert admission.calls[-1]["disposition"] is (
+        PublicConversationAdmissionDisposition.EXACT_RETRY
+    )
+
+
+def test_rotated_fingerprint_still_rejects_same_key_with_different_input() -> None:
+    repository = _Repository(_binding())
+    fingerprinter = _RotatingFingerprinter()
+    use_case, cipher, admission = _use_case(
+        repository,
+        fingerprinter=fingerprinter,
+    )
+    use_case.execute(_command())
+    fingerprinter.primary = "admission-v2"
+
+    with pytest.raises(DuplicateRequestConflictError):
+        use_case.execute(_command("different"))
+
+    assert len(repository.turns) == 1
+    assert len(cipher.values) == 2
+    assert len(admission.calls) == 1
+
+
+def test_missing_stored_fingerprint_key_fails_closed_before_admission_or_write() -> (
+    None
+):
+    repository = _Repository(_binding())
+    fingerprinter = _RotatingFingerprinter()
+    use_case, cipher, admission = _use_case(
+        repository,
+        fingerprinter=fingerprinter,
+    )
+    first = use_case.execute(_command())
+    fingerprinter.primary = "admission-v2"
+    fingerprinter.available.remove("admission-v1")
+
+    with pytest.raises(MemoryAdapterUnavailableError):
+        use_case.execute(_command())
+
+    assert list(repository.turns) == [first.turn_id]
+    assert len(cipher.values) == 2
+    assert len(admission.calls) == 1
+
+
+@pytest.mark.parametrize("completed_turns", [0, 99])
+def test_public_turn_limit_allows_requests_below_the_completed_turn_cap(
+    completed_turns,
+) -> None:
+    repository = _Repository(_binding())
+    repository.completed_turn_count = completed_turns
+    use_case, _cipher, admission = _use_case(repository)
+
+    result = use_case.execute(_command())
+
+    assert result.turn_state is TurnStatus.PENDING_DISPATCH
+    assert len(admission.calls) == 1
+
+
+def test_101st_completed_public_turn_is_rejected_before_admission_or_write() -> None:
+    repository = _Repository(_binding())
+    repository.completed_turn_count = 100
+    publisher = _Publisher()
+    use_case, cipher, admission = _use_case(repository, publisher=publisher)
+
+    with pytest.raises(PublicConversationTurnLimitExceededError):
+        use_case.execute(_command())
+
+    assert repository.turns == {}
+    assert cipher.values == []
+    assert admission.calls == []
+    assert publisher.calls == []
+
+
+def test_exact_retry_remains_available_at_the_completed_turn_cap() -> None:
+    repository = _Repository(_binding())
+    use_case, cipher, admission = _use_case(repository)
+    first = use_case.execute(_command())
+    repository.completed_turn_count = 100
+
+    replay = use_case.execute(_command())
+
+    assert replay.replayed is True
+    assert replay.turn_id == first.turn_id
+    assert len(cipher.values) == 2
+    assert admission.calls[-1]["disposition"] is (
+        PublicConversationAdmissionDisposition.EXACT_RETRY
+    )
+
+
+@pytest.mark.parametrize(
+    ("budget_status", "expected_error"),
+    [
+        ("blocked", WorkflowBudgetBlockedError),
+        ("unavailable", WorkflowBudgetUnavailableError),
+    ],
+)
+def test_budget_denial_fails_closed_before_admission_dispatch_and_content_write(
+    budget_status,
+    expected_error,
+) -> None:
+    repository = _Repository(_binding())
+    budget = _Budget(budget_status)
+    publisher = _Publisher()
+    use_case, cipher, admission = _use_case(
+        repository,
+        publisher=publisher,
+        budget=budget,
+    )
+
+    with pytest.raises(expected_error):
+        use_case.execute(_command())
+
+    assert budget.calls == [
+        {"workflow_id": repository.binding.workflow_id, "now": _now()}
+    ]
+    assert admission.calls == []
+    assert repository.turns == {}
+    assert cipher.values == []
+    assert publisher.calls == []
+
+
+def test_exact_retry_bypasses_predispatch_budget_gate_to_reconcile_active_turn() -> (
+    None
+):
+    repository = _Repository(_binding())
+    budget = _Budget()
+    use_case, _cipher, admission = _use_case(repository, budget=budget)
+    first = use_case.execute(_command())
+    budget.status = "blocked"
+
+    replay = use_case.execute(_command())
+
+    assert replay.replayed is True
+    assert replay.turn_id == first.turn_id
+    assert len(budget.calls) == 1
+    assert admission.calls[-1]["disposition"] is (
+        PublicConversationAdmissionDisposition.EXACT_RETRY
+    )
+
+
+def test_turn_cap_is_rechecked_under_the_locked_start_transaction():
+    repository = _Repository(_binding())
+    budget = _Budget(
+        on_evaluate=lambda: setattr(repository, "completed_turn_count", 100)
+    )
+    publisher = _Publisher()
+    use_case, cipher, admission = _use_case(
+        repository,
+        budget=budget,
+        publisher=publisher,
+    )
+
+    with pytest.raises(PublicConversationTurnLimitExceededError):
+        use_case.execute(_command())
+
+    assert len(budget.calls) == 1
+    assert len(admission.calls) == 1
+    assert repository.turns == {}
+    assert cipher.values == []
+    assert publisher.calls == []

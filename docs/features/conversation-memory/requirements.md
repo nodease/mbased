@@ -123,11 +123,12 @@ Workflow와 Chatbot의 여러 turn에서 필요한 대화 맥락을 독립 Memor
 - MEM-REQ-057: Memory summary usage는 main node usage와 구분되는 `purpose=memory_summary` 또는 동등한 typed purpose로 귀속해야 한다.
 - MEM-REQ-058: Node Memory read/summary failure policy와 required conversation turn write failure policy를 분리해야 한다.
 - MEM-REQ-059: Summary generation lease는 재획득마다 증가하는 fencing generation을 가지며 current generation과 source revision이 일치하는 owner만 summary를 commit할 수 있어야 한다. Stale owner가 이미 수행한 provider attempt의 actual usage는 summary 채택 여부와 분리해 attempt idempotency key로 정확히 한 번 reconcile해야 한다.
+- MEM-REQ-059A: Public main-generation은 새 logical request의 admission 전에 Workflow 월 예산을 확인하고, usage intent를 만든 뒤 provider 외부 I/O 직전 current 예산을 다시 확인해야 한다. 초과는 provider 미호출 terminal failure로 닫고, 예산 판정 unavailable은 fail-open하지 않으며 retryable 상태로 남겨야 한다. Exact turn retry는 admission 전 예산 검사로 기존 turn 복구를 막지 않지만 provider 직전 검사를 우회할 수 없다.
 
 ### Transcript, Retention And Privacy
 
 - MEM-REQ-060: 사용자 transcript와 모델용 Memory Context를 별도 projection으로 취급해야 한다.
-- MEM-REQ-061: Transcript는 current actor/capability가 볼 수 있는 redacted display entry만 반환해야 한다.
+- MEM-REQ-061: Transcript는 current actor/capability가 볼 수 있는 terminal turn의 approved redacted display entry만 bounded page와 opaque cursor로 반환해야 한다. Public failed/cancelled turn에는 partial user/assistant content를 반환하지 않고 state, timestamp와 bounded safe reason만 허용하며 display ciphertext의 identity/AAD 검증 실패는 raw 또는 model projection fallback 없이 fail-closed해야 한다.
 - MEM-REQ-062: Transcript에 보이는 turn이 current authorization, token budget 또는 summary policy로 Memory Context에서 제외될 수 있음을 UI가 오해 없이 처리해야 한다.
 - MEM-REQ-063: Reset/delete 후 visible transcript와 server session lifecycle이 일치해야 한다.
 - MEM-REQ-064: Redaction을 통과한 Memory content도 잠재적으로 민감한 데이터로 취급하고 최대 크기, encryption-at-rest, backup/export와 operator access policy를 적용해야 한다.

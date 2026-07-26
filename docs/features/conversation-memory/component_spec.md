@@ -437,6 +437,10 @@ Shared privacy boundary는 bounded content에 대해 classification, redacted pr
 기존 Budget adapter가 atomic reservation을 제공하지 않으면 summary strategy는 `window`로 제한한다. Reservation capability를 지원한다고 선언한 adapter만 `window_then_summary` composition에 주입할 수 있다.
 
 Price estimate가 unavailable, invalid 또는 unknown 때문에 zero이면 reservation을 거부하고 `budget.price_unavailable`을 반환한다. Summary provider는 호출하지 않으며 Memory/Budget adapter가 임의 가격 fallback을 만들지 않는다.
+Public main-generation의 월 예산은 두 단계로 강제한다. Gateway는 exact retry가 아닌 새 logical request만 Redis admission과 durable Turn/dispatch write 전에 shared Workflow budget read model로 검사한다. Worker는 durable usage intent 생성 뒤 current admission fence를 확인하고 provider-start marker 및 외부 I/O 직전에 일회용 DB session으로 같은 예산을 다시 검사한다. `blocked`는 usage intent를 `budget.exceeded` definitive failure로 닫고 context/Turn/admission을 terminalize하며 provider를 호출하지 않는다. `unavailable` 또는 adapter 예외는 fail-open하지 않고 provider marker/I/O 없이 retryable 상태를 유지한다. Exact retry는 기존 Turn 복구를 위해 Gateway gate를 반복 소비하지 않지만 Worker gate는 우회하지 않는다.
+
+Completed public Turn 상한은 session당 100개다. Read-only preflight에서 빠르게 거부한 뒤, mutation transaction이 잠근 current Session 안에서 count를 다시 읽어 동시 완료 race의 101번째 Turn을 `session.claim_turn`·dispatch 이전에 차단한다. Exact retry는 count와 무관하게 stored Turn identity를 먼저 복구한다.
+
 
 ### Audit And Outbox
 
@@ -447,6 +451,8 @@ AuditLog canonical action은 `memory.session.created/closed/reset/delete_request
 ### Runtime Worker Composition And Activation
 
 Gateway publisher와 Worker는 exact task name `workflow.execute_conversation_turn`을 공유한다. Worker process는 이 task를 시작 시 import/register하고, production handler는 reference-only envelope을 검증한 뒤 실제 DB-backed Memory/Workflow admission, frozen deployment graph, ProviderExecutionCapability/usage adapter를 조립한다. 이름만 등록된 placeholder 또는 test fake는 worker readiness 근거가 아니다. 각 실제 delivery는 서로 다른 lease owner를 사용하고 active lease의 다른 owner는 mutation 전에 fence한다. Task 예외는 safe code만 가진 최대 3회의 bounded recovery delivery로 처리하고 첫 countdown은 execution lease보다 길게 둔다. Stable execution/provider attempt와 assistant checkpoint가 provider 재호출을 막는다.
+
+Conversation task는 wildcard workflow queue가 아니라 exact `conversation-memory-v1` queue로 route한다. Gateway publisher는 task name과 queue를 모두 명시하고 Celery exact route가 `workflow.*`보다 먼저 적용된다. Docker entrypoint, local dev Worker와 Helm/Compose capable Worker만 `workflow,conversation-memory-v1`을 소비한다. Gateway runtime activation은 `MEMORY_PUBLIC_RUNTIME_WORKER_QUEUE=conversation-memory-v1`가 아니면 worker-ready 값과 무관하게 startup을 거부한다.
 
 V1 provider request timeout 상한은 180초이고 Workflow execution lease는 210초,
 첫 bounded recovery는 211초 뒤 시작한다. Typed permanent provider preparation 실패는
@@ -480,6 +486,8 @@ Main-generation capability의 server-owned 상한은 Worker 환경의 다음 세
 이 값에는 임의 기본값을 두지 않는다. 누락, boolean, 0 이하 또는 정수 형식 오류는 composition 단계에서 provider I/O 전에 fail-closed한다. Client/Access Grant/graph payload는 이 상한을 설정하거나 늘릴 수 없다. 표준 배포는 runtime과 worker-ready를 default-off로 유지하며, 운영자가 승인한 상한, versioned queue/capability worker routing, schema와 dependent readiness를 함께 확인하기 전 `MEMORY_PUBLIC_RUNTIME_WORKER_READY=true`로 전환하지 않는다.
 
 Gateway process는 route serving 전에 public runtime 설정 검증을 실행한다. Runtime이
+Request fingerprint HMAC rotation은 Turn에 저장된 key version을 replay 권위로 사용한다. 새 logical request는 primary key로 서명하고 exact retry는 retained stored key로 다시 계산한다. Stored version이 없거나 keyring에서 제거됐으면 새 primary로 비교하거나 새 Turn을 만들지 않고 adapter-unavailable로 fail-closed한다.
+
 활성화됐는데 lifecycle, worker readiness, content encryption/fingerprint key 또는 key
 분리가 불완전하면 첫 요청까지 오류를 늦추지 않고 startup을 fail-closed한다.
 
@@ -550,7 +558,7 @@ Public session create/run 전에 distributed atomic rate/concurrency limiter를 
 
 ### Transcript
 
-Server `ConversationTranscriptView`를 사용하고 client React state를 source of truth로 간주하지 않는다. Refresh/reset/delete 후 server lifecycle과 visible messages가 일치해야 한다. Transcript에 보이는 turn과 model Memory Context가 다를 수 있음을 safe 상태로 표현한다.
+Server `ConversationTranscriptView`를 사용하고 client React state를 source of truth로 간주하지 않는다. Repository는 organization/session-scoped terminal Turn을 sequence 순서로 최대 51개만 읽고 application은 50개 page와 opaque cursor를 투영한다. Completed Turn은 approved AAD-bound display entry만 decrypt하며 failed/cancelled Turn은 content 없이 safe reason만 표시한다. Refresh/reset/delete 후 server lifecycle과 visible messages가 일치해야 한다. Transcript에 보이는 turn과 model Memory Context가 다를 수 있음을 safe 상태로 표현한다.
 
 ## Observability
 

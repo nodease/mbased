@@ -7,6 +7,8 @@ single Unit of Work, and returns raw capabilities only to its caller.
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import hmac
 import json
@@ -17,13 +19,20 @@ from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Protocol
 
+from apps.memory.application.content import memory_content_aad
 from apps.memory.application.ports import MemoryUnitOfWorkPort
 from apps.memory.domain.conversation import (
     AudienceKind,
+    ConversationMemoryEntry,
     ConversationPurgeJob,
     ConversationSession,
+    ConversationTurn,
+    EntryLifecycle,
+    EntryType,
+    ProtectedContent,
     PurgeStatus,
     SessionLifecycle,
+    TurnStatus,
 )
 from apps.memory.domain.errors import (
     AccessGrantNotUsableError,
@@ -151,6 +160,15 @@ class SecretReplayCipherPort(Protocol):
     ) -> str | None: ...
 
 
+class PublicTranscriptContentCipherPort(Protocol):
+    def reveal(
+        self,
+        protected: ProtectedContent,
+        *,
+        associated_data: str,
+    ) -> str | None: ...
+
+
 class PublicConversationAuditPort(Protocol):
     def record(
         self,
@@ -256,6 +274,15 @@ class PublicConversationRepositoryPort(Protocol):
         self, *, organization_id: uuid.UUID, purge_job_id: uuid.UUID
     ) -> ConversationPurgeJob | None: ...
 
+    def list_public_transcript_turns(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        session_id: uuid.UUID,
+        after_sequence: int,
+        limit: int,
+    ) -> tuple["PublicTranscriptTurnSource", ...]: ...
+
 
 @dataclass(frozen=True, slots=True)
 class CreatePublicConversationCommand:
@@ -308,12 +335,31 @@ class DeletePublicConversationResult:
 
 
 @dataclass(frozen=True, slots=True)
+class PublicTranscriptTurnSource:
+    turn: ConversationTurn
+    user_entry: ConversationMemoryEntry | None
+    assistant_entry: ConversationMemoryEntry | None
+
+
+@dataclass(frozen=True, slots=True)
+class PublicTranscriptTurn:
+    turn_id: uuid.UUID
+    sequence: int
+    state: TurnStatus
+    user_content: str | None
+    assistant_content: str | None
+    created_at: datetime
+    safe_failure_reason: str | None
+
+
+@dataclass(frozen=True, slots=True)
 class PublicTranscriptResult:
     lifecycle: SessionLifecycle
     lifecycle_revision: int
     content_revision: int
     expires_at: datetime
-    turns: tuple[object, ...]
+    turns: tuple[PublicTranscriptTurn, ...]
+    next_cursor: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -333,6 +379,7 @@ class _TransactionalPublicUseCase:
         replay_cipher: SecretReplayCipherPort,
         audit: PublicConversationAuditPort,
         policy: PublicConversationPolicy,
+        content_cipher: PublicTranscriptContentCipherPort | None = None,
         admission: PublicConversationAdmissionPort | None = None,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
@@ -340,6 +387,7 @@ class _TransactionalPublicUseCase:
         self.uow = uow
         self.secrets = secrets
         self.replay_cipher = replay_cipher
+        self.content_cipher = content_cipher
         self.audit = audit
         self.policy = policy
         self.admission = admission
@@ -1323,13 +1371,16 @@ class DeletePublicConversationUseCase(_TransactionalPublicUseCase):
 
 
 class GetPublicTranscriptUseCase(_TransactionalPublicUseCase):
-    """Return the safe empty projection until MBA-318 writes public turns."""
+    """Return a bounded safe display projection of terminal public turns."""
+
+    PAGE_SIZE = 50
 
     def execute(
         self,
         *,
         url_slug: str,
         access_token: str,
+        cursor: str | None = None,
         now: datetime,
     ) -> PublicTranscriptResult:
         def operation() -> PublicTranscriptResult:
@@ -1351,6 +1402,23 @@ class GetPublicTranscriptUseCase(_TransactionalPublicUseCase):
                 SessionLifecycle.CLOSED,
             }:
                 raise AccessGrantNotUsableError()
+            after_sequence = _decode_transcript_cursor(cursor)
+            sources = self.repository.list_public_transcript_turns(
+                organization_id=binding.organization_id,
+                session_id=session.id,
+                after_sequence=after_sequence,
+                limit=self.PAGE_SIZE + 1,
+            )
+            page = sources[: self.PAGE_SIZE]
+            turns = tuple(
+                self._project_turn(binding=binding, session=session, source=source)
+                for source in page
+            )
+            next_cursor = (
+                _encode_transcript_cursor(page[-1].turn.sequence)
+                if len(sources) > self.PAGE_SIZE and page
+                else None
+            )
             return PublicTranscriptResult(
                 lifecycle=session.lifecycle,
                 lifecycle_revision=session.lifecycle_revision,
@@ -1359,10 +1427,101 @@ class GetPublicTranscriptUseCase(_TransactionalPublicUseCase):
                     session=session,
                     grant=grant,
                 ),
-                turns=(),
+                turns=turns,
+                next_cursor=next_cursor,
             )
 
         return self._execute(operation)
+
+    def _project_turn(
+        self,
+        *,
+        binding: PublicDeploymentBinding,
+        session: ConversationSession,
+        source: PublicTranscriptTurnSource,
+    ) -> PublicTranscriptTurn:
+        turn = source.turn
+        if (
+            turn.organization_id != binding.organization_id
+            or turn.session_id != session.id
+            or not turn.terminal
+        ):
+            raise MemoryAdapterUnavailableError()
+        if turn.status in {TurnStatus.FAILED, TurnStatus.CANCELLED}:
+            if turn.safe_failure_reason is None:
+                raise MemoryAdapterUnavailableError()
+            return PublicTranscriptTurn(
+                turn_id=turn.id,
+                sequence=turn.sequence,
+                state=turn.status,
+                user_content=None,
+                assistant_content=None,
+                created_at=turn.created_at,
+                safe_failure_reason=turn.safe_failure_reason,
+            )
+        if turn.status is not TurnStatus.COMPLETED:
+            raise MemoryAdapterUnavailableError()
+        return PublicTranscriptTurn(
+            turn_id=turn.id,
+            sequence=turn.sequence,
+            state=turn.status,
+            user_content=self._display_content(
+                binding=binding,
+                session=session,
+                turn=turn,
+                entry=source.user_entry,
+                expected_entry_id=turn.user_entry_id,
+                expected_type=EntryType.USER_TURN,
+            ),
+            assistant_content=self._display_content(
+                binding=binding,
+                session=session,
+                turn=turn,
+                entry=source.assistant_entry,
+                expected_entry_id=turn.assistant_entry_id,
+                expected_type=EntryType.ASSISTANT_TURN,
+            ),
+            created_at=turn.created_at,
+            safe_failure_reason=None,
+        )
+
+    def _display_content(
+        self,
+        *,
+        binding: PublicDeploymentBinding,
+        session: ConversationSession,
+        turn: ConversationTurn,
+        entry: ConversationMemoryEntry | None,
+        expected_entry_id: uuid.UUID | None,
+        expected_type: EntryType,
+    ) -> str:
+        if (
+            self.content_cipher is None
+            or expected_entry_id is None
+            or entry is None
+            or entry.id != expected_entry_id
+            or entry.organization_id != binding.organization_id
+            or entry.session_id != session.id
+            or entry.turn_id != turn.id
+            or entry.entry_type is not expected_type
+            or entry.lifecycle is not EntryLifecycle.APPROVED
+            or entry.content is None
+            or entry.content.display is None
+        ):
+            raise MemoryAdapterUnavailableError()
+        display = self.content_cipher.reveal(
+            entry.content.display,
+            associated_data=memory_content_aad(
+                organization_id=binding.organization_id,
+                session_id=session.id,
+                turn_id=turn.id,
+                entry_id=entry.id,
+                projection="display",
+            ),
+        )
+        if display is None:
+            raise MemoryAdapterUnavailableError()
+        return display
 
 
 class GetPublicPurgeStatusUseCase(_TransactionalPublicUseCase):
@@ -1649,6 +1808,49 @@ def _close_result_from_snapshot(
     )
 
 
+def _encode_transcript_cursor(after_sequence: int) -> str:
+    if type(after_sequence) is not int or after_sequence < 1:
+        raise MemoryAdapterUnavailableError()
+    payload = json.dumps(
+        {"after": after_sequence, "v": 1},
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("ascii")
+    return base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+
+
+def _decode_transcript_cursor(cursor: str | None) -> int:
+    if cursor is None:
+        return 0
+    if not isinstance(cursor, str) or not 1 <= len(cursor) <= 256:
+        raise AccessGrantNotUsableError()
+    try:
+        padded = cursor + ("=" * (-len(cursor) % 4))
+        decoded = base64.b64decode(
+            padded.encode("ascii"),
+            altchars=b"-_",
+            validate=True,
+        )
+        payload = json.loads(decoded.decode("ascii"))
+    except (
+        binascii.Error,
+        UnicodeDecodeError,
+        UnicodeEncodeError,
+        json.JSONDecodeError,
+        ValueError,
+    ):
+        raise AccessGrantNotUsableError() from None
+    if (
+        not isinstance(payload, dict)
+        or set(payload) != {"after", "v"}
+        or payload.get("v") != 1
+        or type(payload.get("after")) is not int
+        or payload["after"] < 1
+    ):
+        raise AccessGrantNotUsableError()
+    return payload["after"]
+
+
 __all__ = [
     "ClosePublicConversationResult",
     "ClosePublicConversationUseCase",
@@ -1669,6 +1871,9 @@ __all__ = [
     "PublicConversationResult",
     "PublicDeploymentBinding",
     "PublicPurgeStatusResult",
+    "PublicTranscriptResult",
+    "PublicTranscriptTurn",
+    "PublicTranscriptTurnSource",
     "PublicSecretIssuerPort",
     "public_request_fingerprint",
     "ResetPublicConversationUseCase",

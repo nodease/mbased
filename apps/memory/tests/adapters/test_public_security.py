@@ -164,7 +164,9 @@ def test_memory_content_cipher_binds_projection_to_associated_data() -> None:
 
     assert b"private message" not in protected.ciphertext
     assert protected.plaintext_byte_length == len("private message".encode("utf-8"))
-    assert cipher.reveal(protected, associated_data="entry-1:model") == "private message"
+    assert (
+        cipher.reveal(protected, associated_data="entry-1:model") == "private message"
+    )
     assert cipher.reveal(protected, associated_data="entry-2:model") is None
 
 
@@ -180,7 +182,9 @@ def test_memory_content_cipher_rejects_empty_and_oversized_utf8_payloads() -> No
         cipher.protect("가" * 6_000, associated_data="entry:model")
 
 
-def test_memory_content_cipher_fails_closed_for_tampering_or_missing_key_version() -> None:
+def test_memory_content_cipher_fails_closed_for_tampering_or_missing_key_version() -> (
+    None
+):
     cipher = FernetMemoryContentCipher(
         Fernet.generate_key(),
         digest_hmac_key=secrets.token_bytes(32),
@@ -235,3 +239,42 @@ def test_runtime_fingerprint_is_keyed_versioned_and_scope_bound() -> None:
     assert version == "admission-v1"
     assert first != second
     assert "private input" not in first
+
+
+def test_runtime_fingerprint_can_replay_with_a_retained_non_primary_key() -> None:
+    old_key = secrets.token_bytes(32)
+    values = {
+        "organization_id": "org",
+        "deployment_id": "deployment",
+        "deployment_version": 1,
+        "grant_id": "grant",
+        "session_id": "session",
+        "expected_lifecycle_revision": 1,
+        "mapping_version": "conversation-mapping-v1",
+        "memory_policy_version": "memory-policy-v1",
+        "memory_contract_version": "conversation-memory-v1",
+        "storage_generation": 1,
+        "input_variable": "question",
+        "input_text": "private input",
+    }
+    original = HmacMemoryRuntimeFingerprinter(
+        {"admission-v1": old_key},
+        primary_key_version="admission-v1",
+    )
+    rotated = HmacMemoryRuntimeFingerprinter(
+        {"admission-v1": old_key, "admission-v2": secrets.token_bytes(32)},
+        primary_key_version="admission-v2",
+    )
+
+    old_version, old_digest = original.fingerprint(**values)
+    replay_version, replay_digest = rotated.fingerprint(
+        key_version=old_version,
+        **values,
+    )
+    new_version, new_digest = rotated.fingerprint(**values)
+
+    assert (replay_version, replay_digest) == (old_version, old_digest)
+    assert new_version == "admission-v2"
+    assert new_digest != old_digest
+    with pytest.raises(ValueError, match="fingerprint key"):
+        rotated.fingerprint(key_version="admission-retired", **values)

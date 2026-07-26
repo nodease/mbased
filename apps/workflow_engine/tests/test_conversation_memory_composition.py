@@ -4,6 +4,9 @@ from apps.workflow_engine.adapters.conversation_memory_provider import (
     ConversationMemoryProviderAdapter,
     ConversationProviderLimits,
 )
+from apps.workflow_engine.adapters.workflow_budget import (
+    DisposableWorkflowBudgetDecisionAdapter,
+)
 from apps.workflow_engine.adapters.conversation_execution_observer import (
     SqlAlchemyConversationExecutionJournalObserver,
 )
@@ -18,7 +21,9 @@ from apps.workflow_engine.composition.conversation_memory import (
 
 
 class _Cipher:
-    def protect(self, value, *, associated_data):  # pragma: no cover - construction only
+    def protect(
+        self, value, *, associated_data
+    ):  # pragma: no cover - construction only
         raise AssertionError("not invoked while composing")
 
     def reveal(self, protected, *, associated_data):  # pragma: no cover
@@ -38,7 +43,9 @@ class _UsageRecorder:
     pass
 
 
-def test_production_composition_builds_real_memory_admission_and_provider_adapters() -> None:
+def test_production_composition_builds_real_memory_admission_and_provider_adapters() -> (
+    None
+):
     use_case = build_conversation_turn_use_case(
         session_factory=lambda: None,
         content_cipher=_Cipher(),
@@ -65,12 +72,15 @@ def test_production_composition_builds_real_memory_admission_and_provider_adapte
     )
     assert isinstance(use_case.provider, ConversationMemoryProviderAdapter)
     assert isinstance(
+        use_case.budget,
+        DisposableWorkflowBudgetDecisionAdapter,
+    )
+    assert isinstance(
         use_case.observer,
         SqlAlchemyConversationExecutionJournalObserver,
     )
     assert (
-        use_case.lease_duration.total_seconds()
-        == CONVERSATION_EXECUTION_LEASE_SECONDS
+        use_case.lease_duration.total_seconds() == CONVERSATION_EXECUTION_LEASE_SECONDS
     )
     assert (
         use_case.lease_duration.total_seconds()

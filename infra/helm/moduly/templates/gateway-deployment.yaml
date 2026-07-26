@@ -139,6 +139,12 @@ spec:
               key: SECRET_KEY
         - name: MEMORY_PUBLIC_CONVERSATION_ENABLED
           value: {{ .Values.memoryPublicConversation.enabled | quote }}
+        - name: MEMORY_PUBLIC_RUNTIME_ENABLED
+          value: {{ .Values.memoryPublicConversation.runtimeEnabled | quote }}
+        - name: MEMORY_PUBLIC_RUNTIME_WORKER_READY
+          value: {{ .Values.memoryPublicConversation.runtimeWorkerReady | quote }}
+        - name: MEMORY_PUBLIC_RUNTIME_WORKER_QUEUE
+          value: {{ .Values.memoryPublicConversation.runtimeWorkerQueue | quote }}
         - name: MEMORY_PUBLIC_PURGE_WORKER_READY
           value: {{ .Values.memoryPublicConversation.purgeWorkerReady | quote }}
         - name: MEMORY_PUBLIC_REPLAY_BACKUP_ERASURE_MODE

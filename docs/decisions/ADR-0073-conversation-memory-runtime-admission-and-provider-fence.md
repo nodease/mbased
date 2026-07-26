@@ -291,6 +291,89 @@ Memory와 usage ledger의 두 `provider_started` marker가 서로 다른 replay 
   active send authority와 reference-only cleanup authority를 같은 branch에서 혼합하지 않고,
   각 domain commit 직후 crash와 close/revoke/redeploy 조합을 회귀 테스트로 추가한다.
 
+### Fingerprint key rotation과 completed Turn 상한
+
+- Context: idempotency fingerprint의 primary HMAC key가 회전하면 기존 Turn의 exact retry를 새
+  primary로 계산해 false conflict를 만들 수 있었고, completed Turn 100개를 확인하지 않아
+  101번째 요청도 dispatch/provider까지 도달할 수 있었다.
+- Options considered: 모든 retained key로 순차 비교, 기존 Turn을 새 key로 즉시 재서명, stored
+  key version으로 exact replay하고 locked Session에서 turn count를 재검사하는 방식을 검토했다.
+- Final decision: 새 logical request는 primary fingerprint key를 사용하고, existing request는
+  Turn에 저장된 key version 하나로만 재계산한다. Stored version이 누락되거나 retained keyring에
+  없으면 새 primary로 완화하지 않고 fail-closed한다. Completed Turn 100개 상한은 preflight와
+  Session row lock을 가진 mutation transaction에서 모두 검사하며 existing exact retry를 먼저
+  복구한다.
+- Rationale: stored version은 기존 digest를 재현하는 유일한 권위이고 Session lock 안의 두 번째
+  count가 concurrent 101번째 write를 막는다. Exact retry 우선은 상한이 기존 active Turn의
+  recovery를 막지 않게 한다.
+- Affected files: `apps/memory/adapters/security.py`,
+  `apps/memory/application/public_runtime.py`,
+  `apps/memory/adapters/persistence/repository.py`와 관련 Memory/Gateway 테스트.
+- Follow-up review: retained fingerprint key 제거 전 해당 version의 live Turn replay window가
+  끝났는지 운영 절차에서 확인하고, 상한 정책 변경 시 preflight/locked count를 함께 갱신한다.
+
+### Public transcript의 bounded display projection
+
+- Context: transcript use case가 항상 빈 tuple을 반환해 completed 대화도 보이지 않았고, raw
+  entry 조회를 단순 연결하면 model projection, partial failure content 또는 다른 tenant row가
+  노출될 수 있었다.
+- Options considered: 모든 entry를 조회해 API에서 filter, Turn별 N+1 조회, terminal Turn과
+  expected user/assistant entry를 tenant-scoped bounded join으로 읽고 application에서 AAD-bound
+  display projection만 여는 방식을 검토했다.
+- Final decision: repository는 organization/session/terminal status/sequence로 최대 51개를
+  조회하고 application은 최대 50개와 opaque cursor를 반환한다. Completed Turn은 approved
+  user/assistant display ciphertext만 immutable identity와 AAD를 검증해 decrypt한다.
+  Failed/cancelled Turn은 content 없이 state, timestamp와 safe reason만 반환한다.
+- Rationale: bounded query와 display-only decryption이 refresh 기능을 복구하면서 model/raw
+  content, partial provider output와 cross-scope row의 API 유출을 차단한다.
+- Affected files: `apps/memory/application/public_lifecycle.py`,
+  `apps/memory/adapters/persistence/repository.py`,
+  `apps/gateway/api/v1/endpoints/public_conversation.py`와 관련 lifecycle/API 테스트.
+- Follow-up review: authenticated transcript가 public과 다른 failed-user visibility를 요구하면
+  별도 capability와 projection을 승인하고 public serializer를 재사용해 scope를 넓히지 않는다.
+
+### Versioned Conversation queue의 rollout authority
+
+- Context: exact Conversation task가 wildcard `workflow.*`의 일반 queue로 전달되면 rolling
+  deployment 중 capability가 없는 old Worker가 task를 선점할 수 있었다.
+- Options considered: Worker 내부 capability guard만 사용, 전용 Celery app 분리, 공통 app의
+  exact versioned route와 explicit publish queue를 함께 사용하는 방식을 검토했다.
+- Final decision: task name `workflow.execute_conversation_turn`은
+  `conversation-memory-v1` queue로 exact route하고 publisher도 queue를 명시한다. Docker/dev
+  Worker와 Helm/Compose capable deployment만 이 queue를 consume한다. Gateway activation은
+  configured worker queue가 exact 상수와 다르면 startup을 거부한다.
+- Rationale: broker routing이 incompatible Worker의 delivery 자체를 막고 runtime guard는
+  오배달에 대한 최종 방어로 남는다. Task name과 queue 상수를 공유하면 producer/consumer
+  drift를 정적 테스트로 검출할 수 있다.
+- Affected files: `apps/shared/domain/conversation_memory_task.py`,
+  `apps/shared/celery_app.py`, Gateway publisher/composition, Worker task, Docker/dev/Helm/Compose
+  배포 파일과 deployment contract 테스트.
+- Follow-up review: 새 contract version은 기존 queue의 의미를 변경하지 않고 새 versioned
+  queue/capability를 추가해 drain과 rollback이 가능한 rollout을 유지한다.
+
+### Pre-provider 실패 분류와 Workflow 월 예산의 이중 fence
+
+- Context: current input/context/mapping의 영구 오류도 RUNNING Turn과 leased admission을 남겨
+  poison retry가 반복됐고, public Conversation 경로는 Workflow 월 예산을 pre-dispatch와
+  provider 직전 모두 우회했다.
+- Options considered: 모든 pre-provider 오류 terminal 처리, 모두 retryable 처리, typed
+  deterministic 오류만 terminalize하고 예산을 Gateway/Worker 두 경계에서 재검사하는 방식을
+  검토했다.
+- Final decision: current input unavailable, context unavailable/conflict, invalid mapping과 typed
+  provider preparation failure는 current fence 아래 context attempt(있을 때), Memory Turn과
+  Workflow admission을 같은 safe reason으로 failed 처리한다. Adapter/storage/budget unavailable은
+  terminalize하지 않고 retryable하게 남긴다. Gateway는 새 logical request만 admission/write 전
+  shared budget decision을 검사하고, Worker는 durable usage intent 뒤 provider marker/I/O 직전에
+  일회용 DB session으로 재검사한다. Blocked는 usage intent를 `budget.exceeded` definitive failure로
+  닫고 terminalize하며 unavailable은 fail-closed retry다.
+- Rationale: 오류의 치유 가능성에 따른 분류가 영구 lease와 premature terminalization을 함께
+  방지한다. 두 예산 fence는 queue 대기 중 사용량 변화와 request/Worker TOCTOU를 막고 exact
+  retry가 기존 Turn을 복구할 수 있게 한다.
+- Affected files: Gateway/Worker conversation composition, public runtime, execution orchestration,
+  provider usage adapter, workflow budget adapter 및 관련 Memory/Gateway/Workflow 테스트.
+- Follow-up review: Budget 서비스가 atomic reservation을 제공하면 provider 직전 read decision을
+  reservation/commit 계약으로 승격하되 usage intent와 provider-start no-replay 순서를 유지한다.
+
 ## 결과
 
 - Public conversation의 raw content는 Memory content store와 provider process-local request

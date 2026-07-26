@@ -12,12 +12,20 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any, Callable, Literal, Mapping, Protocol
 
+from apps.memory.domain.errors import (
+    AccessGrantNotUsableError,
+    MemoryContextConflictError,
+    MemoryContextUnavailableError,
+    WorkflowBudgetBlockedError,
+    WorkflowBudgetUnavailableError,
+)
 from apps.shared.domain.conversation_memory_runtime import (
     ConversationMemoryRuntimeContract,
     ConversationMemoryRuntimeContractError,
     validate_conversation_memory_runtime,
 )
 from apps.shared.domain.conversation_memory_task import ConversationTurnTaskEnvelope
+from apps.shared.domain.workflow_budget import BudgetExecutionDecision
 from apps.shared.utils.prompt_injection_guard import (
     PLATFORM_UNTRUSTED_CONTEXT_GUARDRAIL_PROMPT,
 )
@@ -152,7 +160,9 @@ class ExecuteConversationTurnResult:
 
 
 class ConversationMemoryRuntimePort(Protocol):
-    def resolve(self, envelope: ConversationTurnTaskEnvelope) -> ConversationExecutionBinding: ...
+    def resolve(
+        self, envelope: ConversationTurnTaskEnvelope
+    ) -> ConversationExecutionBinding: ...
 
     def resolve_terminal(
         self,
@@ -166,17 +176,29 @@ class ConversationMemoryRuntimePort(Protocol):
         **kwargs,
     ) -> ConversationMemoryTerminalProjection: ...
 
-    def observe_admitted(self, binding: ConversationExecutionBinding, **kwargs) -> ConversationExecutionBinding: ...
+    def observe_admitted(
+        self, binding: ConversationExecutionBinding, **kwargs
+    ) -> ConversationExecutionBinding: ...
 
-    def observe_running(self, binding: ConversationExecutionBinding, **kwargs) -> ConversationExecutionBinding: ...
+    def observe_running(
+        self, binding: ConversationExecutionBinding, **kwargs
+    ) -> ConversationExecutionBinding: ...
 
-    def read_current_input(self, binding: ConversationExecutionBinding, **kwargs) -> str: ...
+    def read_current_input(
+        self, binding: ConversationExecutionBinding, **kwargs
+    ) -> str: ...
 
-    def build_context(self, binding: ConversationExecutionBinding, **kwargs) -> ConversationMemoryContextBuild: ...
+    def build_context(
+        self, binding: ConversationExecutionBinding, **kwargs
+    ) -> ConversationMemoryContextBuild: ...
 
-    def claim_context(self, binding: ConversationExecutionBinding, **kwargs) -> ConversationMemoryContextClaim: ...
+    def claim_context(
+        self, binding: ConversationExecutionBinding, **kwargs
+    ) -> ConversationMemoryContextClaim: ...
 
-    def validate_current(self, binding: ConversationExecutionBinding, **kwargs) -> None: ...
+    def validate_current(
+        self, binding: ConversationExecutionBinding, **kwargs
+    ) -> None: ...
 
     def recover_checkpoint(
         self,
@@ -190,11 +212,17 @@ class ConversationMemoryRuntimePort(Protocol):
         **kwargs,
     ) -> ConversationMemoryTerminalProjection | None: ...
 
-    def mark_provider_started(self, binding: ConversationExecutionBinding, **kwargs) -> int: ...
+    def mark_provider_started(
+        self, binding: ConversationExecutionBinding, **kwargs
+    ) -> int: ...
 
-    def finish_context_attempt(self, binding: ConversationExecutionBinding, **kwargs) -> None: ...
+    def finish_context_attempt(
+        self, binding: ConversationExecutionBinding, **kwargs
+    ) -> None: ...
 
-    def checkpoint(self, binding: ConversationExecutionBinding, **kwargs) -> ConversationMemoryCheckpoint: ...
+    def checkpoint(
+        self, binding: ConversationExecutionBinding, **kwargs
+    ) -> ConversationMemoryCheckpoint: ...
 
     def complete(self, binding: ConversationExecutionBinding, **kwargs) -> None: ...
 
@@ -206,13 +234,26 @@ class ConversationExecutionAdmissionPort(Protocol):
 
     def claim(self, binding: ConversationExecutionBinding, **kwargs): ...
 
-    def require_fence(self, binding: ConversationExecutionBinding, **kwargs) -> None: ...
+    def require_fence(
+        self, binding: ConversationExecutionBinding, **kwargs
+    ) -> None: ...
 
     def finish(self, binding: ConversationExecutionBinding, **kwargs) -> None: ...
 
 
 class ConversationExecutionGraphPort(Protocol):
-    def load(self, binding: ConversationExecutionBinding) -> ConversationExecutionGraph: ...
+    def load(
+        self, binding: ConversationExecutionBinding
+    ) -> ConversationExecutionGraph: ...
+
+
+class ConversationWorkflowBudgetPort(Protocol):
+    def evaluate(
+        self,
+        *,
+        workflow_id: uuid.UUID,
+        now: datetime,
+    ) -> BudgetExecutionDecision: ...
 
 
 class ConversationProviderPort(Protocol):
@@ -259,6 +300,7 @@ class ExecuteConversationTurnUseCase:
         admissions: ConversationExecutionAdmissionPort,
         graphs: ConversationExecutionGraphPort,
         provider: ConversationProviderPort,
+        budget: ConversationWorkflowBudgetPort,
         observer: ConversationObserverPort,
         clock: ClockPort,
         worker_capability: str,
@@ -269,6 +311,7 @@ class ExecuteConversationTurnUseCase:
         self.admissions = admissions
         self.graphs = graphs
         self.provider = provider
+        self.budget = budget
         self.observer = observer
         self.clock = clock
         self.worker_capability = worker_capability
@@ -338,9 +381,7 @@ class ExecuteConversationTurnUseCase:
                         projection = ConversationMemoryTerminalProjection(
                             outcome="outcome_unknown",
                             safe_failure_reason="provider_outcome_unknown",
-                            provider_attempt_id=(
-                                projection.provider_attempt_id
-                            ),
+                            provider_attempt_id=(projection.provider_attempt_id),
                             usage_reference=projection.usage_reference,
                         )
                         context_outcome = "outcome_unknown"
@@ -458,12 +499,25 @@ class ExecuteConversationTurnUseCase:
             claimed.admission_id,
             claimed.execution_id,
         )
-        input_text = self.memory.read_current_input(
-            binding,
-            execution_id=claimed.execution_id,
-            attempt_id=claimed.attempt_id,
-        )
-        llm_data = _llm_data(graph.graph, binding.llm_node_id)
+        try:
+            input_text = self.memory.read_current_input(
+                binding,
+                execution_id=claimed.execution_id,
+                attempt_id=claimed.attempt_id,
+            )
+            llm_data = _llm_data(graph.graph, binding.llm_node_id)
+        except (
+            AccessGrantNotUsableError,
+            MemoryContextConflictError,
+            MemoryContextUnavailableError,
+            ConversationExecutionRuntimeError,
+        ) as exc:
+            return self._fail_before_provider(
+                binding=binding,
+                claimed=claimed,
+                worker_owner=command.worker_owner,
+                safe_reason=_safe_reason_code(exc, "memory.input_unavailable"),
+            )
         try:
             preparation = self.provider.prepare(
                 binding=binding,
@@ -477,70 +531,65 @@ class ExecuteConversationTurnUseCase:
             LLMCredentialNotAvailableError,
             ProviderExecutionConfigurationError,
         ) as exc:
-            safe_reason = _safe_reason_code(exc, "provider_not_sent")
-            self.admissions.require_fence(
+            return self._fail_before_provider(
+                binding=binding,
+                claimed=claimed,
+                worker_owner=command.worker_owner,
+                safe_reason=_safe_reason_code(exc, "provider_not_sent"),
+            )
+        except Exception as exc:
+            if getattr(exc, "code", None) != "memory.llm_behavior_unsupported":
+                raise
+            return self._fail_before_provider(
+                binding=binding,
+                claimed=claimed,
+                worker_owner=command.worker_owner,
+                safe_reason="memory.llm_behavior_unsupported",
+            )
+        context: ConversationMemoryContextClaim | None = None
+        try:
+            context_build = self.memory.build_context(
                 binding,
-                owner=command.worker_owner,
-                lease_generation=claimed.lease_generation,
-                now=self.clock.now(),
+                node_invocation_id=node_invocation_id,
+                capability_reference=preparation.capability_reference,
+                capability_revision=preparation.capability_revision,
+                provider_attempt_id=preparation.provider_attempt_id,
+                expires_at=preparation.expires_at,
             )
-            self.memory.fail(
+            now = self.clock.now()
+            context = self.memory.claim_context(
                 binding,
-                execution_id=claimed.execution_id,
-                attempt_id=claimed.attempt_id,
-                safe_reason_code=safe_reason,
+                plan_id=context_build.plan_id,
+                lease_id=context_build.lease_id,
+                node_invocation_id=node_invocation_id,
+                capability_reference=preparation.capability_reference,
+                capability_revision=preparation.capability_revision,
+                provider_attempt_id=preparation.provider_attempt_id,
+                claim_deadline_at=min(
+                    preparation.expires_at,
+                    now + self.context_lease_duration,
+                ),
             )
-            self.admissions.finish(
-                binding,
-                owner=command.worker_owner,
-                lease_generation=claimed.lease_generation,
-                outcome="failed",
-                result_entry_id=None,
-                result_digest=None,
-                safe_failure_reason=safe_reason,
-                now=self.clock.now(),
+            messages = _messages(
+                llm_data,
+                variable=binding.input_variable,
+                input_text=input_text,
+                history_block=context.history_block,
             )
-            self._observe(
-                "execution_failed",
-                binding,
-                claimed.admission_id,
-                claimed.execution_id,
-                safe_failure_reason=safe_reason,
+        except (
+            AccessGrantNotUsableError,
+            MemoryContextConflictError,
+            MemoryContextUnavailableError,
+            ConversationExecutionRuntimeError,
+        ) as exc:
+            return self._fail_before_provider(
+                binding=binding,
+                claimed=claimed,
+                worker_owner=command.worker_owner,
+                safe_reason=_safe_reason_code(exc, "memory.context_unavailable"),
+                context=context,
             )
-            return ExecuteConversationTurnResult(
-                admission_id=claimed.admission_id,
-                execution_id=claimed.execution_id,
-                turn_id=binding.turn_id,
-                state=ConversationExecutionState.FAILED,
-            )
-        context_build = self.memory.build_context(
-            binding,
-            node_invocation_id=node_invocation_id,
-            capability_reference=preparation.capability_reference,
-            capability_revision=preparation.capability_revision,
-            provider_attempt_id=preparation.provider_attempt_id,
-            expires_at=preparation.expires_at,
-        )
-        now = self.clock.now()
-        context = self.memory.claim_context(
-            binding,
-            plan_id=context_build.plan_id,
-            lease_id=context_build.lease_id,
-            node_invocation_id=node_invocation_id,
-            capability_reference=preparation.capability_reference,
-            capability_revision=preparation.capability_revision,
-            provider_attempt_id=preparation.provider_attempt_id,
-            claim_deadline_at=min(
-                preparation.expires_at,
-                now + self.context_lease_duration,
-            ),
-        )
-        messages = _messages(
-            llm_data,
-            variable=binding.input_variable,
-            input_text=input_text,
-            history_block=context.history_block,
-        )
+        assert context is not None
         context_attempt_version = context.attempt_version
         usage_reference: str | None = None
 
@@ -553,6 +602,7 @@ class ExecuteConversationTurnUseCase:
                 lease_generation=claimed.lease_generation,
                 now=now_at_fence,
             )
+            self._require_budget_allows(binding.workflow_id, now_at_fence)
             self.memory.validate_current(
                 binding,
                 execution_id=claimed.execution_id,
@@ -578,6 +628,17 @@ class ExecuteConversationTurnUseCase:
                 before_provider_start=before_provider_start,
             )
         except ConversationExecutionFenceError:
+            raise
+        except WorkflowBudgetBlockedError as exc:
+            return self._fail_before_provider(
+                binding=binding,
+                claimed=claimed,
+                worker_owner=command.worker_owner,
+                safe_reason=exc.code,
+                context=context,
+                context_attempt_version=context_attempt_version,
+            )
+        except WorkflowBudgetUnavailableError:
             raise
         except ProviderInvocationOutcomeUnknownError:
             self.admissions.require_fence(
@@ -669,9 +730,7 @@ class ExecuteConversationTurnUseCase:
             now=self.clock.now(),
         )
         if usage_reference is None:
-            raise ConversationExecutionRuntimeError(
-                "provider_usage.binding_mismatch"
-            )
+            raise ConversationExecutionRuntimeError("provider_usage.binding_mismatch")
         checkpoint = self.memory.checkpoint(
             binding,
             execution_id=claimed.execution_id,
@@ -697,6 +756,83 @@ class ExecuteConversationTurnUseCase:
             resume_usage=False,
         )
 
+    def _require_budget_allows(
+        self,
+        workflow_id: uuid.UUID,
+        now: datetime,
+    ) -> None:
+        try:
+            decision = self.budget.evaluate(workflow_id=workflow_id, now=now)
+        except WorkflowBudgetBlockedError:
+            raise
+        except WorkflowBudgetUnavailableError:
+            raise
+        except Exception as exc:
+            raise WorkflowBudgetUnavailableError() from exc
+        if decision.status == "allowed":
+            return
+        if decision.status == "blocked":
+            raise WorkflowBudgetBlockedError()
+        raise WorkflowBudgetUnavailableError()
+
+    def _fail_before_provider(
+        self,
+        *,
+        binding: ConversationExecutionBinding,
+        claimed,
+        worker_owner: str,
+        safe_reason: str,
+        context: ConversationMemoryContextClaim | None = None,
+        context_attempt_version: int | None = None,
+    ) -> ExecuteConversationTurnResult:
+        self.admissions.require_fence(
+            binding,
+            owner=worker_owner,
+            lease_generation=claimed.lease_generation,
+            now=self.clock.now(),
+        )
+        if context is not None:
+            self.memory.finish_context_attempt(
+                binding,
+                context_attempt_id=context.attempt_id,
+                expected_version=(
+                    context.attempt_version
+                    if context_attempt_version is None
+                    else context_attempt_version
+                ),
+                outcome="failed",
+                safe_failure_reason=safe_reason,
+            )
+        self.memory.fail(
+            binding,
+            execution_id=claimed.execution_id,
+            attempt_id=claimed.attempt_id,
+            safe_reason_code=safe_reason,
+        )
+        self.admissions.finish(
+            binding,
+            owner=worker_owner,
+            lease_generation=claimed.lease_generation,
+            outcome="failed",
+            result_entry_id=None,
+            result_digest=None,
+            safe_failure_reason=safe_reason,
+            now=self.clock.now(),
+        )
+        self._observe(
+            "execution_failed",
+            binding,
+            claimed.admission_id,
+            claimed.execution_id,
+            safe_failure_reason=safe_reason,
+        )
+        return ExecuteConversationTurnResult(
+            admission_id=claimed.admission_id,
+            execution_id=claimed.execution_id,
+            turn_id=binding.turn_id,
+            state=ConversationExecutionState.FAILED,
+        )
+
     def _return_terminal_admission(
         self,
         binding: ConversationExecutionBinding,
@@ -705,9 +841,7 @@ class ExecuteConversationTurnUseCase:
         terminal_event = {
             ConversationExecutionState.COMPLETED: "execution_completed",
             ConversationExecutionState.FAILED: "execution_failed",
-            ConversationExecutionState.OUTCOME_UNKNOWN: (
-                "execution_outcome_unknown"
-            ),
+            ConversationExecutionState.OUTCOME_UNKNOWN: ("execution_outcome_unknown"),
         }[admitted.state]
         self._observe(
             terminal_event,
@@ -787,9 +921,7 @@ class ExecuteConversationTurnUseCase:
                 "succeeded",
                 "outcome_unknown",
             }:
-                raise ConversationExecutionRuntimeError(
-                    "memory.checkpoint_invalid"
-                )
+                raise ConversationExecutionRuntimeError("memory.checkpoint_invalid")
         self.admissions.require_fence(
             binding,
             owner=worker_owner,
@@ -838,8 +970,7 @@ class ExecuteConversationTurnUseCase:
             or envelope.broker_message_id != binding.broker_message_id
             or envelope.memory_contract_version != binding.memory_contract_version
             or envelope.storage_generation != binding.storage_generation
-            or envelope.minimum_worker_capability
-            != binding.minimum_worker_capability
+            or envelope.minimum_worker_capability != binding.minimum_worker_capability
         ):
             raise ValueError("memory.execution_binding_mismatch")
 
@@ -933,7 +1064,10 @@ def _messages(
     system_prompt = node_data.get("system_prompt") or ""
     user_prompt = node_data.get("user_prompt") or ""
     assistant_prompt = node_data.get("assistant_prompt") or ""
-    if any(not isinstance(value, str) for value in (system_prompt, user_prompt, assistant_prompt)):
+    if any(
+        not isinstance(value, str)
+        for value in (system_prompt, user_prompt, assistant_prompt)
+    ):
         raise ConversationExecutionRuntimeError("memory.llm_behavior_unsupported")
     if _TEMPLATE_VARIABLE.findall(system_prompt) or _TEMPLATE_VARIABLE.findall(
         assistant_prompt
@@ -961,7 +1095,9 @@ def _messages(
 
 def _safe_reason_code(error: Exception, default: str) -> str:
     code = getattr(error, "code", None)
-    if isinstance(code, str) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,63}", code):
+    if isinstance(code, str) and re.fullmatch(
+        r"[A-Za-z0-9][A-Za-z0-9._:-]{0,63}", code
+    ):
         return code
     return default
 

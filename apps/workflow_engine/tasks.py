@@ -50,7 +50,10 @@ from apps.workflow_engine.composition.conversation_memory import (
 from apps.workflow_engine.application.conversation_memory_execution import (
     ExecuteConversationTurnCommand,
 )
-from apps.shared.domain.conversation_memory_task import ConversationTurnTaskEnvelope
+from apps.shared.domain.conversation_memory_task import (
+    CONVERSATION_TURN_TASK_NAME,
+    ConversationTurnTaskEnvelope,
+)
 from apps.workflow_engine.schedule_dispatch_settings import (
     get_schedule_dispatch_settings,
 )
@@ -133,7 +136,7 @@ def _engine_workflow_run_id(engine) -> str | None:
 
 
 @celery_app.task(
-    name="workflow.execute_conversation_turn",
+    name=CONVERSATION_TURN_TASK_NAME,
     bind=True,
     max_retries=3,
     ignore_result=True,
@@ -161,8 +164,7 @@ def execute_conversation_turn(self, payload: Dict[str, Any]):
             not isinstance(code, str)
             or not 1 <= len(code) <= 128
             or any(
-                character
-                not in "abcdefghijklmnopqrstuvwxyz0123456789._-"
+                character not in "abcdefghijklmnopqrstuvwxyz0123456789._-"
                 for character in code
             )
         ):

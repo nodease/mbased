@@ -99,3 +99,42 @@ def test_standard_proxy_paths_preserve_client_network_for_public_admission():
     assert "proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for" in nginx
     assert "validateLoginTrustedProxy" in helm_helpers
     assert "AUTH_LOGIN_TRUSTED_PROXY_CIDRS is required" in helm_helpers
+
+
+def test_conversation_tasks_use_a_versioned_queue_consumed_only_by_capable_workers():
+    celery_source = _read("apps/shared/celery_app.py")
+    task_source = _read("apps/workflow_engine/tasks.py")
+    publisher_source = _read(
+        "apps/gateway/adapters/queue/conversation_turn_publisher.py"
+    )
+    entrypoint = _read("docker/workflow_engine/docker-entrypoint.sh")
+    dev_script = _read("scripts/dev.sh")
+
+    queue = "conversation-memory-v1"
+    assert (
+        'CONVERSATION_TURN_TASK_NAME: {"queue": CONVERSATION_TURN_TASK_QUEUE}'
+        in celery_source
+    )
+    assert "CONVERSATION_TURN_TASK_QUEUE" in publisher_source
+    assert "queue=CONVERSATION_TURN_TASK_QUEUE" in publisher_source
+    assert "CONVERSATION_TURN_TASK_NAME" in task_source
+    assert "name=CONVERSATION_TURN_TASK_NAME" in task_source
+    assert f"--queues=workflow,{queue}" in entrypoint
+    assert f"-Q workflow,{queue}" in dev_script
+    assert "--queues=workflow,default" not in entrypoint
+
+
+def test_standard_deployment_defaults_keep_the_runtime_queue_contract_explicit():
+    compose = _read("docker/docker-compose.yml")
+    values = _read("infra/helm/moduly/values.yaml")
+    production_values = _read("infra/helm/moduly/values-production.yaml")
+    gateway_template = _read("infra/helm/moduly/templates/gateway-deployment.yaml")
+
+    assert "MEMORY_PUBLIC_RUNTIME_WORKER_QUEUE:-conversation-memory-v1" in compose
+    for source in (values, production_values):
+        assert 'runtimeWorkerQueue: "conversation-memory-v1"' in source
+        assert "runtimeEnabled: false" in source
+        assert "runtimeWorkerReady: false" in source
+    assert "MEMORY_PUBLIC_RUNTIME_ENABLED" in gateway_template
+    assert "MEMORY_PUBLIC_RUNTIME_WORKER_READY" in gateway_template
+    assert "MEMORY_PUBLIC_RUNTIME_WORKER_QUEUE" in gateway_template

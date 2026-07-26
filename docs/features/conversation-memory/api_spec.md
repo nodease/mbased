@@ -255,11 +255,11 @@ Turn status는 `pending_dispatch | queued | running | completed | failed | cance
 }
 ```
 
-- Transcript는 bounded page size와 opaque cursor를 사용한다.
+- Transcript는 한 page에 terminal Turn을 최대 50개 반환하고 51번째 존재 여부로 opaque `next_cursor`를 발급한다. Cursor는 version과 마지막 sequence만 담은 base64url opaque 값이며 malformed, oversized, unknown-version 값은 resource-hiding으로 거부한다.
 - MBA-317의 안전한 빈 projection도 같은 response envelope을 사용해 `conversation.state`, lifecycle/content revision, 실제 접근 `expires_at`, 빈 `turns`와 `next_cursor`를 반환한다. 내부 application DTO 이름이나 legacy `status/entries` shape를 공개 계약으로 노출하지 않는다.
 - Raw prompt, Memory summary, Data Dependency, private source identity와 authorization reason을 반환하지 않는다.
-- Public transcript를 지원하면 해당 public session에서 생성된 redacted display turn만 반환한다.
-- Failed/cancelled turn은 state, timestamp와 safe failure reason만 표시한다. Authenticated owner에게 redacted user display entry를 반환할 수 있지만 public transcript에는 failed assistant content와 partial output을 반환하지 않는다.
+- Public transcript는 해당 public session에서 생성된 terminal Turn만 stable sequence 순서로 조회하고 completed Turn의 approved user/assistant `display` projection을 entry/turn/session/organization identity와 AAD까지 검증해 반환한다. Model projection이나 decrypt fallback은 금지한다.
+- Failed/cancelled turn은 state, timestamp와 safe failure reason만 표시한다. Authenticated owner에게 redacted user display entry를 반환할 수 있지만 public transcript에는 failed user/assistant content와 partial output을 반환하지 않는다.
 - Transcript가 보인다는 사실이 같은 turn이 현재 LLM Memory Context에 포함된다는 뜻은 아니다.
 - Closed session은 retention 기간 동안 authenticated owner 또는 transcript-only로 제한된 public grant에 redacted transcript를 반환할 수 있지만 runtime context, turn write와 reset은 차단한다. Privacy delete는 transcript-only grant로도 허용하고 grant를 즉시 revoke한다. Delete-pending/deleted session은 transcript 대신 resource-hiding response를 반환한다.
 
@@ -487,6 +487,9 @@ Application/domain error는 FastAPI `HTTPException`에 의존하지 않는다. I
 | `memory.session_closed` | 409 | Authenticated owner의 closed session runtime read/mutation. Retention transcript는 별도 허용 |
 | `memory.stale_lifecycle_revision` | 409 | Expected lifecycle revision 불일치 |
 | `memory.active_turn_conflict` | 409 | 같은 session에 처리 중인 turn 존재 |
+| `memory.turn_limit_exceeded` | 409 | Public session에 completed Turn 100개가 있어 새 logical Turn을 dispatch/provider 전에 거부 |
+| `budget.exceeded` | 429 | Workflow 월 예산 초과. 새 logical run admission 또는 provider 외부 I/O 전에 차단 |
+| `budget.unavailable` | 503 | 예산 판정이 불명확해 fail-closed. 새 write/provider I/O 없이 retry 가능 |
 | `memory.stale_turn_version` | 409 | Pending turn version 불일치 |
 | `memory.duplicate_request_conflict` | 409 | 같은 request ID에 다른 fingerprint |
 | `memory.secret_replay_expired` | 409 | Secret replay ciphertext 만료. Same key로 새 grant/receipt를 만들지 않음 |

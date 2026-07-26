@@ -51,6 +51,9 @@ scheduleDispatch:
 
 memoryPublicConversation:
   enabled: false
+  runtimeEnabled: false
+  runtimeWorkerReady: false
+  runtimeWorkerQueue: "conversation-memory-v1"
   purgeWorkerReady: false
   replayBackupErasureMode: "unconfirmed"
   capabilityHmacPrimaryVersion: ""

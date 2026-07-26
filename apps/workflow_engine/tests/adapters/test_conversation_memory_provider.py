@@ -4,6 +4,9 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
+import pytest
+
+from apps.memory.domain.errors import WorkflowBudgetBlockedError
 from apps.workflow_engine.adapters.conversation_memory_provider import (
     ConversationMemoryProviderAdapter,
     ConversationProviderLimits,
@@ -109,6 +112,9 @@ class _UsageAttempt:
     def mark_outcome_unknown(self, *, reason_code):
         self.events.append(f"usage_unknown:{reason_code}")
 
+    def record_definitive_failure(self, *, reason_code):
+        self.events.append(f"usage_failed:{reason_code}")
+
 
 class _StartCommitFailingUsageAttempt(_UsageAttempt):
     def mark_provider_started(self):
@@ -168,16 +174,16 @@ def test_usage_start_commit_failure_remains_retryable_without_provider_io() -> N
             },
             preparation=preparation,
             messages=({"role": "user", "content": "question"},),
-            before_provider_start=lambda _reference: events.append(
-                "memory_marker"
-            ),
+            before_provider_start=lambda _reference: events.append("memory_marker"),
         )
 
     assert events[-2:] == ["memory_marker", "usage_start_failed"]
     assert "provider_io" not in events
 
 
-def test_current_capability_binding_is_revalidated_after_intent_before_any_send_marker() -> None:
+def test_current_capability_binding_is_revalidated_after_intent_before_any_send_marker() -> (
+    None
+):
     events = []
     runtime = _Runtime(events)
     adapter = ConversationMemoryProviderAdapter(
@@ -260,9 +266,7 @@ def test_malformed_provider_response_is_immediately_durable_outcome_unknown() ->
             },
             preparation=preparation,
             messages=({"role": "user", "content": "question"},),
-            before_provider_start=lambda _reference: events.append(
-                "memory_marker"
-            ),
+            before_provider_start=lambda _reference: events.append("memory_marker"),
         )
 
     assert events[-1] == "usage_unknown:provider_call_failed"
@@ -301,3 +305,50 @@ def test_reference_terminal_reconciliation_delegates_exact_usage_identity() -> N
             },
         )
     ]
+
+
+def test_budget_block_after_usage_intent_records_definitive_failure_before_send():
+    events = []
+    runtime = _Runtime(events)
+    usage = _UsageRecorder(events)
+    adapter = ConversationMemoryProviderAdapter(
+        runtime=runtime,
+        usage_recorder=usage,
+        limits=ConversationProviderLimits(
+            input_token_cap=2_000,
+            output_token_cap=500,
+            cost_cap_microusd=10_000,
+        ),
+    )
+    binding = _binding()
+    preparation = adapter.prepare(
+        binding=binding,
+        admission_id=uuid.uuid4(),
+        execution_id=uuid.uuid4(),
+        node_invocation_id=uuid.uuid4(),
+        node_data={"model_id": "fixed-model"},
+        deployment_config={},
+    )
+
+    def block_budget(_reference):
+        events.append("budget_blocked")
+        raise WorkflowBudgetBlockedError()
+
+    with pytest.raises(WorkflowBudgetBlockedError):
+        adapter.generate(
+            binding=binding,
+            admission_id=uuid.uuid4(),
+            execution_id=uuid.uuid4(),
+            node_invocation_id=uuid.uuid4(),
+            node_data={
+                "model_id": "fixed-model",
+                "parameters": {"max_tokens": 20},
+            },
+            preparation=preparation,
+            messages=({"role": "user", "content": "question"},),
+            before_provider_start=block_budget,
+        )
+
+    assert events[-2:] == ["budget_blocked", "usage_failed:budget.exceeded"]
+    assert "usage_started" not in events
+    assert "provider_io" not in events

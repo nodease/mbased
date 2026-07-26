@@ -213,7 +213,9 @@ class FernetSecretReplayCipher:
         try:
             return cls(raw_key.encode("ascii"), key_version=key_version)
         except (UnicodeEncodeError, ValueError) as exc:
-            raise RuntimeError("MEMORY_PUBLIC_REPLAY_ENCRYPTION_KEY is invalid") from exc
+            raise RuntimeError(
+                "MEMORY_PUBLIC_REPLAY_ENCRYPTION_KEY is invalid"
+            ) from exc
 
     def encrypt(
         self,
@@ -454,11 +456,21 @@ class HmacMemoryRuntimeFingerprinter:
         except (json.JSONDecodeError, TypeError, ValueError) as exc:
             raise RuntimeError("invalid memory runtime admission keyring") from exc
 
-    def fingerprint(self, **values) -> tuple[str, str]:
+    def fingerprint(
+        self,
+        *,
+        key_version: str | None = None,
+        **values,
+    ) -> tuple[str, str]:
+        selected_version = key_version or self._primary
+        selected_key = self._keys.get(selected_version)
+        if selected_key is None:
+            raise ValueError("memory runtime fingerprint key is unavailable")
         input_text = values.get("input_text")
-        if not isinstance(input_text, str) or not 1 <= len(
-            input_text.encode("utf-8")
-        ) <= MAX_MEMORY_CONTENT_BYTES:
+        if (
+            not isinstance(input_text, str)
+            or not 1 <= len(input_text.encode("utf-8")) <= MAX_MEMORY_CONTENT_BYTES
+        ):
             raise ValueError("memory runtime request is invalid")
         canonical = {
             "organization_id": str(values.get("organization_id")),
@@ -466,9 +478,7 @@ class HmacMemoryRuntimeFingerprinter:
             "deployment_version": values.get("deployment_version"),
             "grant_id": str(values.get("grant_id")),
             "session_id": str(values.get("session_id")),
-            "expected_lifecycle_revision": values.get(
-                "expected_lifecycle_revision"
-            ),
+            "expected_lifecycle_revision": values.get("expected_lifecycle_revision"),
             "mapping_version": values.get("mapping_version"),
             "memory_policy_version": values.get("memory_policy_version"),
             "memory_contract_version": values.get("memory_contract_version"),
@@ -485,21 +495,18 @@ class HmacMemoryRuntimeFingerprinter:
             or canonical["storage_generation"] < 1
         ):
             raise ValueError("memory runtime request is invalid")
-        payload = (
-            b"memory-runtime-admission-v1\x00"
-            + json.dumps(
-                canonical,
-                sort_keys=True,
-                separators=(",", ":"),
-                ensure_ascii=False,
-            ).encode("utf-8")
-        )
+        payload = b"memory-runtime-admission-v1\x00" + json.dumps(
+            canonical,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
         digest = hmac.new(
-            self._keys[self._primary],
+            selected_key,
             payload,
             hashlib.sha256,
         ).hexdigest()
-        return self._primary, digest
+        return selected_version, digest
 
     def configuration_key_materials(self) -> tuple[bytes, ...]:
         return tuple(self._keys.values())

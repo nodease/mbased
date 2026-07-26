@@ -24,7 +24,12 @@ from apps.memory.application.public_lifecycle import (
 )
 from apps.memory.application.public_runtime import StartPublicConversationTurnResult
 from apps.memory.domain.conversation import SessionLifecycle, TurnStatus
-from apps.memory.domain.errors import AccessGrantNotUsableError
+from apps.memory.domain.errors import (
+    AccessGrantNotUsableError,
+    PublicConversationTurnLimitExceededError,
+    WorkflowBudgetBlockedError,
+    WorkflowBudgetUnavailableError,
+)
 
 
 def _key() -> str:
@@ -406,7 +411,9 @@ def test_memory_enabled_public_run_without_conversation_fails_closed(monkeypatch
     app = FastAPI()
     app.include_router(run.router, prefix="/api/v1")
     app.dependency_overrides[get_db] = lambda: object()
-    monkeypatch.setattr(run, "_public_conversation_runtime_required", lambda _slug: True)
+    monkeypatch.setattr(
+        run, "_public_conversation_runtime_required", lambda _slug: True
+    )
 
     async def legacy_run(**_kwargs):
         raise AssertionError("Memory-enabled deployment must not use legacy execution")
@@ -426,7 +433,9 @@ def test_memory_off_public_run_uses_legacy_execution(monkeypatch):
     app = FastAPI()
     app.include_router(run.router, prefix="/api/v1")
     app.dependency_overrides[get_db] = lambda: object()
-    monkeypatch.setattr(run, "_public_conversation_runtime_required", lambda _slug: False)
+    monkeypatch.setattr(
+        run, "_public_conversation_runtime_required", lambda _slug: False
+    )
     calls = []
 
     async def legacy_run(**kwargs):
@@ -534,4 +543,97 @@ def test_public_turn_status_hides_missing_or_invalid_bearer(monkeypatch, authori
             "code": "memory.session_hidden",
             "message": "Conversation not found",
         }
+    }
+
+
+def test_transcript_serializes_typed_turns_and_forwards_the_opaque_cursor(monkeypatch):
+    application = _Application()
+    access_token = f"cag_v1_{secrets.token_urlsafe(32)}"
+
+    class _DetailedTranscript:
+        def __init__(self):
+            self.queries = []
+
+        def execute(self, **query):
+            self.queries.append(query)
+            return SimpleNamespace(
+                lifecycle=SessionLifecycle.CLOSED,
+                lifecycle_revision=2,
+                content_revision=3,
+                expires_at=datetime(2026, 7, 25, tzinfo=timezone.utc),
+                turns=(
+                    SimpleNamespace(
+                        turn_id=uuid.UUID("11111111-1111-1111-1111-111111111111"),
+                        sequence=1,
+                        state=TurnStatus.COMPLETED,
+                        user_content="Approved user question",
+                        assistant_content="Approved redacted answer",
+                        created_at=datetime(2026, 7, 24, tzinfo=timezone.utc),
+                        safe_failure_reason=None,
+                    ),
+                ),
+                next_cursor="opaque-next-page",
+            )
+
+    application.transcript = _DetailedTranscript()
+    response = _client(monkeypatch, application).get(
+        "/run-public/public-chatbot/conversation/transcript?cursor=opaque-current-page",
+        headers={"Authorization": f"Conversation {access_token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "conversation": {
+            "state": "closed",
+            "lifecycle_revision": 2,
+            "content_revision": 3,
+            "expires_at": "2026-07-25T00:00:00+00:00",
+        },
+        "turns": [
+            {
+                "turn_id": "11111111-1111-1111-1111-111111111111",
+                "sequence": 1,
+                "state": "completed",
+                "user": {"content": "Approved user question"},
+                "assistant": {"content": "Approved redacted answer"},
+                "created_at": "2026-07-24T00:00:00+00:00",
+                "safe_failure_reason": None,
+            }
+        ],
+        "next_cursor": "opaque-next-page",
+    }
+    assert application.transcript.queries == [
+        {
+            "url_slug": "public-chatbot",
+            "access_token": access_token,
+            "cursor": "opaque-current-page",
+            "now": application.transcript.queries[0]["now"],
+        }
+    ]
+
+
+@pytest.mark.parametrize(
+    ("error", "status_code", "code"),
+    [
+        (
+            PublicConversationTurnLimitExceededError(),
+            409,
+            "memory.turn_limit_exceeded",
+        ),
+        (WorkflowBudgetBlockedError(), 429, "budget.exceeded"),
+        (WorkflowBudgetUnavailableError(), 503, "budget.unavailable"),
+    ],
+)
+def test_public_runtime_policy_errors_keep_typed_safe_status_codes(
+    error,
+    status_code,
+    code,
+):
+    mapped = public_conversation._map_public_error(error)
+
+    assert mapped.status_code == status_code
+    assert mapped.detail["code"] == code
+    assert mapped.headers == {
+        "Cache-Control": "no-store",
+        "Referrer-Policy": "no-referrer",
     }

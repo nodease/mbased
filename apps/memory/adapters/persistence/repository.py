@@ -31,6 +31,7 @@ from apps.memory.application.public_lifecycle import (
     IdempotencyReservation,
     PublicAppBinding,
     PublicDeploymentBinding,
+    PublicTranscriptTurnSource,
 )
 from apps.memory.domain.conversation import (
     AudienceKind,
@@ -263,8 +264,7 @@ class SqlAlchemyConversationMemoryRepository:
                 and_(
                     ConversationTurnRecord.organization_id
                     == ConversationSessionRecord.organization_id,
-                    ConversationTurnRecord.session_id
-                    == ConversationSessionRecord.id,
+                    ConversationTurnRecord.session_id == ConversationSessionRecord.id,
                 ),
             )
             .join(
@@ -276,8 +276,7 @@ class SqlAlchemyConversationMemoryRepository:
                     == ConversationSessionRecord.id,
                     MemoryTurnDispatchJobRecord.id
                     == ConversationTurnRecord.dispatch_id,
-                    MemoryTurnDispatchJobRecord.turn_id
-                    == ConversationTurnRecord.id,
+                    MemoryTurnDispatchJobRecord.turn_id == ConversationTurnRecord.id,
                 ),
             )
             .join(
@@ -295,8 +294,7 @@ class SqlAlchemyConversationMemoryRepository:
                 App,
                 and_(
                     App.id == ConversationSessionRecord.app_id,
-                    App.organization_id
-                    == ConversationSessionRecord.organization_id,
+                    App.organization_id == ConversationSessionRecord.organization_id,
                 ),
             )
             .join(
@@ -311,15 +309,13 @@ class SqlAlchemyConversationMemoryRepository:
             .join(
                 WorkflowDeployment,
                 and_(
-                    WorkflowDeployment.id
-                    == ConversationSessionRecord.deployment_id,
+                    WorkflowDeployment.id == ConversationSessionRecord.deployment_id,
                     WorkflowDeployment.app_id == App.id,
                     WorkflowDeployment.id == App.active_deployment_id,
                 ),
             )
             .where(
-                ConversationSessionRecord.organization_id
-                == command.organization_id,
+                ConversationSessionRecord.organization_id == command.organization_id,
                 ConversationTurnRecord.id == command.turn_id,
                 ConversationTurnRecord.dispatch_id == command.dispatch_id,
                 MemoryTurnDispatchJobRecord.id == command.dispatch_id,
@@ -367,15 +363,15 @@ class SqlAlchemyConversationMemoryRepository:
                     content_revision=session_record.content_revision,
                 )
             )
-            self._turn_baselines[
-                (turn.organization_id, turn.session_id, turn.id)
-            ] = _TurnBaseline(version=turn_record.version)
-            self._dispatch_baselines[
-                (dispatch.organization_id, dispatch.id)
-            ] = _DispatchBaseline(
-                status=dispatch_record.status,
-                claim_generation=dispatch_record.claim_generation,
-                attempt_count=dispatch_record.attempt_count,
+            self._turn_baselines[(turn.organization_id, turn.session_id, turn.id)] = (
+                _TurnBaseline(version=turn_record.version)
+            )
+            self._dispatch_baselines[(dispatch.organization_id, dispatch.id)] = (
+                _DispatchBaseline(
+                    status=dispatch_record.status,
+                    claim_generation=dispatch_record.claim_generation,
+                    attempt_count=dispatch_record.attempt_count,
+                )
             )
             self._access_grant_baselines[grant.id] = _AccessGrantBaseline(
                 state=grant_record.state,
@@ -412,8 +408,7 @@ class SqlAlchemyConversationMemoryRepository:
                 and_(
                     ConversationTurnRecord.organization_id
                     == ConversationSessionRecord.organization_id,
-                    ConversationTurnRecord.session_id
-                    == ConversationSessionRecord.id,
+                    ConversationTurnRecord.session_id == ConversationSessionRecord.id,
                 ),
             )
             .join(
@@ -425,8 +420,7 @@ class SqlAlchemyConversationMemoryRepository:
                     == ConversationSessionRecord.id,
                     MemoryTurnDispatchJobRecord.id
                     == ConversationTurnRecord.dispatch_id,
-                    MemoryTurnDispatchJobRecord.turn_id
-                    == ConversationTurnRecord.id,
+                    MemoryTurnDispatchJobRecord.turn_id == ConversationTurnRecord.id,
                 ),
             )
             .join(
@@ -444,8 +438,7 @@ class SqlAlchemyConversationMemoryRepository:
                 App,
                 and_(
                     App.id == ConversationSessionRecord.app_id,
-                    App.organization_id
-                    == ConversationSessionRecord.organization_id,
+                    App.organization_id == ConversationSessionRecord.organization_id,
                 ),
             )
             .join(
@@ -460,14 +453,12 @@ class SqlAlchemyConversationMemoryRepository:
             .join(
                 WorkflowDeployment,
                 and_(
-                    WorkflowDeployment.id
-                    == ConversationSessionRecord.deployment_id,
+                    WorkflowDeployment.id == ConversationSessionRecord.deployment_id,
                     WorkflowDeployment.app_id == App.id,
                 ),
             )
             .where(
-                ConversationSessionRecord.organization_id
-                == command.organization_id,
+                ConversationSessionRecord.organization_id == command.organization_id,
                 ConversationTurnRecord.id == command.turn_id,
                 ConversationTurnRecord.dispatch_id == command.dispatch_id,
                 MemoryTurnDispatchJobRecord.id == command.dispatch_id,
@@ -513,15 +504,15 @@ class SqlAlchemyConversationMemoryRepository:
                     content_revision=session_record.content_revision,
                 )
             )
-            self._turn_baselines[
-                (turn.organization_id, turn.session_id, turn.id)
-            ] = _TurnBaseline(version=turn_record.version)
-            self._dispatch_baselines[
-                (dispatch.organization_id, dispatch.id)
-            ] = _DispatchBaseline(
-                status=dispatch_record.status,
-                claim_generation=dispatch_record.claim_generation,
-                attempt_count=dispatch_record.attempt_count,
+            self._turn_baselines[(turn.organization_id, turn.session_id, turn.id)] = (
+                _TurnBaseline(version=turn_record.version)
+            )
+            self._dispatch_baselines[(dispatch.organization_id, dispatch.id)] = (
+                _DispatchBaseline(
+                    status=dispatch_record.status,
+                    claim_generation=dispatch_record.claim_generation,
+                    attempt_count=dispatch_record.attempt_count,
+                )
             )
             self._access_grant_baselines[grant.id] = _AccessGrantBaseline(
                 state=grant_record.state,
@@ -949,6 +940,94 @@ class SqlAlchemyConversationMemoryRepository:
         )
         record = _execute(self._session, statement).scalar_one_or_none()
         return _turn_domain(record) if record is not None else None
+
+    def count_completed_turns(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        session_id: uuid.UUID,
+    ) -> int:
+        statement = select(func.count(ConversationTurnRecord.id)).where(
+            ConversationTurnRecord.organization_id == organization_id,
+            ConversationTurnRecord.session_id == session_id,
+            ConversationTurnRecord.status == TurnStatus.COMPLETED.value,
+        )
+        return int(_execute(self._session, statement).scalar_one())
+
+    def list_public_transcript_turns(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        session_id: uuid.UUID,
+        after_sequence: int,
+        limit: int,
+    ) -> tuple[PublicTranscriptTurnSource, ...]:
+        if after_sequence < 0 or not 1 <= limit <= 101:
+            raise ValueError("public transcript query is invalid")
+        user_entry = aliased(
+            ConversationMemoryEntryRecord,
+            name="public_transcript_user_entry",
+        )
+        assistant_entry = aliased(
+            ConversationMemoryEntryRecord,
+            name="public_transcript_assistant_entry",
+        )
+        statement = (
+            select(ConversationTurnRecord, user_entry, assistant_entry)
+            .select_from(ConversationTurnRecord)
+            .outerjoin(
+                user_entry,
+                and_(
+                    user_entry.organization_id == organization_id,
+                    user_entry.session_id == session_id,
+                    user_entry.id == ConversationTurnRecord.user_entry_id,
+                    user_entry.turn_id == ConversationTurnRecord.id,
+                ),
+            )
+            .outerjoin(
+                assistant_entry,
+                and_(
+                    assistant_entry.organization_id == organization_id,
+                    assistant_entry.session_id == session_id,
+                    assistant_entry.id == ConversationTurnRecord.assistant_entry_id,
+                    assistant_entry.turn_id == ConversationTurnRecord.id,
+                ),
+            )
+            .where(
+                ConversationTurnRecord.organization_id == organization_id,
+                ConversationTurnRecord.session_id == session_id,
+                ConversationTurnRecord.sequence > after_sequence,
+                ConversationTurnRecord.status.in_(
+                    (
+                        TurnStatus.COMPLETED.value,
+                        TurnStatus.FAILED.value,
+                        TurnStatus.CANCELLED.value,
+                    )
+                ),
+            )
+            .order_by(
+                ConversationTurnRecord.sequence.asc(),
+                ConversationTurnRecord.id.asc(),
+            )
+            .limit(limit)
+        )
+        return tuple(
+            PublicTranscriptTurnSource(
+                turn=_turn_domain(turn_record),
+                user_entry=(
+                    _entry_domain(user_record) if user_record is not None else None
+                ),
+                assistant_entry=(
+                    _entry_domain(assistant_record)
+                    if assistant_record is not None
+                    else None
+                ),
+            )
+            for turn_record, user_record, assistant_record in _execute(
+                self._session,
+                statement,
+            ).all()
+        )
 
     def add_turn(self, turn: ConversationTurn) -> None:
         self._session.add(_turn_record(turn))
@@ -2311,10 +2390,7 @@ def _public_deployment_binding(
         or deployment.version < 1
         or (
             require_active
-            and (
-                deployment.id != app.active_deployment_id
-                or not deployment.is_active
-            )
+            and (deployment.id != app.active_deployment_id or not deployment.is_active)
         )
     ):
         return None
@@ -2344,9 +2420,7 @@ def _public_deployment_binding(
     if runtime_contract is not None:
         mapping_version = runtime_contract.mapping_version
         memory_policy_version = runtime_contract.memory_policy_version
-    runtime_current = (
-        deployment.id == app.active_deployment_id and deployment.is_active
-    )
+    runtime_current = deployment.id == app.active_deployment_id and deployment.is_active
     return PublicDeploymentBinding(
         organization_id=workflow.organization_id,
         app_id=app.id,
@@ -2357,10 +2431,7 @@ def _public_deployment_binding(
         memory_policy_version=memory_policy_version,
         memory_contract_version="conversation-memory-v1",
         storage_generation=1,
-        runtime_contract_ready=(
-            runtime_contract is not None
-            and runtime_current
-        ),
+        runtime_contract_ready=(runtime_contract is not None and runtime_current),
         runtime_start_node_id=(
             runtime_contract.start_node_id if runtime_contract else None
         ),

@@ -28,10 +28,13 @@ from apps.memory.domain.errors import (
     MemoryAdapterUnavailableError,
     PublicConversationFeatureDisabledError,
     PublicConversationRateLimitedError,
+    PublicConversationTurnLimitExceededError,
     PurgeReceiptNotUsableError,
     SecretReplayExpiredError,
     SessionNotActiveError,
     StaleLifecycleRevisionError,
+    WorkflowBudgetBlockedError,
+    WorkflowBudgetUnavailableError,
 )
 
 router = APIRouter()
@@ -107,7 +110,9 @@ def _purge_receipt(authorization: str | None) -> str:
     return receipt
 
 
-def _set_public_headers(response: Response, *, lifecycle_revision: int | None = None) -> None:
+def _set_public_headers(
+    response: Response, *, lifecycle_revision: int | None = None
+) -> None:
     response.headers["Cache-Control"] = "no-store"
     response.headers["Referrer-Policy"] = "no-referrer"
     if lifecycle_revision is not None:
@@ -169,6 +174,24 @@ def _map_public_error(error: Exception) -> HTTPException:
                 "Cache-Control": "no-store",
                 "Referrer-Policy": "no-referrer",
             },
+        )
+    if isinstance(error, PublicConversationTurnLimitExceededError):
+        return _safe_error(
+            error.code,
+            "The conversation completed-turn limit was reached.",
+            status_code=status.HTTP_409_CONFLICT,
+        )
+    if isinstance(error, WorkflowBudgetBlockedError):
+        return _safe_error(
+            error.code,
+            "Workflow monthly budget exceeded.",
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+        )
+    if isinstance(error, WorkflowBudgetUnavailableError):
+        return _safe_error(
+            error.code,
+            "Workflow budget evaluation is temporarily unavailable.",
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         )
     if isinstance(error, PublicConversationFeatureDisabledError):
         return _safe_error(
@@ -361,6 +384,7 @@ def get_public_transcript(
     url_slug: str,
     response: Response,
     authorization: Annotated[str | None, Header()] = None,
+    cursor: str | None = None,
     db: Session = Depends(get_db),
 ):
     application = _application(db)
@@ -368,6 +392,7 @@ def get_public_transcript(
         result = application.transcript.execute(
             url_slug=url_slug,
             access_token=_conversation_token(authorization),
+            cursor=cursor,
             now=_now(),
         )
     except Exception as error:
@@ -380,8 +405,27 @@ def get_public_transcript(
             "content_revision": result.content_revision,
             "expires_at": result.expires_at,
         },
-        "turns": list(result.turns),
-        "next_cursor": None,
+        "turns": [
+            {
+                "turn_id": str(turn.turn_id),
+                "sequence": turn.sequence,
+                "state": turn.state.value,
+                "user": (
+                    {"content": turn.user_content}
+                    if turn.user_content is not None
+                    else None
+                ),
+                "assistant": (
+                    {"content": turn.assistant_content}
+                    if turn.assistant_content is not None
+                    else None
+                ),
+                "created_at": turn.created_at,
+                "safe_failure_reason": turn.safe_failure_reason,
+            }
+            for turn in result.turns
+        ],
+        "next_cursor": result.next_cursor,
     }
 
 

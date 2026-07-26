@@ -6,11 +6,19 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from apps.memory.domain.errors import (
+    AccessGrantNotUsableError,
+    MemoryAdapterUnavailableError,
+    MemoryContextConflictError,
+    MemoryContextUnavailableError,
+    WorkflowBudgetUnavailableError,
+)
 from apps.shared.domain.conversation_memory_task import ConversationTurnTaskEnvelope
-from apps.memory.domain.errors import AccessGrantNotUsableError
+from apps.shared.domain.workflow_budget import BudgetExecutionDecision
 from apps.workflow_engine.application.conversation_memory_execution import (
     ConversationExecutionBinding,
     ConversationExecutionGraph,
+    ConversationExecutionRuntimeError,
     ConversationMemoryCheckpoint,
     ConversationMemoryContextBuild,
     ConversationMemoryContextClaim,
@@ -246,6 +254,10 @@ class _Memory:
         self.context_terminal_projection = None
         self.fail_error_once = None
         self.validate_error = None
+        self.read_error = None
+        self.build_error = None
+        self.input_value = "current question"
+        self.claim_error = None
         self.reference_requires_failure = False
         self.reference_requires_acknowledgement = False
         self.finalize_reference_kwargs = None
@@ -262,9 +274,7 @@ class _Memory:
             binding=self.terminal_binding or self.binding,
             projection=self.terminal_projection,
             requires_memory_failure=self.reference_requires_failure,
-            requires_dispatch_acknowledgement=(
-                self.reference_requires_acknowledgement
-            ),
+            requires_dispatch_acknowledgement=(self.reference_requires_acknowledgement),
         )
 
     def finalize_reference_failure(self, binding, **kwargs):
@@ -291,18 +301,24 @@ class _Memory:
 
     def read_current_input(self, binding, **_kwargs):
         self.events.append("read_input")
-        return "current question"
+        if self.read_error is not None:
+            raise self.read_error
+        return self.input_value
 
     def build_context(self, binding, **_kwargs):
         self.events.append("build_context")
+        if self.build_error is not None:
+            raise self.build_error
         return ConversationMemoryContextBuild(uuid.uuid4(), uuid.uuid4())
 
     def claim_context(self, binding, **_kwargs):
         self.events.append("claim_context")
+        if self.claim_error is not None:
+            raise self.claim_error
         return ConversationMemoryContextClaim(
             attempt_id=self.context_attempt_id,
             attempt_version=1,
-            history_block="<UNTRUSTED_CONVERSATION_HISTORY version=\"1\">\n"
+            history_block='<UNTRUSTED_CONVERSATION_HISTORY version="1">\n'
             '{"role":"user","content":"previous"}\n'
             '{"role":"assistant","content":"prior answer"}\n'
             "</UNTRUSTED_CONVERSATION_HISTORY>",
@@ -336,11 +352,9 @@ class _Memory:
     def finish_context_attempt(self, binding, **kwargs):
         self.events.append(f"context_finish:{kwargs['outcome']}")
         if kwargs["outcome"] in {"failed", "outcome_unknown"}:
-            self.context_terminal_projection = (
-                ConversationMemoryTerminalProjection(
-                    outcome=kwargs["outcome"],
-                    safe_failure_reason=kwargs["safe_failure_reason"],
-                )
+            self.context_terminal_projection = ConversationMemoryTerminalProjection(
+                outcome=kwargs["outcome"],
+                safe_failure_reason=kwargs["safe_failure_reason"],
             )
 
     def checkpoint(self, binding, **kwargs):
@@ -471,6 +485,16 @@ class _FailingOnceObserver(_Observer):
         super().record(**kwargs)
 
 
+class _Budget:
+    def __init__(self, status="allowed"):
+        self.status = status
+        self.calls = []
+
+    def evaluate(self, **kwargs):
+        self.calls.append(kwargs)
+        return BudgetExecutionDecision(status=self.status)
+
+
 def _envelope(binding):
     return ConversationTurnTaskEnvelope(
         organization_id=binding.organization_id,
@@ -484,16 +508,25 @@ def _envelope(binding):
     )
 
 
-def _use_case(binding, *, provider=None, observer=None):
+def _use_case(
+    binding,
+    *,
+    provider=None,
+    observer=None,
+    budget=None,
+    graph=None,
+):
     memory = _Memory(binding)
     admission = _Admission(binding)
     provider = provider or _Provider()
+    budget = budget or _Budget()
     return (
         ExecuteConversationTurnUseCase(
             memory=memory,
             admissions=admission,
-            graphs=_GraphStore(binding),
+            graphs=_GraphStore(binding, graph=graph),
             provider=provider,
+            budget=budget,
             observer=observer or _Observer(),
             clock=_Clock(),
             worker_capability="memory-runtime-v1",
@@ -532,9 +565,7 @@ def test_vertical_execution_orders_fences_and_keeps_history_untrusted() -> None:
         "memory_start:usage-operation-1"
     )
     assert memory.events.index("checkpoint") < memory.events.index("complete")
-    assert admission.events.index("fence") < admission.events.index(
-        "finish:completed"
-    )
+    assert admission.events.index("fence") < admission.events.index("finish:completed")
     assert provider.events == [
         "prepare",
         "intent",
@@ -796,7 +827,9 @@ def test_reference_lifecycle_cleanup_preserves_canonical_provider_outcome(
     ]
 
 
-def test_crash_after_terminal_usage_commit_completes_from_checkpoint_without_provider_io() -> None:
+def test_crash_after_terminal_usage_commit_completes_from_checkpoint_without_provider_io() -> (
+    None
+):
     binding = _binding()
     provider = _Provider(success_error=RuntimeError("fault_after_usage_commit"))
     use_case, memory, admission, _provider = _use_case(binding, provider=provider)
@@ -823,7 +856,9 @@ def test_crash_after_terminal_usage_commit_completes_from_checkpoint_without_pro
     assert "complete" in memory.events
 
 
-def test_crash_between_checkpoint_and_usage_terminal_recovers_without_provider_io() -> None:
+def test_crash_between_checkpoint_and_usage_terminal_recovers_without_provider_io() -> (
+    None
+):
     binding = _binding()
     provider = _Provider(
         success_error=RuntimeError("fault_before_usage_terminal"),
@@ -851,7 +886,9 @@ def test_crash_between_checkpoint_and_usage_terminal_recovers_without_provider_i
     assert "complete" in memory.events
 
 
-def test_terminal_context_attempt_checkpoint_completes_without_rewriting_outcome() -> None:
+def test_terminal_context_attempt_checkpoint_completes_without_rewriting_outcome() -> (
+    None
+):
     binding = _binding()
     use_case, memory, _admission, provider = _use_case(binding)
     memory.checkpoint_value = ConversationMemoryCheckpoint(
@@ -1006,7 +1043,9 @@ def test_context_terminal_crash_recovers_only_after_new_owner_claim() -> None:
     assert provider.events.count("intent") == 1
 
 
-def test_active_other_owner_fences_context_terminal_recovery_before_memory_mutation() -> None:
+def test_active_other_owner_fences_context_terminal_recovery_before_memory_mutation() -> (
+    None
+):
     binding = _binding()
     provider = _Provider(error=ProviderInvocationOutcomeUnknownError())
     use_case, memory, admission, _provider = _use_case(
@@ -1057,7 +1096,9 @@ def test_stale_owner_callback_fence_failure_has_zero_memory_mutation() -> None:
     assert admission.state is ConversationExecutionState.LEASED
 
 
-def test_outcome_unknown_requires_current_fence_before_terminal_memory_mutation() -> None:
+def test_outcome_unknown_requires_current_fence_before_terminal_memory_mutation() -> (
+    None
+):
     binding = _binding()
     provider = _Provider(error=ProviderInvocationOutcomeUnknownError())
     use_case, memory, admission, _provider = _use_case(
@@ -1081,7 +1122,9 @@ def test_outcome_unknown_requires_current_fence_before_terminal_memory_mutation(
     assert admission.state is ConversationExecutionState.LEASED
 
 
-def test_current_owner_authorization_failure_terminalizes_without_provider_start() -> None:
+def test_current_owner_authorization_failure_terminalizes_without_provider_start() -> (
+    None
+):
     binding = _binding()
     use_case, memory, admission, provider = _use_case(binding)
     memory.validate_error = AccessGrantNotUsableError()
@@ -1212,3 +1255,154 @@ def test_task_hint_mismatch_fails_before_admission_or_provider_prepare() -> None
     assert memory.events == ["resolve_terminal", "resolve"]
     assert admission.events == []
     assert provider.events == []
+
+
+@pytest.mark.parametrize(
+    ("failure_field", "failure", "safe_reason", "provider_events"),
+    [
+        (
+            "read_error",
+            ConversationExecutionRuntimeError("memory.current_input_unavailable"),
+            "memory.current_input_unavailable",
+            [],
+        ),
+        (
+            "build_error",
+            MemoryContextUnavailableError(),
+            "memory.context_unavailable",
+            ["prepare"],
+        ),
+        (
+            "claim_error",
+            MemoryContextConflictError(),
+            "memory.context_conflict",
+            ["prepare"],
+        ),
+    ],
+)
+def test_deterministic_preprovider_failures_terminalize_turn_and_admission(
+    failure_field,
+    failure,
+    safe_reason,
+    provider_events,
+) -> None:
+    binding = _binding()
+    observer = _Observer()
+    use_case, memory, admission, provider = _use_case(
+        binding,
+        observer=observer,
+    )
+    setattr(memory, failure_field, failure)
+
+    result = use_case.execute(
+        ExecuteConversationTurnCommand(
+            envelope=_envelope(binding),
+            worker_owner="worker-a",
+            delivery_attempt_id=uuid.uuid4(),
+        )
+    )
+
+    assert result.state is ConversationExecutionState.FAILED
+    assert f"fail:{safe_reason}" in memory.events
+    assert admission.events[-1] == "finish:failed"
+    assert provider.events == provider_events
+    assert "provider_io" not in provider.events
+    assert observer.events[-1] == "execution_failed"
+    assert observer.records[-1]["safe_failure_reason"] == safe_reason
+
+
+@pytest.mark.parametrize(
+    ("failure_field", "failure"),
+    [
+        ("build_error", MemoryAdapterUnavailableError()),
+        ("claim_error", RuntimeError("transient context storage outage")),
+    ],
+)
+def test_transient_preprovider_failures_remain_retryable_without_terminalization(
+    failure_field,
+    failure,
+) -> None:
+    binding = _binding()
+    use_case, memory, admission, provider = _use_case(binding)
+    setattr(memory, failure_field, failure)
+
+    with pytest.raises(type(failure)):
+        use_case.execute(
+            ExecuteConversationTurnCommand(
+                envelope=_envelope(binding),
+                worker_owner="worker-a",
+                delivery_attempt_id=uuid.uuid4(),
+            )
+        )
+
+    assert not any(event.startswith("fail:") for event in memory.events)
+    assert not any(event.startswith("finish:") for event in admission.events)
+    assert provider.events == ["prepare"]
+
+
+def test_invalid_port_input_terminalizes_after_context_claim_without_provider_io():
+    binding = _binding()
+    use_case, memory, admission, provider = _use_case(binding)
+    memory.input_value = ""
+
+    result = use_case.execute(
+        ExecuteConversationTurnCommand(
+            envelope=_envelope(binding),
+            worker_owner="worker-a",
+            delivery_attempt_id=uuid.uuid4(),
+        )
+    )
+
+    assert result.state is ConversationExecutionState.FAILED
+    assert "context_finish:failed" in memory.events
+    assert "fail:memory.input_mapping_invalid" in memory.events
+    assert admission.events[-1] == "finish:failed"
+    assert provider.events == ["prepare"]
+
+
+def test_current_budget_block_terminalizes_before_provider_start_and_io():
+    binding = _binding()
+    budget = _Budget("blocked")
+    use_case, memory, admission, provider = _use_case(
+        binding,
+        budget=budget,
+    )
+
+    result = use_case.execute(
+        ExecuteConversationTurnCommand(
+            envelope=_envelope(binding),
+            worker_owner="worker-a",
+            delivery_attempt_id=uuid.uuid4(),
+        )
+    )
+
+    assert result.state is ConversationExecutionState.FAILED
+    assert budget.calls == [{"workflow_id": binding.workflow_id, "now": NOW}]
+    assert provider.events == ["prepare", "intent"]
+    assert "memory_start:usage-operation-1" not in memory.events
+    assert "context_finish:failed" in memory.events
+    assert "fail:budget.exceeded" in memory.events
+    assert admission.events[-1] == "finish:failed"
+
+
+def test_budget_evaluation_unavailable_remains_retryable_and_fails_closed():
+    binding = _binding()
+    budget = _Budget("unavailable")
+    use_case, memory, admission, provider = _use_case(
+        binding,
+        budget=budget,
+    )
+
+    with pytest.raises(WorkflowBudgetUnavailableError):
+        use_case.execute(
+            ExecuteConversationTurnCommand(
+                envelope=_envelope(binding),
+                worker_owner="worker-a",
+                delivery_attempt_id=uuid.uuid4(),
+            )
+        )
+
+    assert provider.events == ["prepare", "intent"]
+    assert "memory_start:usage-operation-1" not in memory.events
+    assert not any(event.startswith("fail:") for event in memory.events)
+    assert not any(event.startswith("finish:") for event in admission.events)

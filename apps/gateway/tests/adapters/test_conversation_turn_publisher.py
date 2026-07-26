@@ -8,6 +8,9 @@ import pytest
 
 from apps.gateway.adapters.queue import conversation_turn_publisher as adapter
 from apps.memory.domain.conversation import DispatchStatus, MemoryTurnDispatchJob
+from apps.shared.domain.conversation_memory_task import (
+    CONVERSATION_TURN_TASK_QUEUE,
+)
 
 
 NOW = datetime(2026, 7, 22, 12, tzinfo=timezone.utc)
@@ -61,7 +64,9 @@ def test_publisher_claims_then_sends_only_the_reference_envelope(monkeypatch) ->
         "SqlAlchemyConversationMemoryRepository",
         lambda _session: object(),
     )
-    monkeypatch.setattr(adapter, "SqlAlchemyMemoryUnitOfWork", lambda _session: object())
+    monkeypatch.setattr(
+        adapter, "SqlAlchemyMemoryUnitOfWork", lambda _session: object()
+    )
     session = _Session()
     celery = _Celery()
     values = {
@@ -94,6 +99,7 @@ def test_publisher_claims_then_sends_only_the_reference_envelope(monkeypatch) ->
         "minimum_worker_capability",
     }
     assert args[0]["claim_generation"] == 2
+    assert options["queue"] == CONVERSATION_TURN_TASK_QUEUE
     assert options["ignore_result"] is True
     assert [event[0] for event in events] == ["claim", "mark"]
     assert session.closed is True
@@ -140,7 +146,9 @@ def test_publisher_releases_its_current_claim_after_send_failure(
         "SqlAlchemyConversationMemoryRepository",
         lambda _session: object(),
     )
-    monkeypatch.setattr(adapter, "SqlAlchemyMemoryUnitOfWork", lambda _session: object())
+    monkeypatch.setattr(
+        adapter, "SqlAlchemyMemoryUnitOfWork", lambda _session: object()
+    )
     session = _Session()
 
     with pytest.raises(RuntimeError, match="workflow.task_publish_failed"):
@@ -280,7 +288,9 @@ def test_publish_failure_is_immediately_claimable_by_the_exact_retry_publisher(
         "SqlAlchemyConversationMemoryRepository",
         lambda _session: repository,
     )
-    monkeypatch.setattr(adapter, "SqlAlchemyMemoryUnitOfWork", lambda _session: _UnitOfWork())
+    monkeypatch.setattr(
+        adapter, "SqlAlchemyMemoryUnitOfWork", lambda _session: _UnitOfWork()
+    )
     values = {
         "organization_id": job.organization_id,
         "session_id": job.session_id,
