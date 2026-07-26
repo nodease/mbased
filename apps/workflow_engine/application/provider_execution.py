@@ -32,6 +32,15 @@ class ProviderInvocationOutcomeUnknownError(RuntimeError):
         super().__init__(self.code)
 
 
+class ProviderStartCommitRetryableError(RuntimeError):
+    """Usage start was not confirmed; retry must reconcile before any send."""
+
+    code = "provider_usage.start_commit_retryable"
+
+    def __init__(self) -> None:
+        super().__init__(self.code)
+
+
 class ProviderInvocationNotSentError(RuntimeError):
     """The provider request definitively did not cross the outbound boundary."""
 
@@ -433,6 +442,7 @@ __all__ = [
     "ProviderInvocationNotSentError",
     "ProviderInvocationOutcomeUnknownError",
     "ProviderInvocationRejectedError",
+    "ProviderStartCommitRetryableError",
     "ProviderExecutionUsageContext",
     "ProviderInvocationLease",
 ]

@@ -215,7 +215,7 @@ Mapped user/final assistant turn write는 conversational surface에서 required�
 }
 ```
 
-Turn status는 `pending_dispatch | queued | running | completed | failed | cancelled`만 노출한다. Pending/failed detail에는 queue name, Worker identity, broker error와 raw exception을 넣지 않는다.
+Turn status는 `pending_dispatch | queued | running | completed | failed | cancelled`만 노출한다. 응답 `ETag`는 authorization으로 확인한 current Session lifecycle revision과 정확히 일치하는 `"lifecycle-revision-{revision}"` 형식이다. Pending/failed detail에는 queue name, Worker identity, broker error와 raw exception을 넣지 않는다.
 
 ```json
 {
@@ -229,7 +229,7 @@ Turn status는 `pending_dispatch | queued | running | completed | failed | cance
 }
 ```
 
-`display`는 completed Turn의 approved assistant display projection이 있을 때만 문자열이고 나머지 상태에서는 `null`이다. `failure_reason`은 failed/cancelled 상태의 bounded safe reason만 허용한다. Model projection, raw prompt/provider response, source identity, context/usage reference와 내부 exception은 반환하지 않는다. Missing, malformed, expired, revoked 또는 다른 deployment/session/turn에 속한 Conversation capability는 모두 동일한 resource-hidden `404`다.
+`display`는 completed Turn의 approved assistant display projection이 있을 때만 문자열이고 나머지 상태에서는 `null`이다. `failure_reason`은 failed/cancelled 상태의 bounded safe reason만 허용한다. Model projection, raw prompt/provider response, source identity, context/usage reference와 내부 exception은 반환하지 않는다. Missing, malformed, expired, revoked 또는 다른 deployment/session/turn에 속한 Conversation capability는 모두 동일한 resource-hidden `404`다. Frozen deployment가 Memory-on이면 root `conversation` envelope 누락 또는 malformed Memory contract를 legacy public run으로 전달하지 않고 provider/Workflow side effect 전에 typed `422`로 거부한다.
 
 ## Transcript Model
 

@@ -385,6 +385,64 @@ class PostgresProviderUsageRecorder:
         finally:
             db.close()
 
+    def reconcile_reference_terminal(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        provider_attempt_id: uuid.UUID,
+        operation_reference: str | None,
+    ) -> str:
+        if operation_reference is None:
+            return "not_started"
+        try:
+            operation_id = uuid.UUID(operation_reference)
+        except (TypeError, ValueError) as exc:
+            raise ProviderUsageRuntimeError(
+                "provider_usage.binding_mismatch"
+            ) from exc
+        db = self._session_factory()
+        try:
+            record = (
+                db.query(ProviderUsageOperationRecord)
+                .filter(
+                    ProviderUsageOperationRecord.id == operation_id,
+                    ProviderUsageOperationRecord.organization_id
+                    == organization_id,
+                    ProviderUsageOperationRecord.provider_attempt_id
+                    == provider_attempt_id,
+                    ProviderUsageOperationRecord.purpose
+                    == ProviderExecutionPurpose.MAIN_GENERATION.value,
+                )
+                .one_or_none()
+            )
+            if record is None:
+                raise ProviderUsageRuntimeError(
+                    "provider_usage.binding_mismatch"
+                )
+            state = ProviderUsageState(record.state)
+            if state is ProviderUsageState.INTENT:
+                return "not_started"
+            if state is ProviderUsageState.PROVIDER_STARTED:
+                try:
+                    self._ledger_service.mark_outcome_unknown(
+                        db,
+                        operation_id=operation_id,
+                        expected_state_version=record.state_version,
+                        reason_code="stale_provider_started",
+                    )
+                except ProviderUsageLedgerError as exc:
+                    raise ProviderUsageRuntimeError(exc.code) from exc
+                return "outcome_unknown"
+            if state is ProviderUsageState.OUTCOME_UNKNOWN:
+                return "outcome_unknown"
+            if state is ProviderUsageState.SUCCEEDED:
+                return "succeeded"
+            if state is ProviderUsageState.FAILED_DEFINITIVE:
+                return "failed"
+            raise ProviderUsageRuntimeError("provider_usage.replay_blocked")
+        finally:
+            db.close()
+
     def record(self, request: ProviderUsageRecord) -> float:
         db = self._session_factory()
         try:

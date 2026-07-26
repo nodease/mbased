@@ -5,6 +5,7 @@ from copy import deepcopy
 import pytest
 from apps.shared.domain.conversation_memory_runtime import (
     ConversationMemoryRuntimeContractError,
+    conversation_memory_runtime_requested,
     validate_conversation_memory_runtime,
 )
 
@@ -111,6 +112,33 @@ def test_valid_initial_public_conversation_contract_is_canonicalized() -> None:
     assert contract.output_variable == "answer"
     assert contract.memory.max_turns == 5
     assert contract.memory.max_context_tokens == 1_200
+
+
+def test_memory_runtime_intent_survives_invalid_contract_validation() -> None:
+    graph = _graph()
+    config = {"conversation_memory": "invalid"}
+
+    assert conversation_memory_runtime_requested(graph, config) is True
+    with pytest.raises(ConversationMemoryRuntimeContractError):
+        validate_conversation_memory_runtime(graph, config)
+
+
+def test_memory_runtime_intent_detects_enabled_graph_without_runtime_config() -> None:
+    assert conversation_memory_runtime_requested(_graph(), {}) is True
+
+    graph = _graph()
+    graph["nodes"][1]["data"]["memory"]["enabled"] = False
+    assert conversation_memory_runtime_requested(graph, {}) is False
+
+
+@pytest.mark.parametrize("enabled", [1, 0, "true", "false", "yes", None])
+def test_memory_runtime_intent_treats_non_literal_boolean_as_malformed_memory_on(
+    enabled,
+) -> None:
+    graph = _graph()
+    graph["nodes"][1]["data"]["memory"]["enabled"] = enabled
+
+    assert conversation_memory_runtime_requested(graph, {}) is True
 
 
 def test_serialized_memory_schema_defaults_remain_runtime_compatible() -> None:

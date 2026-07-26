@@ -28,14 +28,21 @@ from apps.memory.application.context import (
     MarkContextProviderStartedUseCase,
 )
 from apps.memory.application.execution import (
+    ConversationExecutionTerminalProjection,
+    FinalizeReferenceConversationExecutionCommand,
+    FinalizeReferenceConversationExecutionUseCase,
     ObserveConversationExecutionAdmittedCommand,
     ObserveConversationExecutionAdmittedUseCase,
     ObserveConversationExecutionRunningCommand,
     ObserveConversationExecutionRunningUseCase,
     ReadCurrentTurnInputCommand,
     ReadCurrentTurnInputUseCase,
+    RecoverConversationExecutionTerminalCommand,
+    RecoverConversationExecutionTerminalUseCase,
     ResolveConversationExecutionCommand,
     ResolveConversationExecutionUseCase,
+    ResolveTerminalConversationExecutionCommand,
+    ResolveTerminalConversationExecutionUseCase,
     ResolvedConversationExecution,
 )
 from apps.memory.application.lifecycle import (
@@ -73,6 +80,8 @@ from apps.workflow_engine.application.conversation_memory_execution import (
     ConversationMemoryCheckpoint,
     ConversationMemoryContextBuild,
     ConversationMemoryContextClaim,
+    ConversationMemoryTerminalProjection,
+    ConversationMemoryTerminalRecovery,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -148,6 +157,97 @@ class SqlAlchemyConversationMemoryRuntimeAdapter:
             )
         )
         return _workflow_binding(result)
+
+    def resolve_terminal(
+        self,
+        envelope: ConversationTurnTaskEnvelope,
+        **kwargs,
+    ) -> ConversationMemoryTerminalRecovery | None:
+        result = self._execute(
+            lambda repository, uow: ResolveTerminalConversationExecutionUseCase(
+                repository=repository,
+                uow=uow,
+            ).execute(
+                ResolveTerminalConversationExecutionCommand(
+                    organization_id=envelope.organization_id,
+                    dispatch_id=envelope.dispatch_id,
+                    dispatch_claim_generation=envelope.claim_generation,
+                    broker_message_id=envelope.broker_message_id,
+                    turn_id=envelope.turn_id,
+                    memory_contract_version=envelope.memory_contract_version,
+                    storage_generation=envelope.storage_generation,
+                    minimum_worker_capability=(
+                        envelope.minimum_worker_capability
+                    ),
+                    workflow_admission_id=kwargs["admission_id"],
+                    execution_id=kwargs["execution_id"],
+                    attempt_id=kwargs["attempt_id"],
+                )
+            )
+        )
+        if result is None:
+            return None
+        return ConversationMemoryTerminalRecovery(
+            binding=_workflow_binding(result.binding),
+            projection=ConversationMemoryTerminalProjection(
+                outcome=result.projection.outcome,
+                safe_failure_reason=result.projection.safe_failure_reason,
+                result_entry_id=result.projection.result_entry_id,
+                result_digest=result.projection.result_digest,
+                provider_attempt_id=result.projection.provider_attempt_id,
+                usage_reference=result.projection.usage_reference,
+            ),
+            requires_memory_failure=result.requires_memory_failure,
+            requires_dispatch_acknowledgement=(
+                result.requires_dispatch_acknowledgement
+            ),
+        )
+
+    def finalize_reference_failure(
+        self,
+        binding: ConversationExecutionBinding,
+        **kwargs,
+    ) -> ConversationMemoryTerminalProjection:
+        safe_failure_reason = kwargs["safe_failure_reason"]
+        if not isinstance(safe_failure_reason, str):
+            raise ConversationExecutionRuntimeError(
+                "memory.terminal_projection_invalid"
+            )
+        result = self._execute(
+            lambda repository, uow: FinalizeReferenceConversationExecutionUseCase(
+                repository=repository,
+                uow=uow,
+            ).execute(
+                FinalizeReferenceConversationExecutionCommand(
+                    binding=_memory_binding(binding),
+                    workflow_admission_id=kwargs["admission_id"],
+                    execution_id=kwargs["execution_id"],
+                    attempt_id=kwargs["attempt_id"],
+                    safe_failure_reason=safe_failure_reason,
+                    acknowledge_dispatch=kwargs.get(
+                        "acknowledge_dispatch",
+                        False,
+                    ),
+                    provider_attempt_id=kwargs.get("provider_attempt_id"),
+                    context_outcome=kwargs.get(
+                        "context_outcome",
+                        "failed",
+                    ),
+                    execution_outcome=kwargs.get(
+                        "execution_outcome",
+                        "failed",
+                    ),
+                )
+            )
+        )
+        return ConversationMemoryTerminalProjection(
+            outcome=result.outcome,
+            safe_failure_reason=result.safe_failure_reason,
+            result_entry_id=result.result_entry_id,
+            result_digest=result.result_digest,
+            provider_attempt_id=result.provider_attempt_id,
+            usage_reference=result.usage_reference,
+        )
 
     def observe_admitted(
         self,
@@ -438,6 +538,41 @@ class SqlAlchemyConversationMemoryRuntimeAdapter:
             turn_version=result.expected_turn_version,
             state=result.assistant_content,
             context_attempt_outcome=result.context_attempt_outcome,
+        )
+
+    def recover_terminal(
+        self,
+        binding: ConversationExecutionBinding,
+        **kwargs,
+    ) -> ConversationMemoryTerminalProjection | None:
+        result = self._execute(
+            lambda repository, uow: RecoverConversationExecutionTerminalUseCase(
+                repository=repository,
+                uow=uow,
+            ).execute(
+                RecoverConversationExecutionTerminalCommand(
+                    binding=_memory_binding(binding),
+                    workflow_admission_id=kwargs["admission_id"],
+                    execution_id=kwargs["execution_id"],
+                    attempt_id=kwargs["attempt_id"],
+                    node_invocation_id=kwargs["node_invocation_id"],
+                    provider_attempt_id=kwargs["provider_attempt_id"],
+                )
+            )
+        )
+        if result is None:
+            return None
+        if not isinstance(result, ConversationExecutionTerminalProjection):
+            raise ConversationExecutionRuntimeError(
+                "memory.terminal_projection_invalid"
+            )
+        return ConversationMemoryTerminalProjection(
+            outcome=result.outcome,
+            safe_failure_reason=result.safe_failure_reason,
+            result_entry_id=result.result_entry_id,
+            result_digest=result.result_digest,
+            provider_attempt_id=result.provider_attempt_id,
+            usage_reference=result.usage_reference,
         )
 
     def complete(

@@ -13,7 +13,9 @@ from apps.workflow_engine.application.conversation_memory_execution import (
 )
 from apps.workflow_engine.application.provider_execution import (
     ProviderInvocationOutcomeUnknownError,
+    ProviderStartCommitRetryableError,
 )
+from apps.workflow_engine.application.provider_usage import ProviderUsageRuntimeError
 
 
 NOW = datetime(2026, 7, 23, 9, tzinfo=timezone.utc)
@@ -108,6 +110,12 @@ class _UsageAttempt:
         self.events.append(f"usage_unknown:{reason_code}")
 
 
+class _StartCommitFailingUsageAttempt(_UsageAttempt):
+    def mark_provider_started(self):
+        self.events.append("usage_start_failed")
+        raise ProviderUsageRuntimeError("provider_usage.start_commit_failed")
+
+
 class _UsageRecorder:
     def __init__(self, events):
         self.events = events
@@ -116,6 +124,57 @@ class _UsageRecorder:
     def begin(self, _request):
         self.events.append("intent")
         return self.attempt
+
+    def reconcile_reference_terminal(self, **kwargs):
+        self.events.append(("reconcile_reference_terminal", kwargs))
+        return "outcome_unknown"
+
+
+def test_usage_start_commit_failure_remains_retryable_without_provider_io() -> None:
+    events = []
+    runtime = _Runtime(events)
+    usage = _UsageRecorder(events)
+    usage.attempt = _StartCommitFailingUsageAttempt(events)
+    adapter = ConversationMemoryProviderAdapter(
+        runtime=runtime,
+        usage_recorder=usage,
+        limits=ConversationProviderLimits(
+            input_token_cap=2_000,
+            output_token_cap=500,
+            cost_cap_microusd=10_000,
+        ),
+    )
+    binding = _binding()
+    preparation = adapter.prepare(
+        binding=binding,
+        admission_id=uuid.uuid4(),
+        execution_id=uuid.uuid4(),
+        node_invocation_id=uuid.uuid4(),
+        node_data={"model_id": "fixed-model"},
+        deployment_config={},
+    )
+
+    import pytest
+
+    with pytest.raises(ProviderStartCommitRetryableError):
+        adapter.generate(
+            binding=binding,
+            admission_id=uuid.uuid4(),
+            execution_id=uuid.uuid4(),
+            node_invocation_id=uuid.uuid4(),
+            node_data={
+                "model_id": "fixed-model",
+                "parameters": {"max_tokens": 20},
+            },
+            preparation=preparation,
+            messages=({"role": "user", "content": "question"},),
+            before_provider_start=lambda _reference: events.append(
+                "memory_marker"
+            ),
+        )
+
+    assert events[-2:] == ["memory_marker", "usage_start_failed"]
+    assert "provider_io" not in events
 
 
 def test_current_capability_binding_is_revalidated_after_intent_before_any_send_marker() -> None:
@@ -208,3 +267,37 @@ def test_malformed_provider_response_is_immediately_durable_outcome_unknown() ->
 
     assert events[-1] == "usage_unknown:provider_call_failed"
     assert "usage_success" not in events
+
+
+def test_reference_terminal_reconciliation_delegates_exact_usage_identity() -> None:
+    events = []
+    usage = _UsageRecorder(events)
+    adapter = ConversationMemoryProviderAdapter(
+        runtime=_Runtime(events),
+        usage_recorder=usage,
+        limits=ConversationProviderLimits(
+            input_token_cap=2_000,
+            output_token_cap=500,
+            cost_cap_microusd=10_000,
+        ),
+    )
+    organization_id = uuid.uuid4()
+    provider_attempt_id = uuid.uuid4()
+
+    outcome = adapter.reconcile_reference_terminal(
+        organization_id=organization_id,
+        provider_attempt_id=provider_attempt_id,
+        usage_reference="usage-operation-1",
+    )
+
+    assert outcome == "outcome_unknown"
+    assert events == [
+        (
+            "reconcile_reference_terminal",
+            {
+                "organization_id": organization_id,
+                "provider_attempt_id": provider_attempt_id,
+                "operation_reference": "usage-operation-1",
+            },
+        )
+    ]

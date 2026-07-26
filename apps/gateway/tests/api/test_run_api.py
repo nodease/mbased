@@ -46,6 +46,11 @@ def test_public_run_forwards_injected_runtime_policy_at_fastapi_boundary(
         "run_deployment",
         run_deployment,
     )
+    monkeypatch.setattr(
+        run_endpoint,
+        "_public_conversation_runtime_required",
+        lambda _slug: False,
+    )
 
     app = FastAPI()
     app.include_router(run_endpoint.router)

@@ -448,6 +448,29 @@ AuditLog canonical action은 `memory.session.created/closed/reset/delete_request
 
 Gateway publisher와 Worker는 exact task name `workflow.execute_conversation_turn`을 공유한다. Worker process는 이 task를 시작 시 import/register하고, production handler는 reference-only envelope을 검증한 뒤 실제 DB-backed Memory/Workflow admission, frozen deployment graph, ProviderExecutionCapability/usage adapter를 조립한다. 이름만 등록된 placeholder 또는 test fake는 worker readiness 근거가 아니다. 각 실제 delivery는 서로 다른 lease owner를 사용하고 active lease의 다른 owner는 mutation 전에 fence한다. Task 예외는 safe code만 가진 최대 3회의 bounded recovery delivery로 처리하고 첫 countdown은 execution lease보다 길게 둔다. Stable execution/provider attempt와 assistant checkpoint가 provider 재호출을 막는다.
 
+V1 provider request timeout 상한은 180초이고 Workflow execution lease는 210초,
+첫 bounded recovery는 211초 뒤 시작한다. Typed permanent provider preparation 실패는
+provider 미전송 상태로 terminal 처리하지만 transient/untyped preparation failure는 retry
+가능하게 남긴다. Provider 응답을 받은 owner도 checkpoint와 usage success 전에 current
+lease generation을 다시 검증한다.
+
+Public execution observability는 `conversation_workflow_execution_events`의 content-free
+durable journal에 public actor와 safe opaque correlation/event/reason만 저장한다. Raw
+input/output, prompt, context, token과 provider response column은 두지 않는다. Journal
+write 실패는 task retry 대상으로 남기며 admission/event unique key와 terminal redelivery가
+누락 event를 idempotent하게 복구한다.
+
+Context attempt, Memory Turn/checkpoint, Workflow admission과 journal은 별도 transaction이므로
+각 commit 직후 crash를 reference-only recovery state로 다룬다. Active resolve보다 먼저
+deterministic admission/execution/attempt와 frozen deployment correlation만 조회하되, runtime이
+여전히 usable한 최초 published delivery는 정상 경로로 통과시킨다. Close, grant revoke 또는
+active deployment 교체로 runtime이 stale이면 새 owner가 admission lease generation을
+획득한 뒤에만 dispatch/Turn/entry/session과 admission/journal을 terminal로 수렴시킨다.
+이 cleanup은 raw content를 읽거나 provider 권한을 복원하지 않는다. Running attempt는
+ADR-0069 usage ledger를 권위로 intent/provider-started/terminal을 분류하며, lifecycle 변경
+전에 저장된 provisional assistant checkpoint는 actual usage 사실을 보존하되 approved
+content로 승격하지 않고 reject한다.
+
 Main-generation capability의 server-owned 상한은 Worker 환경의 다음 세 positive integer에서만 읽는다.
 
 - `MEMORY_RUNTIME_PROVIDER_INPUT_TOKEN_CAP`

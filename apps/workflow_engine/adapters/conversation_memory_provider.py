@@ -21,6 +21,7 @@ from apps.workflow_engine.application.provider_execution import (
     ProviderInvocationNotSentError,
     ProviderInvocationOutcomeUnknownError,
     ProviderInvocationRejectedError,
+    ProviderStartCommitRetryableError,
 )
 from apps.workflow_engine.application.provider_usage import (
     ProviderUsageIntent,
@@ -210,7 +211,9 @@ class ConversationMemoryProviderAdapter:
         try:
             usage_attempt.mark_provider_started()
         except ProviderUsageRuntimeError as exc:
-            raise ConversationProviderExecutionError(exc.code) from exc
+            if exc.code == "provider_usage.replay_blocked":
+                raise ProviderInvocationOutcomeUnknownError() from exc
+            raise ProviderStartCommitRetryableError() from exc
         try:
             response = lease.invoke()
         except (ProviderInvocationNotSentError, ProviderInvocationRejectedError) as exc:
@@ -274,6 +277,22 @@ class ConversationMemoryProviderAdapter:
                 organization_id=organization_id,
                 provider_attempt_id=checkpoint.context_attempt_id,
                 operation_reference=checkpoint.usage_reference,
+            )
+        except ProviderUsageRuntimeError as exc:
+            raise ConversationProviderExecutionError(exc.code) from exc
+
+    def reconcile_reference_terminal(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        provider_attempt_id: uuid.UUID,
+        usage_reference: str | None,
+    ) -> str:
+        try:
+            return self.usage_recorder.reconcile_reference_terminal(
+                organization_id=organization_id,
+                provider_attempt_id=provider_attempt_id,
+                operation_reference=usage_reference,
             )
         except ProviderUsageRuntimeError as exc:
             raise ConversationProviderExecutionError(exc.code) from exc

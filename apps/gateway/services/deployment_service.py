@@ -39,6 +39,9 @@ from apps.shared.domain.deployment_runtime_policy import (
     is_deployment_type_allowed_for_surface,
     is_deployment_type_allowed_for_trigger,
 )
+from apps.shared.domain.conversation_memory_runtime import (
+    conversation_memory_runtime_requested,
+)
 from apps.shared.domain.external_effect_error import (
     safe_external_effect_error_payload,
 )
@@ -1119,6 +1122,19 @@ class DeploymentService:
         request_id: Optional[str] = None,
         correlation_id: Optional[str] = None,
     ) -> Dict[str, Any]:
+        if conversation_memory_runtime_requested(
+            deployment.graph_snapshot,
+            deployment.config,
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "memory.conversation_required",
+                    "message": (
+                        "A conversation envelope is required for this deployment."
+                    ),
+                },
+            )
         # 예산 초과 차단 — 아래 dispatch try 블록 밖이어야 429가
         # "Engine Execution failed" 500으로 감싸이지 않는다 (BGT-REQ-030~031).
         WorkflowBudgetService.ensure_workflow_budget_allows_execution(

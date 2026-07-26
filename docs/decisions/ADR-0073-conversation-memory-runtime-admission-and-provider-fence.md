@@ -135,6 +135,162 @@ Memory와 usage ledger의 두 `provider_started` marker가 서로 다른 replay 
 - Follow-up review: 운영 dispatch reconciler가 추가되면 같은 terminal finalizer를 재사용하고
   session→Turn→entry→dispatch lock 순서와 current generation 검증을 유지한다.
 
+### Memory-on 요청의 legacy fallback 차단
+
+- Context: public run body에서 `conversation` envelope이 빠졌을 때 versioned Memory
+  deployment도 기존 legacy 실행으로 진입할 수 있었고, Memory 계약 자체가 malformed이면
+  `runtime_contract_ready=false`만으로는 Memory 사용 의도를 구분할 수 없었다.
+- Options considered: envelope이 있을 때만 Memory runtime을 선택, valid contract에만
+  Memory runtime을 강제, frozen graph/config의 Memory-on 의도를 validation 전에 판정하는
+  방식을 검토했다.
+- Final decision: active public Chatbot의 frozen graph 또는 deployment config가 Memory-on을
+  명시하면 contract validation 성공 여부와 무관하게 legacy fallback을 금지한다. Envelope
+  누락은 provider/legacy Workflow side effect 전에 typed `422`로 닫는다. Raw graph의
+  `enabled`는 literal `false` 또는 필드 부재만 Memory-off로 인정하고 legacy parser가
+  coercion할 수 있는 숫자/문자열과 다른 malformed 값은 Memory intent로 fail-closed한다.
+  Valid envelope 경로의 동기 DB application은 async event loop 밖의 thread-owned session에서
+  실행한다.
+- Rationale: malformed configuration은 Memory-OFF가 아니며 permissive fallback은 versioned
+  authorization, context와 provider fence를 우회한다. DB session을 worker thread 안에서
+  생성하면 request-thread session의 cross-thread 사용도 피한다.
+- Affected files: `apps/shared/domain/conversation_memory_runtime.py`,
+  `apps/memory/adapters/persistence/repository.py`,
+  `apps/gateway/composition/memory.py`,
+  `apps/gateway/api/v1/endpoints/run.py`,
+  `apps/gateway/services/deployment_service.py`와 관련 테스트.
+- Follow-up review: 다른 public/authenticated run surface를 추가할 때도 raw frozen contract의
+  Memory-on 판정을 공유하고 각 surface의 explicit envelope/authorization 계약 없이는
+  legacy 실행으로 완화하지 않는다.
+
+### Provider deadline, prepare failure와 post-response fence
+
+- Context: 30초 execution lease가 최대 180초 provider timeout보다 짧아 recovery owner가
+  정상 요청 중 lease를 탈취할 수 있었고, permanent `provider.prepare` 오류는 Turn을
+  running에 남겼다. Provider 응답 뒤 checkpoint 전에 generation이 바뀌는 race도 있었다.
+- Options considered: heartbeat 도입, provider timeout 단축, timeout보다 긴 fixed lease와
+  provider 응답 직후 fence 재검증을 검토했다.
+- Final decision: V1 provider timeout 상한은 180초, execution lease는 210초, 첫 recovery는
+  211초로 고정한다. Typed credential/configuration prepare 실패는 provider 미전송 safe
+  failure로 Memory와 Workflow admission을 terminal 처리하고, untyped/transient 오류는
+  bounded retry를 위해 non-terminal로 남긴다. Provider 응답 직후 current generation을
+  다시 확인한 뒤에만 checkpoint와 usage success를 기록한다.
+- Rationale: provider deadline 전체를 덮는 lease와 post-response fence가 stale owner의
+  checkpoint를 차단한다. 영구/일시 오류를 구분하면 poison retry와 조기 terminalization을
+  동시에 피한다.
+- Affected files: `apps/workflow_engine/application/conversation_memory_execution.py`,
+  `apps/workflow_engine/composition/conversation_memory.py`,
+  `apps/workflow_engine/tasks.py`와 관련 application/composition/task 테스트.
+- Follow-up review: provider timeout 정책이 180초를 넘도록 변경되면 같은 변경에서 lease와
+  recovery deadline 계약도 함께 갱신하고 heartbeat/fencing 전략을 재검토한다.
+
+### Content-free execution journal
+
+- Context: process-local logging observer는 public Workflow execution projection을
+  durable하게 남기지 못하고, observer 오류를 무시하면 canonical execution은 완료돼도
+  safe observability row가 영구 누락될 수 있었다.
+- Options considered: legacy WorkflowRun/WorkflowNodeRun에 빈 payload를 삽입, AuditLog에
+  high-cardinality 상태를 기록, 전용 content-free idempotent journal을 검토했다.
+- Final decision: public actor와 organization/app/workflow/deployment/session/turn/node의
+  opaque correlation, event type과 bounded safe failure reason만 갖는 전용 durable
+  journal을 사용한다. Admission/event unique key로 재전달을 idempotent하게 만들고
+  inputs, outputs, prompt, token, context와 provider response column은 두지 않는다.
+  Journal write 실패는 삼키지 않고 task를 retry하며 terminal redelivery는 canonical
+  admission에서 누락된 terminal event를 재구성한다.
+- Rationale: lifecycle AuditLog cardinality를 오염시키지 않으면서 ADR의 public principal과
+  no-content 계약을 DB 수준에서 고정한다. Journal은 execution 권위가 아니지만 누락을
+  성공으로 숨기지 않아 bounded reconciliation이 가능하다.
+- Affected files: `apps/shared/db/models/workflow_conversation_execution.py`,
+  `apps/shared/alembic/versions/b20e1f2a3b45_add_conversation_execution_journal.py`,
+  `apps/workflow_engine/adapters/conversation_execution_observer.py`,
+  `apps/workflow_engine/application/conversation_memory_execution.py`와 관련 테스트.
+- Follow-up review: 운영 조회/retention surface를 추가할 때 raw content join을 금지하고
+  organization scope, bounded retention과 삭제 정책을 별도 승인한다.
+
+### Production execution scope와 runtime schema readiness
+
+- Context: application Port에만 execution scope 조회 계약이 있고 production SQL adapter가
+  구현하지 않으면 Worker는 모든 delivery의 첫 authorization에서 실패한다. 또한 admission과
+  journal table이 readiness 집합에서 빠지면 Gateway가 runtime을 활성화한 뒤에야 Worker의
+  DB 오류가 드러난다.
+- Options considered: 여러 repository 조회를 조합, application에서 row를 순차 조회, 하나의
+  tenant-bound locked join과 required schema capability gate를 검토했다.
+- Final decision: Session, Turn, Dispatch, Access Grant, App, Workflow와 active Deployment를
+  organization/turn/dispatch identity로 한 번에 조회하고 관련 row를 current transaction에서
+  잠근다. Public runtime의 admission과 content-free journal table/핵심 column도 Memory
+  readiness의 필수 capability로 검사한다.
+- Rationale: 단일 locked scope는 authorization과 deployment binding 사이의 혼합 snapshot을
+  피하고, schema gate는 provider side effect가 가능한 runtime을 incomplete migration 위에서
+  시작하지 못하게 한다.
+- Affected files: `apps/memory/adapters/persistence/repository.py`,
+  `apps/memory/adapters/persistence/readiness.py`,
+  `apps/memory/tests/adapters/test_execution_repository.py`,
+  `apps/memory/tests/adapters/test_schema.py`.
+- Follow-up review: execution graph topology가 확장되면 같은 scope query의 lock 순서와
+  organization/deployment binding을 유지하고 필요한 additive table을 readiness capability에
+  함께 추가한다.
+
+### Expired context claim의 same-attempt recovery
+
+- Context: context claim은 20초지만 first task recovery는 execution lease 뒤인 211초라
+  provider 시작 전 crash는 반드시 expired claim으로 돌아온다. 기존 replay는 deadline을
+  갱신하지 않아 복구하지 못했고, Memory marker 뒤 usage start commit 실패는 이미
+  `provider_started`인 attempt를 일반 reclaim으로 처리해 영구 conflict가 됐다.
+- Options considered: 매 retry에 새 provider attempt 발급, expired attempt를 상태와 무관하게
+  재승인, stable attempt에서 claimed와 provider-started recovery를 분리하는 방식을 검토했다.
+- Final decision: expired `claimed`만 같은 attempt에서 lease/attempt generation, deadline과
+  attempt version을 CAS로 증가시키고 current authorization을 다시 검증한다. Expired
+  `provider_started`는 generation/deadline과 provider send authority를 갱신하지 않으며,
+  동일 capability revision과 canonical usage reference의 idempotent marker callback에만
+  다시 진입한다.
+- Rationale: stable attempt reclaim은 provider 미전송 crash를 복구하면서 stale owner를
+  fence한다. 이미 marker가 있는 attempt를 별도로 취급하면 exact usage intent commit을
+  계속할 수 있지만 provider-started/terminal usage에서 send 권한을 재생성하지 않는다.
+- Affected files: `apps/memory/application/context.py`,
+  `apps/memory/adapters/persistence/repository.py`,
+  `apps/memory/tests/application/test_context.py`,
+  `apps/memory/tests/adapters/test_context_repository.py`.
+- Follow-up review: context claim과 task recovery 시간을 바꾸면 20초/211초 실제 간격의
+  crash tests를 함께 갱신하고 generation CAS 및 canonical usage no-replay를 재검토한다.
+
+### Cross-transaction terminal과 lifecycle 변경의 reference-only 수렴
+
+- Context: context attempt, Memory Turn/checkpoint, Workflow admission과 content-free journal은
+  서로 다른 transaction에서 commit된다. 각 commit 사이 crash 뒤 211초 recovery 전에
+  close, grant revoke 또는 active deployment 교체가 일어나면 active authorization resolver는
+  의도대로 실행 권한을 거부하지만, 이미 저장된 terminal/usage 사실과 provisional row까지
+  정리하지 못해 Turn과 admission이 영구 잔존할 수 있다.
+- Options considered: 모든 domain write를 하나의 cross-layer transaction으로 결합, active
+  authorization이 돌아올 때까지 retry, immutable identity만 읽는 별도 cleanup resolver와
+  current admission fence 아래의 bounded reconciliation을 검토했다.
+- Final decision: deterministic admission/execution/attempt identity로 active resolve보다 먼저
+  content-free recovery state를 조회한다. Runtime이 여전히 usable한 최초 `published`
+  dispatch는 정상 경로로 보내고, lifecycle이 stale인 pre-ACK/queued/running 또는 이미
+  terminal인 실행만 historical cleanup 후보로 인정한다. Non-terminal admission은 새 owner가
+  lease generation을 획득한 뒤에만 dispatch ACK, Turn/entry/session terminal cleanup과
+  admission finish를 진행한다. Completed/failed/outcome-unknown projection은 predecessor
+  version, execution/attempt, assistant entry/digest와 safe reason이 정확히 일치할 때만
+  재생하며 terminal admission의 누락 journal은 active execution 권한 없이 복구한다.
+  Historical running cleanup은 Memory marker가 아니라 ADR-0069 usage ledger를 권위로 사용해
+  `intent`는 provider 미호출 실패, `provider_started`/`outcome_unknown`은 outcome unknown,
+  terminal usage는 canonical outcome으로 분류한다. Lifecycle이 이미 stale한 provisional
+  assistant checkpoint는 실제 usage 사실을 보존하되 approved content로 승격하지 않고
+  reject한다.
+- Rationale: active authorization 거부는 새 raw read/provider I/O를 막는 경계이고, terminal
+  cleanup 권한까지 없애는 경계가 아니다. Reference-only resolver와 admission fence를
+  분리하면 stale owner mutation과 provider replay 없이 각 crash window를 absorbing state로
+  수렴시킨다.
+- Affected files: `apps/memory/application/execution.py`,
+  `apps/memory/adapters/persistence/repository.py`,
+  `apps/workflow_engine/application/conversation_memory_execution.py`,
+  `apps/workflow_engine/adapters/conversation_memory_runtime.py`,
+  `apps/workflow_engine/application/provider_usage.py`,
+  `apps/workflow_engine/adapters/provider_usage.py`,
+  `apps/workflow_engine/adapters/conversation_memory_provider.py`와 관련 application/adapter
+  테스트.
+- Follow-up review: terminal cleanup에 새 lifecycle 또는 provider usage state를 추가하면
+  active send authority와 reference-only cleanup authority를 같은 branch에서 혼합하지 않고,
+  각 domain commit 직후 crash와 close/revoke/redeploy 조합을 회귀 테스트로 추가한다.
+
 ## 결과
 
 - Public conversation의 raw content는 Memory content store와 provider process-local request

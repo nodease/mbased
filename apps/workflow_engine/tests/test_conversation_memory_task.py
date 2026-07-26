@@ -11,6 +11,9 @@ from apps.workflow_engine import tasks
 from apps.workflow_engine.application.conversation_memory_admission import (
     ConversationExecutionState,
 )
+from apps.workflow_engine.composition.conversation_memory import (
+    CONVERSATION_PROVIDER_MAX_TIMEOUT_SECONDS,
+)
 
 
 def _payload() -> dict:
@@ -127,4 +130,8 @@ def test_task_schedules_bounded_recovery_without_exposing_exception_text(
     assert (
         captured["countdown"]
         == tasks.CONVERSATION_EXECUTION_LEASE_SECONDS + 1
+    )
+    assert (
+        captured["countdown"]
+        > CONVERSATION_PROVIDER_MAX_TIMEOUT_SECONDS
     )

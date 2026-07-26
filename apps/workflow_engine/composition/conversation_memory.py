@@ -15,10 +15,12 @@ from apps.workflow_engine.adapters.conversation_memory_provider import (
     ConversationProviderLimits,
 )
 from apps.workflow_engine.adapters.conversation_memory_runtime import (
-    LoggingConversationObserver,
     SqlAlchemyConversationExecutionAdmissionAdapter,
     SqlAlchemyConversationExecutionGraphAdapter,
     SqlAlchemyConversationMemoryRuntimeAdapter,
+)
+from apps.workflow_engine.adapters.conversation_execution_observer import (
+    SqlAlchemyConversationExecutionJournalObserver,
 )
 from apps.workflow_engine.application.conversation_memory_execution import (
     ExecuteConversationTurnUseCase,
@@ -37,7 +39,10 @@ _OUTPUT_CAP_ENV = "MEMORY_RUNTIME_PROVIDER_OUTPUT_TOKEN_CAP"
 _COST_CAP_ENV = "MEMORY_RUNTIME_PROVIDER_COST_CAP_MICROUSD"
 _INT32_MAX = 2_147_483_647
 _INT64_MAX = 9_223_372_036_854_775_807
-CONVERSATION_EXECUTION_LEASE_SECONDS = 30
+CONVERSATION_PROVIDER_MAX_TIMEOUT_SECONDS = 180
+CONVERSATION_EXECUTION_LEASE_SECONDS = (
+    CONVERSATION_PROVIDER_MAX_TIMEOUT_SECONDS + 30
+)
 
 
 class _TiktokenCounter:
@@ -120,7 +125,9 @@ def build_conversation_turn_use_case(
             usage_recorder=recorder,
             limits=limits,
         ),
-        observer=LoggingConversationObserver(),
+        observer=SqlAlchemyConversationExecutionJournalObserver(
+            session_factory=session_factory,
+        ),
         clock=type("_Clock", (), {"now": staticmethod(runtime_clock)})(),
         worker_capability=values.get(
             "MEMORY_RUNTIME_MINIMUM_WORKER_CAPABILITY",
@@ -153,6 +160,7 @@ def _positive_integer(
 
 __all__ = [
     "CONVERSATION_EXECUTION_LEASE_SECONDS",
+    "CONVERSATION_PROVIDER_MAX_TIMEOUT_SECONDS",
     "build_conversation_turn_use_case",
     "conversation_provider_limits_from_environment",
 ]

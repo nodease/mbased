@@ -67,7 +67,7 @@ Workflow와 Chatbot의 여러 turn에서 필요한 대화 맥락을 독립 Memor
 - MEM-REQ-017: Dispatch publisher 장애, Gateway crash와 ambiguous broker acknowledgement 뒤에도 reconciliation이 turn을 재발행하거나 terminal 처리해 session을 영구 점유하지 않아야 한다.
 - MEM-REQ-018: Turn dispatch 재시도는 Memory-owned mutation만 idempotent하게 재적용하며 arbitrary workflow node/tool side effect를 Memory가 자동 재실행하지 않아야 한다.
 - MEM-REQ-019: Memory-owned pending dispatch claim과 Workflow-owned running execution lease는 각각 server-side deadline을 가지며 만료 후 owner domain의 safe recovery state가 명시되어야 한다. Memory는 Workflow lease를 직접 갱신하지 않아야 한다.
-- MEM-REQ-019A: Public conversation dispatch는 dispatch당 하나의 Workflow-owned durable admission으로 수렴해야 한다. Broker와 Celery result에는 opaque organization/dispatch/turn/contract reference만 포함하고 raw input, Access Grant ID/token, context, provider response와 final output을 포함하지 않아야 한다. Cross-domain acknowledgement, provider I/O와 Memory completion 동안 어느 domain의 DB session이나 row lock도 유지하지 않아야 한다.
+- MEM-REQ-019A: Public conversation dispatch는 dispatch당 하나의 Workflow-owned durable admission으로 수렴해야 한다. Workflow execution 상태는 explicit public principal과 safe opaque correlation만 가진 content-free durable projection으로 기록하고 raw input/output column을 두지 않아야 한다. Broker와 Celery result에는 opaque organization/dispatch/turn/contract reference만 포함하고 raw input, Access Grant ID/token, context, provider response와 final output을 포함하지 않아야 한다. Cross-domain acknowledgement, provider I/O와 Memory completion 동안 어느 domain의 DB session이나 row lock도 유지하지 않아야 한다.
 
 ### Conversational Mapping And Node Policy
 
@@ -78,7 +78,7 @@ Workflow와 Chatbot의 여러 turn에서 필요한 대화 맥락을 독립 Memor
 - MEM-REQ-024: 기본 Memory source는 completed user turn과 mapped final assistant answer로 제한해야 한다.
 - MEM-REQ-025: 중간 node output은 node config가 허용한 bounded channel/projection으로만 저장해야 한다.
 - MEM-REQ-026: 초기 Session 생성 surface는 public Chatbot으로 제한해야 한다. 별도 인증·접근 정책을 갖춘 authenticated internal Chatbot은 후속 target이며, Workflow Editor test, schedule, webhook, API batch와 비대화형 deployment는 각각의 인증·CSRF·idempotency·retention 계약 없이는 Conversation Session을 자동 생성하지 않아야 한다.
-- MEM-REQ-027: 초기 runtime은 root의 정확한 `Start -> LLM -> Answer` topology, 하나의 required text input, 하나의 mapped text output과 하나의 fixed-model LLM node만 허용해야 한다. Routing/fallback/tool/Knowledge/RAG/structured output/nested graph/summary와 unknown active behavior는 같은 pure validator로 preflight와 runtime에서 provider I/O 전에 거부해야 한다.
+- MEM-REQ-027: 초기 runtime은 root의 정확한 `Start -> LLM -> Answer` topology, 하나의 required text input, 하나의 mapped text output과 하나의 fixed-model LLM node만 허용해야 한다. Routing/fallback/tool/Knowledge/RAG/structured output/nested graph/summary와 unknown active behavior는 같은 pure validator로 preflight와 runtime에서 provider I/O 전에 거부해야 한다. Frozen graph/config가 Memory-on을 요청하면 invalid contract 또는 conversation envelope 누락을 Memory-OFF/legacy 실행으로 완화하지 않아야 한다.
 
 ### Provenance And Authorization
 
@@ -159,6 +159,7 @@ Workflow와 Chatbot의 여러 turn에서 필요한 대화 맥락을 독립 Memor
 - MEM-REQ-083: Provider adapter는 outbound call 직전에 `provider_started`를 durable하게 기록해야 하며 marker commit이 실패하면 provider를 호출하지 않아야 한다. Claim 후 start 전 crash는 claim expiry 뒤 새 lease/attempt로 재승인할 수 있어야 한다.
 - MEM-REQ-083A: Memory context-attempt marker는 lease lifecycle marker이고 ADR-0069 usage ledger가 canonical send authority여야 한다. Raw context claim과 full-request 검증 뒤 usage intent, final binding 재검증, Memory marker, usage `provider_started`, provider I/O 순서를 지켜야 한다. Memory-marker-only + exact usage intent는 current owner의 same-attempt continuation만 허용하고, usage started/outcome-unknown/terminal 상태는 provider replay를 허용하지 않아야 한다.
 - MEM-REQ-084: `provider_started` 이후 outcome unknown은 provider를 자동 재호출하지 않고 usage/result reconciliation 또는 safe node failure로 닫아야 한다.
+- MEM-REQ-084A: Context attempt, Memory Turn/checkpoint, Workflow admission과 execution journal의 commit 사이 crash는 deterministic identity와 current admission fence로 bounded reconciliation해야 한다. Close, grant revoke 또는 active deployment 변경 뒤에는 active 실행 권한을 복원하지 않고 reference-only cleanup만 허용하며, ADR-0069 usage state와 provisional checkpoint를 분류해 provider replay, definitive outcome 오분류와 orphan row를 만들지 않아야 한다.
 - MEM-REQ-085: Summary model 가격을 산정할 수 없거나 estimate가 invalid/unknown-zero이면 reservation을 거부하고 provider를 호출하지 않아야 한다. Memory adapter가 임의 가격 또는 0원 fallback을 만들지 않아야 한다.
 
 ### Cross-Domain Capability, Version And Purge Contracts

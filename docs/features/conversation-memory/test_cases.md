@@ -143,6 +143,8 @@ Status: Draft
 - MEM-TC-APP-029N: Provider capability의 organization/deployment version/node invocation/purpose/model/pricing revision/expiry 중 하나라도 lease와 다르면 raw context와 provider 호출을 모두 거부한다.
 - MEM-TC-APP-029O: Lease claim은 실제 materialized entry/summary와 정확히 대응하는 RuntimeDataDependencyEnvelope를 반환하고 excluded/stale source를 envelope에 남기지 않는다.
 - MEM-TC-APP-029P: Usage intent commit 뒤 Memory marker 전에 credential permission/relation/egress/capability binding을 다시 검증하며 하나라도 바뀌면 Memory marker, usage start와 provider I/O가 모두 0회다.
+- MEM-TC-APP-029Q: 20초 context claim 뒤 Worker가 중단되고 211초 recovery delivery가 도착하면 같은 `claimed` attempt의 generation/deadline/version을 CAS로 증가시키고 current authorization을 재검증한다. Stale owner와 다른 attempt는 raw context 또는 provider 권한을 얻지 못한다.
+- MEM-TC-APP-029R: Memory `provider_started` marker 뒤 usage start commit 전에 Worker가 중단되고 claim이 만료되면 generation/deadline을 갱신하지 않은 채 동일 capability revision과 canonical usage reference의 marker callback에만 다시 진입한다. 다른 usage reference와 terminal usage는 provider send 권한을 복원하지 않는다.
 
 ### Summary Generation Process
 
@@ -211,6 +213,7 @@ Status: Draft
 - MEM-TC-DB-025: Purge Job/receipt는 organization, stable App ID, issuance deployment ID/version, audience snapshot, verifier hash와 terminal status만 receipt expiry까지 유지하고 raw receipt/content를 저장하지 않는다. Receipt expiry는 발급 시점 이후 최대 8일을 넘지 않는다.
 - MEM-TC-DB-025A: Delete idempotency authorization tombstone은 organization/stable App/operation/idempotency identity와 versioned access-token HMAC verifier를 all-or-none으로 저장한다. Grant/Session 물리 삭제 뒤 exact replay는 허용하지만 다른 token·App·fingerprint는 거부하고 raw access token을 schema와 fixture 어디에도 저장하지 않는다.
 - MEM-TC-DB-026: Legal-hold compliance storage는 일반 Memory query/provider adapter와 물리·권한 경계가 분리된다.
+- MEM-TC-DB-027: Production execution scope adapter는 organization/turn/dispatch로 Session, Turn, Dispatch, Access Grant, App, Workflow와 active Deployment를 하나의 locked tenant-bound query에서 조회하며 누락·불일치 binding을 `None`으로 닫는다.
 
 ### Authorization Adapters
 
@@ -326,6 +329,8 @@ MBA-317의 자동 검증은 public capability domain/application, encrypted repl
 ### MBA-318 Review Regressions
 
 - MEM-TC-API-040I: Valid Conversation capability의 Turn status는 safe state, sequence, approved display와 bounded failure reason만 반환한다. Missing/malformed/expired/revoked/wrong deployment·session·turn capability는 동일한 resource-hidden 404이며 model projection, raw provider response와 내부 queue/Worker detail은 없다.
+- MEM-TC-API-040J: Turn status `ETag`는 authorization으로 확인한 current Session lifecycle revision과 정확히 일치한다.
+- MEM-TC-API-040K: Frozen graph/config가 Memory-on인 public deployment는 valid/invalid contract 모두 conversation envelope 누락을 typed `422`로 거부하고 legacy execution을 호출하지 않는다. Raw `enabled`의 literal false/필드 부재만 Memory-OFF로 인정하고 legacy bool parser가 coercion할 수 있는 숫자·문자열과 다른 malformed 값은 fail-closed한다.
 
 ## Workflow Runtime Tests
 
@@ -348,6 +353,11 @@ MBA-317의 자동 검증은 public capability domain/application, encrypted repl
 - MEM-TC-RUN-014B: Production composition의 input/output token과 micro-USD provider 상한은 server-owned required Worker 환경값이며 누락·boolean·0 이하·정수 형식 오류를 provider I/O 전에 fail-closed한다. Client, grant와 graph payload는 상한을 설정하거나 늘리지 못한다.
 - MEM-TC-RUN-014C: Gateway process는 public runtime activation 설정을 route serving 전에 검증한다. Runtime이 활성인데 lifecycle/worker readiness/content key/fingerprint key 또는 key 분리가 불완전하면 첫 public run 요청까지 오류를 늦추지 않고 startup을 거부한다.
 - MEM-TC-RUN-014D: Registered Conversation task는 application 예외를 safe code로 redaction해 최대 3회의 bounded recovery delivery를 예약한다. 첫 countdown은 production execution lease보다 길어 새 owner가 lease 만료 전에 retry budget을 소진하지 않는다. Provider response checkpoint 뒤 retry는 usage/context terminal 상태를 덮어쓰지 않고 checkpoint로만 completion하며 provider I/O를 다시 수행하지 않는다.
+- MEM-TC-RUN-014E: Production execution lease는 최대 provider timeout보다 길고 첫 recovery는 lease 뒤에 시작한다. Typed permanent provider preparation failure는 provider 미전송 terminal state로 닫고 transient failure는 retryable하게 유지한다. Provider 응답 뒤 generation이 바뀌면 stale owner는 checkpoint/usage success/Memory completion을 기록하지 못한다.
+- MEM-TC-RUN-014F: Memory provider-start marker 뒤 canonical usage start commit이 확인되지 않으면 provider를 호출하거나 Turn/admission을 terminalize하지 않는다. Bounded retry는 exact intent면 같은 attempt의 usage start를 한 번 계속하고 usage가 이미 provider-started/terminal이면 send 권한을 복원하지 않는다.
+- MEM-TC-RUN-014G: Context attempt terminal, Memory Turn terminal, Workflow admission terminal과 terminal journal의 각 commit 직후 crash를 재전달한다. 새 owner가 current admission lease generation을 획득하기 전에는 Memory mutation이 0회이고, 획득 뒤에는 exact predecessor/execution/attempt/result/reason만 provider 재호출 없이 한 terminal projection으로 수렴한다.
+- MEM-TC-RUN-014H: Publish 뒤 ACK 전 또는 admitted/running journal commit 실패 뒤 close, grant revoke, active deployment 교체가 발생하면 active execution 권한은 복원하지 않는다. Historical resolver는 usable fresh `published` delivery를 정상 경로로 통과시키고 stale lifecycle만 deterministic admission claim/fence 아래에서 dispatch ACK, Turn/entry/session과 admission/journal safe terminal로 원자·멱등 정리한다.
+- MEM-TC-RUN-014I: Historical running cleanup은 canonical usage ledger를 읽어 intent는 provider 미호출 실패, provider-started/outcome-unknown은 outcome unknown, terminal usage는 canonical 결과로 분류한다. Lifecycle 변경 전에 저장된 provisional assistant checkpoint는 actual usage/context 사실을 보존하면서 reject하고 raw output을 승인하거나 provider를 재호출하지 않는다.
 - MEM-TC-RUN-015: Workflow `AdmitExecution(dispatch_id)`은 같은 dispatch에 admission을 하나만 만들고 lookup으로 acknowledgement 유실을 복구한다.
 - MEM-TC-RUN-016: Memory는 Workflow execution lease/heartbeat를 변경하지 않고 safe state projection만 반영한다.
 - MEM-TC-RUN-017: Knowledge, connector/tool, subworkflow, LLM, transform/code와 system policy producer가 RuntimeDataDependencyEnvelope source-owner contract를 지킨다.
@@ -478,6 +488,7 @@ MBA-317의 자동 검증은 public capability domain/application, encrypted repl
 - MEM-TC-MIG-017: Authenticated old-version session은 typed conflict와 safe new-session action을 반환하고 transcript를 새 session에 자동 복사하지 않는다.
 - MEM-TC-MIG-018: Additive migration 적용 전 public lifecycle feature activation은 누락된 schema capability로 startup에서 실패하고 적용 뒤 성공한다. Migration filename, revision ID 또는 당시의 latest head를 하드코딩하지 않고 실제 required table·column 집합을 검증한다.
 - MEM-TC-MIG-019: Runtime additive revision은 Turn replay key/grant provenance, Entry source-free proof와 Workflow execution admission table을 생성한다. 새 runtime binding 또는 admission data가 있으면 downgrade가 fail-closed하고 명시적 보존·배출 뒤 foundation parent로 round-trip 한다.
+- MEM-TC-MIG-020: Public runtime activation readiness는 Workflow execution admission과 content-free journal table/핵심 column을 요구한다. Journal migration은 raw content column 없이 additive upgrade되고 row가 남은 downgrade는 fail-closed한다.
 
 ## Performance And Reliability Tests
 
@@ -517,6 +528,7 @@ MBA-317의 자동 검증은 public capability domain/application, encrypted repl
 - MEM-TC-OBS-014: completed_with_hold/terminal_failure는 operational/compliance event와 alert만 만들고 `memory.session.purged`를 만들지 않는다.
 - MEM-TC-OBS-015: ProviderExecutionCapability는 safe opaque reference/revision만 관측하고 credential, raw scope/token과 private source를 남기지 않는다.
 - MEM-TC-OBS-016: V1 create/reset/close/delete lifecycle은 `memory.grant.rotated`를 발행하지 않고 issued/revoked cardinality만 계약대로 기록한다.
+- MEM-TC-OBS-017: Public execution journal은 explicit public actor, safe opaque correlation/event/reason만 durable하게 저장하고 admission/event 중복을 idempotent하게 제거한다. Journal 실패는 task retry로 표면화하며 terminal redelivery가 누락 terminal event를 복구하고 raw input/output/prompt/context/token/provider response를 저장하지 않는다.
 
 ## Requirement Traceability
 
@@ -530,7 +542,7 @@ MBA-316은 production composition을 활성화하지 않고 아래 persistence/l
 | `apps/memory/tests/domain/test_conversation.py` | Session/Turn revision, active turn, clock expiry late-write 차단, hash-only replay identity, purge receipt 8일 상한, 모든 terminal outcome의 absorbing transition property, dispatch fencing·claim expiry recovery | MEM-TC-DOM-001, 003~013, 015 및 MEM-TC-DOM-016의 dispatch process subset |
 | `apps/memory/tests/application/test_lifecycle.py` | Create/Start/Complete/Close/Delete-pending UoW, same-request replay, matching terminal CompleteTurn replay와 mismatch conflict, clock expiry write 차단, dispatch insert failure rollback, unknown outcome fail-closed | MEM-TC-APP-002, 008~012, 015, 016, 040, 041의 mutation 차단, 043의 tombstone/purge-job 기반 |
 | `apps/memory/tests/application/test_dispatch.py` | Claim/publish/publish-failure/expired-recovery command만 상태를 전이하고 current generation을 즉시 retry 가능하게 해제하며 stale fencing을 rollback | MEM-TC-APP-013A, 017, 017A, 018 |
-| `apps/memory/tests/adapters/test_schema.py`, `test_repository.py` | 15개 model/readiness, nullable reference의 tenant-scoped composite FK와 Access Grant canonical binding FK, lifecycle/turn/entry/dispatch CAS와 terminal/fencing check, projection별 암호화 envelope, safe DB error 변환 | MEM-TC-DB-001, 004, 007, 008, 010, 023의 schema/repository subset |
+| `apps/memory/tests/adapters/test_schema.py`, `test_repository.py` | Memory model/readiness, nullable reference의 tenant-scoped composite FK와 Access Grant canonical binding FK, lifecycle/turn/entry/dispatch CAS와 terminal/fencing check, projection별 암호화 envelope, safe DB error 변환 | MEM-TC-DB-001, 004, 007, 008, 010, 023의 schema/repository subset |
 | `apps/memory/tests/adapters/test_disposable_postgres.py` | 실제 PostgreSQL clean upgrade와 Memory foundation/Public capability replay revision별 Alembic model drift·round-trip check, Access Grant binding mismatch DB rejection, legacy Run/NodeRun 보존 downgrade, concurrent StartTurn 단일 승자, StartTurn partial-write rollback, dispatch claim/publish | MEM-TC-DB-002, 007, 013, 014, 017 및 MEM-TC-MIG-005 |
 
 ### MBA-318 protected-resource completion evidence
@@ -539,13 +551,13 @@ MBA-318은 durable Memory resource reference, current authorization과 provider 
 
 | 경계 | 상태 | Evidence와 follow-up review |
 | --- | --- | --- |
-| 저장 | 완료 | `StartTurnUseCase`, `SqlAlchemyConversationMemoryRepository`, `conversation_turns.access_grant_id`와 `dependency_proof_version`; legacy proof `NULL`은 context 후보에서 fail-closed |
+| 저장 | 완료 | `StartTurnUseCase`, `SqlAlchemyConversationMemoryRepository`, context plan/lease/provider-attempt CAS와 `conversation_workflow_execution_events`; candidate/entry query는 approved, non-invalidated, non-expired reference만 선택하고 raw content를 Build에서 읽지 않음 |
 | 관리 API/UI | 해당 없음 | MBA-318은 기존 Public lifecycle/Workflow 실행 경로를 연결하며 새 관리 API/UI를 추가하지 않음 |
 | Preflight | 완료 | Gateway public runtime과 dispatch admission이 organization/deployment/grant 및 immutable Memory 계약을 side effect 전에 검증 |
-| Runtime/background | 완료 | `apps/workflow_engine/tests/test_conversation_memory_task.py`, `test_conversation_memory_composition.py`, application execution/provider adapter 테스트가 exact task 등록, production composition, current grant/capability 재검증, bounded reference context와 provider-start/usage marker를 검증 |
-| Lifecycle | 완료 | revoked/expired grant redelivery 차단, RUNNING attempt handoff, deterministic assistant checkpoint recovery, terminal execution replay 및 additive migration downgrade guard |
-| Audit/redaction | 완료 | content-free admission/result reference, safe failure reason, raw Memory/token/provider payload 비영속 계약과 테스트 |
-| 테스트 | 완료 | `apps/memory/tests/application/test_public_runtime.py`, `test_context.py`, `test_execution.py`, `test_lifecycle.py`, Gateway public API/publisher 테스트, Workflow task/composition/provider/admission/execution 테스트와 disposable PostgreSQL contract |
+| Runtime/background | 완료 | `apps/workflow_engine/tests/test_conversation_memory_task.py`, `test_conversation_memory_composition.py`, application execution/provider/usage adapter 테스트가 exact task 등록, production composition, current grant/capability 재검증, bounded reference context, provider-start/usage marker, provider deadline을 덮는 lease, post-response fence와 historical no-I/O reconciliation을 검증 |
+| Lifecycle | 완료 | revoked/expired grant redelivery 차단, RUNNING attempt handoff, deterministic assistant checkpoint recovery, pre/post-ACK crash 뒤 close/revoke/redeploy의 reference-only terminal cleanup, terminal execution replay 및 additive migration downgrade guard |
+| Audit/redaction | 완료 | content-free admission/execution journal, explicit public actor, safe failure reason, idempotent reconciliation과 raw Memory/token/provider payload 비영속 계약 및 migration/model 테스트 |
+| 테스트 | 완료 | `apps/memory/tests/application/test_public_runtime.py`, `test_context.py`, adapter context/public repository 테스트, Gateway public API/publisher 테스트, Workflow task/composition/provider/admission/execution/journal 테스트와 disposable PostgreSQL contract |
 
 Disposable PostgreSQL evidence는 `NODEASE_RUN_DISPOSABLE_DB_TEST=1`인 전용 CI job에서 한 번 실행하고 일반 `memory-tests` job에서는 제외한다. MEM-TC-DB-003/005~007/009/011~012/015~026과 lifecycle audit/outbox cardinality는 관련 application adapter가 구현되기 전 완료로 표시하지 않는다.
 

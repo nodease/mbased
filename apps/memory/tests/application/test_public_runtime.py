@@ -534,6 +534,7 @@ def test_public_turn_status_returns_only_approved_display_projection() -> None:
 
     assert result.turn_id == turn.id
     assert result.turn_state is TurnStatus.COMPLETED
+    assert result.lifecycle_revision == repository.session.lifecycle_revision
     assert result.display == "Approved redacted answer"
     assert result.safe_failure_reason is None
     assert cipher.reveals == [

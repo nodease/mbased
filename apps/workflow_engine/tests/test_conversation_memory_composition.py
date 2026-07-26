@@ -4,11 +4,15 @@ from apps.workflow_engine.adapters.conversation_memory_provider import (
     ConversationMemoryProviderAdapter,
     ConversationProviderLimits,
 )
+from apps.workflow_engine.adapters.conversation_execution_observer import (
+    SqlAlchemyConversationExecutionJournalObserver,
+)
 from apps.workflow_engine.application.conversation_memory_execution import (
     ExecuteConversationTurnUseCase,
 )
 from apps.workflow_engine.composition.conversation_memory import (
     CONVERSATION_EXECUTION_LEASE_SECONDS,
+    CONVERSATION_PROVIDER_MAX_TIMEOUT_SECONDS,
     build_conversation_turn_use_case,
 )
 
@@ -60,9 +64,17 @@ def test_production_composition_builds_real_memory_admission_and_provider_adapte
         "apps.workflow_engine.adapters."
     )
     assert isinstance(use_case.provider, ConversationMemoryProviderAdapter)
+    assert isinstance(
+        use_case.observer,
+        SqlAlchemyConversationExecutionJournalObserver,
+    )
     assert (
         use_case.lease_duration.total_seconds()
         == CONVERSATION_EXECUTION_LEASE_SECONDS
+    )
+    assert (
+        use_case.lease_duration.total_seconds()
+        > CONVERSATION_PROVIDER_MAX_TIMEOUT_SECONDS
     )
 
 

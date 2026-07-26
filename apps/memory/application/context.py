@@ -125,9 +125,12 @@ class MemoryContextLease:
         if now >= self.expires_at or deadline <= now or deadline > self.expires_at:
             raise MemoryContextUnavailableError()
         if self.state is ContextLeaseState.CLAIMED:
-            if self.provider_attempt_id == provider_attempt_id:
-                return True
-            raise MemoryContextConflictError()
+            if (
+                self.provider_attempt_id != provider_attempt_id
+                or self.claim_deadline_at is None
+            ):
+                raise MemoryContextConflictError()
+            return True
         if self.state is not ContextLeaseState.ISSUED:
             raise MemoryContextUnavailableError()
         self.provider_attempt_id = provider_attempt_id
@@ -135,6 +138,28 @@ class MemoryContextLease:
         self.claim_generation += 1
         self.claim_deadline_at = deadline
         return False
+
+    def reclaim(
+        self,
+        *,
+        provider_attempt_id: uuid.UUID,
+        expected_claim_generation: int,
+        expected_claim_deadline_at: datetime,
+        deadline: datetime,
+        now: datetime,
+    ) -> None:
+        if now >= self.expires_at or deadline <= now or deadline > self.expires_at:
+            raise MemoryContextUnavailableError()
+        if (
+            self.state is not ContextLeaseState.CLAIMED
+            or self.provider_attempt_id != provider_attempt_id
+            or self.claim_generation != expected_claim_generation
+            or self.claim_deadline_at != expected_claim_deadline_at
+            or now < expected_claim_deadline_at
+        ):
+            raise MemoryContextConflictError()
+        self.claim_generation += 1
+        self.claim_deadline_at = deadline
 
 
 @dataclass(slots=True)
@@ -156,6 +181,28 @@ class MemoryContextProviderAttempt:
     usage_reference: str | None = None
     safe_failure_reason: str | None = None
     terminal_at: datetime | None = None
+
+    def reclaim(
+        self,
+        *,
+        expected_claim_generation: int,
+        expected_claim_deadline_at: datetime,
+        claim_generation: int,
+        claim_deadline_at: datetime,
+        now: datetime,
+    ) -> None:
+        if (
+            self.status is not ContextAttemptState.CLAIMED
+            or self.claim_generation != expected_claim_generation
+            or self.claim_deadline_at != expected_claim_deadline_at
+            or now < self.claim_deadline_at
+            or claim_generation != self.claim_generation + 1
+            or claim_deadline_at <= now
+        ):
+            raise MemoryContextConflictError()
+        self.version += 1
+        self.claim_generation = claim_generation
+        self.claim_deadline_at = claim_deadline_at
 
     def mark_provider_started(
         self,
@@ -436,17 +483,68 @@ class ClaimMemoryContextUseCase(_ContextUseCase):
             lease = self.repository.lock_context_lease(command.lease_id)
             if not _same_claim(plan, lease, command, scope):
                 raise MemoryContextConflictError()
+            previous_claim_generation = lease.claim_generation
+            previous_claim_deadline_at = lease.claim_deadline_at
+            previously_issued = lease.state is ContextLeaseState.ISSUED
             replayed = lease.claim(
                 provider_attempt_id=command.provider_attempt_id,
                 deadline=command.claim_deadline_at,
                 now=command.now,
             )
             attempt_id = command.provider_attempt_id
-            existing = self.repository.find_context_attempt(attempt_id)
+            existing = self.repository.lock_context_attempt(attempt_id)
             if existing is not None:
                 if (
                     existing.lease_id != lease.id
-                    or existing.claim_generation != lease.claim_generation
+                    or existing.organization_id != command.binding.organization_id
+                    or existing.session_id != command.binding.session_id
+                    or existing.turn_id != command.binding.turn_id
+                    or existing.plan_id != plan.id
+                    or existing.node_invocation_id != command.node_invocation_id
+                    or existing.provider_capability_reference
+                    != command.provider_capability_reference
+                    or existing.provider_capability_revision
+                    != command.provider_capability_revision
+                ):
+                    raise MemoryContextConflictError()
+            reclaiming = (
+                lease.state is ContextLeaseState.CLAIMED
+                and lease.provider_attempt_id == command.provider_attempt_id
+                and previous_claim_deadline_at is not None
+                and command.now >= previous_claim_deadline_at
+            )
+            if reclaiming:
+                if existing is None:
+                    raise MemoryContextConflictError()
+                if existing.status is ContextAttemptState.CLAIMED:
+                    next_claim_generation = previous_claim_generation + 1
+                    existing.reclaim(
+                        expected_claim_generation=previous_claim_generation,
+                        expected_claim_deadline_at=previous_claim_deadline_at,
+                        claim_generation=next_claim_generation,
+                        claim_deadline_at=command.claim_deadline_at,
+                        now=command.now,
+                    )
+                    lease.reclaim(
+                        provider_attempt_id=command.provider_attempt_id,
+                        expected_claim_generation=previous_claim_generation,
+                        expected_claim_deadline_at=previous_claim_deadline_at,
+                        deadline=command.claim_deadline_at,
+                        now=command.now,
+                    )
+                    self.repository.save_context_attempt(existing)
+                elif (
+                    existing.status is not ContextAttemptState.PROVIDER_STARTED
+                    or existing.claim_generation != previous_claim_generation
+                    or existing.claim_deadline_at != previous_claim_deadline_at
+                ):
+                    raise MemoryContextConflictError()
+                attempt = existing
+                replayed = True
+            else:
+                if existing is not None and (
+                    existing.claim_generation != lease.claim_generation
+                    or existing.claim_deadline_at != lease.claim_deadline_at
                     or existing.status not in {
                         ContextAttemptState.CLAIMED,
                         ContextAttemptState.PROVIDER_STARTED,
@@ -454,27 +552,34 @@ class ClaimMemoryContextUseCase(_ContextUseCase):
                     }
                 ):
                     raise MemoryContextConflictError()
-                attempt = existing
-                replayed = True
-            else:
-                attempt = MemoryContextProviderAttempt(
-                    id=attempt_id,
-                    organization_id=command.binding.organization_id,
-                    session_id=command.binding.session_id,
-                    turn_id=command.binding.turn_id,
-                    lease_id=lease.id,
-                    plan_id=plan.id,
-                    node_invocation_id=command.node_invocation_id,
-                    provider_capability_reference=command.provider_capability_reference,
-                    provider_capability_revision=command.provider_capability_revision,
-                    status=ContextAttemptState.CLAIMED,
-                    version=1,
-                    claim_generation=lease.claim_generation,
-                    claim_deadline_at=command.claim_deadline_at,
-                )
-                self.repository.add_context_attempt(attempt)
+                if existing is not None:
+                    attempt = existing
+                    replayed = True
+                else:
+                    if not previously_issued:
+                        raise MemoryContextConflictError()
+                    attempt = MemoryContextProviderAttempt(
+                        id=attempt_id,
+                        organization_id=command.binding.organization_id,
+                        session_id=command.binding.session_id,
+                        turn_id=command.binding.turn_id,
+                        lease_id=lease.id,
+                        plan_id=plan.id,
+                        node_invocation_id=command.node_invocation_id,
+                        provider_capability_reference=command.provider_capability_reference,
+                        provider_capability_revision=command.provider_capability_revision,
+                        status=ContextAttemptState.CLAIMED,
+                        version=1,
+                        claim_generation=lease.claim_generation,
+                        claim_deadline_at=command.claim_deadline_at,
+                    )
+                    self.repository.add_context_attempt(attempt)
             self.repository.save_context_lease(lease)
-            selected, block, token_count = self._materialize(plan, command.binding)
+            selected, block, token_count = self._materialize(
+                plan,
+                command.binding,
+                now=command.now,
+            )
             return ClaimedMemoryContext(
                 attempt_id=attempt.id,
                 attempt_version=attempt.version,
@@ -490,6 +595,8 @@ class ClaimMemoryContextUseCase(_ContextUseCase):
         self,
         plan: MemoryContextPlan,
         binding: ResolvedConversationExecution,
+        *,
+        now: datetime,
     ) -> tuple[tuple[tuple[str, str], ...], str, int]:
         if not plan.ordered_pairs:
             return (), "", 0
@@ -497,7 +604,7 @@ class ClaimMemoryContextUseCase(_ContextUseCase):
         selected_block = ""
         selected_tokens = 0
         for pair in plan.ordered_pairs:
-            values = self._pair_values(pair, binding)
+            values = self._pair_values(pair, binding, now=now)
             candidate = tuple(reversed((*selected_newest, values)))
             block = serialize_untrusted_history(candidate)
             tokens = self.token_counter.count(block)
@@ -514,6 +621,8 @@ class ClaimMemoryContextUseCase(_ContextUseCase):
         self,
         pair: ContextCandidatePair,
         binding: ResolvedConversationExecution,
+        *,
+        now: datetime,
     ) -> tuple[str, str]:
         if pair.user is None or pair.assistant is None:
             raise MemoryContextUnavailableError()
@@ -522,7 +631,14 @@ class ClaimMemoryContextUseCase(_ContextUseCase):
             entry = self.repository.get_context_entry(reference)
             if (
                 entry is None
+                or entry.organization_id != binding.organization_id
+                or entry.session_id != binding.session_id
+                or entry.turn_id != reference.turn_id
+                or entry.entry_type is not reference.entry_type
                 or entry.lifecycle is not EntryLifecycle.APPROVED
+                or entry.channel != "conversation"
+                or entry.invalidated_at is not None
+                or (entry.expires_at is not None and now >= entry.expires_at)
                 or entry.content_revision != reference.content_revision
                 or entry.content is None
                 or entry.content.model is None
@@ -630,6 +746,9 @@ def _same_build(plan, lease, command) -> bool:
         and plan.organization_id == command.binding.organization_id
         and plan.session_id == command.binding.session_id
         and plan.turn_id == command.binding.turn_id
+        and lease.organization_id == command.binding.organization_id
+        and lease.session_id == command.binding.session_id
+        and lease.turn_id == command.binding.turn_id
         and lease.plan_id == plan.id
         and lease.node_invocation_id == command.node_invocation_id
         and lease.provider_attempt_id in {None, command.provider_attempt_id}

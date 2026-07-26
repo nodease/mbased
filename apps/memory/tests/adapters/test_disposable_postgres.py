@@ -103,6 +103,10 @@ MEMORY_RUNTIME_COLUMNS = {
     },
     "conversation_memory_entries": {"dependency_proof_version"},
 }
+MEMORY_RUNTIME_TABLES = {
+    "conversation_workflow_execution_admissions",
+    "conversation_workflow_execution_events",
+}
 POST_FOUNDATION_COLUMNS = {
     **MEMORY_RUNTIME_COLUMNS,
     "conversation_purge_jobs": {
@@ -119,7 +123,7 @@ POST_FOUNDATION_COLUMNS = {
 FOUNDATION_MEMORY_SCHEMA = {
     table_name: columns - POST_FOUNDATION_COLUMNS.get(table_name, set())
     for table_name, columns in REQUIRED_MEMORY_SCHEMA.items()
-    if table_name != "conversation_secret_replays"
+    if table_name not in {"conversation_secret_replays", *MEMORY_RUNTIME_TABLES}
 }
 
 
@@ -787,7 +791,13 @@ def test_memory_migration_uow_and_concurrent_start_turn_contracts():
                 assert {
                     table_name: set(columns)
                     for table_name, columns in readiness.missing_columns.items()
-                } == MEMORY_RUNTIME_COLUMNS
+                } == {
+                    **MEMORY_RUNTIME_COLUMNS,
+                    **{
+                        table_name: set(REQUIRED_MEMORY_SCHEMA[table_name])
+                        for table_name in MEMORY_RUNTIME_TABLES
+                    },
+                }
                 repository = SqlAlchemyConversationMemoryRepository(db)
                 replacement_now = datetime.now(timezone.utc)
                 expired_now = replacement_now - timedelta(days=2)

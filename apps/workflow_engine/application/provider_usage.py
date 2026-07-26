@@ -67,6 +67,14 @@ class ProviderUsageRecorder(Protocol):
         operation_reference: str,
     ) -> None: ...
 
+    def reconcile_reference_terminal(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        provider_attempt_id: uuid.UUID,
+        operation_reference: str | None,
+    ) -> str: ...
+
 
 __all__ = [
     "ProviderUsageAttempt",

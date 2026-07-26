@@ -175,6 +175,22 @@ def build_public_conversation_runtime_application(
     )
 
 
+def public_conversation_runtime_required(url_slug: str) -> bool:
+    """Return whether a deployment is bound to the versioned Memory runtime."""
+    with SessionLocal() as db:
+        return SqlAlchemyConversationMemoryRepository(
+            db
+        ).public_deployment_requires_conversation_runtime(
+            url_slug,
+        )
+
+
+def start_public_conversation_turn(command):
+    """Construct and execute a public turn in one thread-owned DB session."""
+    with SessionLocal() as db:
+        return build_public_conversation_runtime_application(db).start_turn.execute(command)
+
+
 def public_conversation_runtime_enabled_from_environment(
     environ: Mapping[str, str],
 ) -> bool:

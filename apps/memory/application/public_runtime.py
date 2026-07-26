@@ -98,6 +98,7 @@ class PublicTurnStatusResult:
     turn_state: TurnStatus
     display: str | None
     safe_failure_reason: str | None
+    lifecycle_revision: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -564,6 +565,7 @@ class GetPublicTurnStatusUseCase:
                     turn=turn,
                 ),
                 safe_failure_reason=turn.safe_failure_reason,
+                lifecycle_revision=session.lifecycle_revision,
             )
             self.uow.commit()
             return result

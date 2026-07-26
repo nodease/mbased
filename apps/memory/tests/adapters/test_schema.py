@@ -576,6 +576,31 @@ def test_schema_readiness_requires_public_idempotency_result_snapshot_columns():
     assert snapshot_columns.isdisjoint(REQUIRED_MEMORY_SCHEMA["conversation_turns"])
 
 
+def test_schema_readiness_requires_runtime_admission_and_execution_journal():
+    assert {
+        "id",
+        "organization_id",
+        "dispatch_id",
+        "session_id",
+        "turn_id",
+        "execution_id",
+        "state",
+        "version",
+        "lease_generation",
+        "lease_deadline",
+    } <= REQUIRED_MEMORY_SCHEMA["conversation_workflow_execution_admissions"]
+    assert {
+        "id",
+        "organization_id",
+        "admission_id",
+        "execution_id",
+        "session_id",
+        "turn_id",
+        "event_type",
+        "safe_failure_reason",
+    } <= REQUIRED_MEMORY_SCHEMA["conversation_workflow_execution_events"]
+
+
 def test_schema_readiness_requires_stable_public_replay_scope_columns():
     assert "app_id" in REQUIRED_MEMORY_SCHEMA["conversation_purge_jobs"]
     assert {

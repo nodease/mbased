@@ -7,10 +7,25 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import delete, func, or_, select, tuple_, update
+from sqlalchemy import and_, delete, func, or_, select, tuple_, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
-from sqlalchemy.orm import Session, SessionTransaction
+from sqlalchemy.orm import Session, SessionTransaction, aliased
+
+from apps.memory.application.context import (
+    ContextAttemptState,
+    ContextCandidatePair,
+    ContextEntryReference,
+    ContextLeaseState,
+    MemoryContextLease,
+    MemoryContextPlan,
+    MemoryContextProviderAttempt,
+)
+from apps.memory.application.execution import (
+    ConversationExecutionScope,
+    ResolveConversationExecutionCommand,
+    ResolveTerminalConversationExecutionCommand,
+)
 
 from apps.memory.application.public_lifecycle import (
     IdempotencyReservation,
@@ -51,6 +66,7 @@ from apps.memory.domain.public_access import (
 )
 from apps.shared.domain.conversation_memory_runtime import (
     ConversationMemoryRuntimeContractError,
+    conversation_memory_runtime_requested,
     validate_conversation_memory_runtime,
 )
 from apps.shared.db.models.app import App
@@ -62,6 +78,10 @@ from apps.shared.db.models.conversation_memory import (
     ConversationSecretReplayRecord,
     ConversationSessionRecord,
     ConversationTurnRecord,
+    MemoryContextLeaseRecord,
+    MemoryContextPlanRecord,
+    MemoryContextProviderAttemptRecord,
+    MemoryEntryDependencyRecord,
     MemoryTurnDispatchJobRecord,
 )
 from apps.shared.db.models.workflow import Workflow
@@ -81,7 +101,9 @@ def delete_conversation_sessions_for_resources(
     if app_ids:
         conditions.append(ConversationSessionRecord.app_id.in_(tuple(app_ids)))
     if workflow_ids:
-        conditions.append(ConversationSessionRecord.workflow_id.in_(tuple(workflow_ids)))
+        conditions.append(
+            ConversationSessionRecord.workflow_id.in_(tuple(workflow_ids))
+        )
     if deployment_ids:
         conditions.append(
             ConversationSessionRecord.deployment_id.in_(tuple(deployment_ids))
@@ -131,6 +153,20 @@ class _IdempotencyBaseline:
     status: str
 
 
+@dataclass(frozen=True, slots=True)
+class _ContextLeaseBaseline:
+    state: str
+    claim_generation: int
+    provider_attempt_id: uuid.UUID | None
+
+
+@dataclass(frozen=True, slots=True)
+class _ContextAttemptBaseline:
+    status: str
+    version: int
+    claim_generation: int
+
+
 class SqlAlchemyConversationMemoryRepository:
     """Memory-owned persistence adapter over the shared SQLAlchemy registry."""
 
@@ -150,6 +186,8 @@ class SqlAlchemyConversationMemoryRepository:
         ] = {}
         self._access_grant_baselines: dict[uuid.UUID, _AccessGrantBaseline] = {}
         self._idempotency_baselines: dict[uuid.UUID, _IdempotencyBaseline] = {}
+        self._context_lease_baselines: dict[uuid.UUID, _ContextLeaseBaseline] = {}
+        self._context_attempt_baselines: dict[uuid.UUID, _ContextAttemptBaseline] = {}
 
     def resolve_public_deployment(
         self,
@@ -159,11 +197,342 @@ class SqlAlchemyConversationMemoryRepository:
 
         return self._resolve_public_deployment(url_slug, lock_app=False)
 
+    def public_deployment_requires_conversation_runtime(
+        self,
+        url_slug: str,
+    ) -> bool:
+        """Detect Memory-on intent before the versioned contract is validated."""
+
+        statement = (
+            select(App, Workflow, WorkflowDeployment)
+            .join(Workflow, Workflow.id == App.workflow_id)
+            .join(
+                WorkflowDeployment,
+                WorkflowDeployment.id == App.active_deployment_id,
+            )
+            .where(App.url_slug == url_slug)
+        )
+        row = _execute(self._session, statement).one_or_none()
+        if row is None:
+            return False
+        app, workflow, deployment = row
+        if (
+            app.organization_id is None
+            or workflow.organization_id is None
+            or app.organization_id != workflow.organization_id
+            or workflow.app_id != app.id
+            or deployment.app_id != app.id
+            or deployment.id != app.active_deployment_id
+            or deployment.type != DeploymentType.CHATBOT
+            or not deployment.is_active
+            or deployment.version < 1
+        ):
+            return False
+        return conversation_memory_runtime_requested(
+            deployment.graph_snapshot,
+            deployment.config,
+        )
+
     def current_time(self) -> datetime:
         return _execute(
             self._session,
             select(func.clock_timestamp()),
         ).scalar_one()
+
+    def resolve_execution_scope(
+        self,
+        command: ResolveConversationExecutionCommand,
+        *,
+        for_update: bool,
+    ) -> ConversationExecutionScope | None:
+        """Resolve one tenant-bound public execution scope in a single snapshot."""
+
+        statement = (
+            select(
+                ConversationSessionRecord,
+                ConversationTurnRecord,
+                MemoryTurnDispatchJobRecord,
+                ConversationAccessGrantRecord,
+                App,
+                Workflow,
+                WorkflowDeployment,
+            )
+            .select_from(ConversationSessionRecord)
+            .join(
+                ConversationTurnRecord,
+                and_(
+                    ConversationTurnRecord.organization_id
+                    == ConversationSessionRecord.organization_id,
+                    ConversationTurnRecord.session_id
+                    == ConversationSessionRecord.id,
+                ),
+            )
+            .join(
+                MemoryTurnDispatchJobRecord,
+                and_(
+                    MemoryTurnDispatchJobRecord.organization_id
+                    == ConversationSessionRecord.organization_id,
+                    MemoryTurnDispatchJobRecord.session_id
+                    == ConversationSessionRecord.id,
+                    MemoryTurnDispatchJobRecord.id
+                    == ConversationTurnRecord.dispatch_id,
+                    MemoryTurnDispatchJobRecord.turn_id
+                    == ConversationTurnRecord.id,
+                ),
+            )
+            .join(
+                ConversationAccessGrantRecord,
+                and_(
+                    ConversationAccessGrantRecord.organization_id
+                    == ConversationSessionRecord.organization_id,
+                    ConversationAccessGrantRecord.session_id
+                    == ConversationSessionRecord.id,
+                    ConversationAccessGrantRecord.id
+                    == ConversationTurnRecord.access_grant_id,
+                ),
+            )
+            .join(
+                App,
+                and_(
+                    App.id == ConversationSessionRecord.app_id,
+                    App.organization_id
+                    == ConversationSessionRecord.organization_id,
+                ),
+            )
+            .join(
+                Workflow,
+                and_(
+                    Workflow.id == ConversationSessionRecord.workflow_id,
+                    Workflow.organization_id
+                    == ConversationSessionRecord.organization_id,
+                    Workflow.app_id == App.id,
+                ),
+            )
+            .join(
+                WorkflowDeployment,
+                and_(
+                    WorkflowDeployment.id
+                    == ConversationSessionRecord.deployment_id,
+                    WorkflowDeployment.app_id == App.id,
+                    WorkflowDeployment.id == App.active_deployment_id,
+                ),
+            )
+            .where(
+                ConversationSessionRecord.organization_id
+                == command.organization_id,
+                ConversationTurnRecord.id == command.turn_id,
+                ConversationTurnRecord.dispatch_id == command.dispatch_id,
+                MemoryTurnDispatchJobRecord.id == command.dispatch_id,
+            )
+        )
+        if for_update:
+            statement = statement.with_for_update(
+                of=[
+                    App,
+                    Workflow,
+                    WorkflowDeployment,
+                    ConversationSessionRecord,
+                    ConversationTurnRecord,
+                    ConversationAccessGrantRecord,
+                    MemoryTurnDispatchJobRecord,
+                ]
+            ).execution_options(populate_existing=True)
+        row = _execute(self._session, statement).one_or_none()
+        if row is None:
+            return None
+        (
+            session_record,
+            turn_record,
+            dispatch_record,
+            grant_record,
+            app,
+            workflow,
+            deployment,
+        ) = row
+        deployment_binding = _public_deployment_binding(
+            app,
+            workflow,
+            deployment,
+        )
+        if deployment_binding is None:
+            return None
+        session = _session_domain(session_record)
+        turn = _turn_domain(turn_record)
+        dispatch = _dispatch_domain(dispatch_record)
+        grant = _access_grant_domain(grant_record)
+        if for_update:
+            self._session_baselines[(session.organization_id, session.id)] = (
+                _SessionBaseline(
+                    lifecycle_revision=session_record.lifecycle_revision,
+                    content_revision=session_record.content_revision,
+                )
+            )
+            self._turn_baselines[
+                (turn.organization_id, turn.session_id, turn.id)
+            ] = _TurnBaseline(version=turn_record.version)
+            self._dispatch_baselines[
+                (dispatch.organization_id, dispatch.id)
+            ] = _DispatchBaseline(
+                status=dispatch_record.status,
+                claim_generation=dispatch_record.claim_generation,
+                attempt_count=dispatch_record.attempt_count,
+            )
+            self._access_grant_baselines[grant.id] = _AccessGrantBaseline(
+                state=grant_record.state,
+            )
+        return ConversationExecutionScope(
+            deployment=deployment_binding,
+            grant=grant,
+            session=session,
+            turn=turn,
+            dispatch=dispatch,
+        )
+
+    def resolve_terminal_execution_scope(
+        self,
+        command: ResolveTerminalConversationExecutionCommand,
+        *,
+        for_update: bool,
+    ) -> ConversationExecutionScope | None:
+        """Resolve immutable terminal references without reauthorizing runtime I/O."""
+
+        statement = (
+            select(
+                ConversationSessionRecord,
+                ConversationTurnRecord,
+                MemoryTurnDispatchJobRecord,
+                ConversationAccessGrantRecord,
+                App,
+                Workflow,
+                WorkflowDeployment,
+            )
+            .select_from(ConversationSessionRecord)
+            .join(
+                ConversationTurnRecord,
+                and_(
+                    ConversationTurnRecord.organization_id
+                    == ConversationSessionRecord.organization_id,
+                    ConversationTurnRecord.session_id
+                    == ConversationSessionRecord.id,
+                ),
+            )
+            .join(
+                MemoryTurnDispatchJobRecord,
+                and_(
+                    MemoryTurnDispatchJobRecord.organization_id
+                    == ConversationSessionRecord.organization_id,
+                    MemoryTurnDispatchJobRecord.session_id
+                    == ConversationSessionRecord.id,
+                    MemoryTurnDispatchJobRecord.id
+                    == ConversationTurnRecord.dispatch_id,
+                    MemoryTurnDispatchJobRecord.turn_id
+                    == ConversationTurnRecord.id,
+                ),
+            )
+            .join(
+                ConversationAccessGrantRecord,
+                and_(
+                    ConversationAccessGrantRecord.organization_id
+                    == ConversationSessionRecord.organization_id,
+                    ConversationAccessGrantRecord.session_id
+                    == ConversationSessionRecord.id,
+                    ConversationAccessGrantRecord.id
+                    == ConversationTurnRecord.access_grant_id,
+                ),
+            )
+            .join(
+                App,
+                and_(
+                    App.id == ConversationSessionRecord.app_id,
+                    App.organization_id
+                    == ConversationSessionRecord.organization_id,
+                ),
+            )
+            .join(
+                Workflow,
+                and_(
+                    Workflow.id == ConversationSessionRecord.workflow_id,
+                    Workflow.organization_id
+                    == ConversationSessionRecord.organization_id,
+                    Workflow.app_id == App.id,
+                ),
+            )
+            .join(
+                WorkflowDeployment,
+                and_(
+                    WorkflowDeployment.id
+                    == ConversationSessionRecord.deployment_id,
+                    WorkflowDeployment.app_id == App.id,
+                ),
+            )
+            .where(
+                ConversationSessionRecord.organization_id
+                == command.organization_id,
+                ConversationTurnRecord.id == command.turn_id,
+                ConversationTurnRecord.dispatch_id == command.dispatch_id,
+                MemoryTurnDispatchJobRecord.id == command.dispatch_id,
+            )
+        )
+        if for_update:
+            statement = statement.with_for_update(
+                of=[
+                    ConversationSessionRecord,
+                    ConversationTurnRecord,
+                    ConversationAccessGrantRecord,
+                    MemoryTurnDispatchJobRecord,
+                ]
+            ).execution_options(populate_existing=True)
+        row = _execute(self._session, statement).one_or_none()
+        if row is None:
+            return None
+        (
+            session_record,
+            turn_record,
+            dispatch_record,
+            grant_record,
+            app,
+            workflow,
+            deployment,
+        ) = row
+        deployment_binding = _public_deployment_binding(
+            app,
+            workflow,
+            deployment,
+            require_active=False,
+        )
+        if deployment_binding is None:
+            return None
+        session = _session_domain(session_record)
+        turn = _turn_domain(turn_record)
+        dispatch = _dispatch_domain(dispatch_record)
+        grant = _access_grant_domain(grant_record)
+        if for_update:
+            self._session_baselines[(session.organization_id, session.id)] = (
+                _SessionBaseline(
+                    lifecycle_revision=session_record.lifecycle_revision,
+                    content_revision=session_record.content_revision,
+                )
+            )
+            self._turn_baselines[
+                (turn.organization_id, turn.session_id, turn.id)
+            ] = _TurnBaseline(version=turn_record.version)
+            self._dispatch_baselines[
+                (dispatch.organization_id, dispatch.id)
+            ] = _DispatchBaseline(
+                status=dispatch_record.status,
+                claim_generation=dispatch_record.claim_generation,
+                attempt_count=dispatch_record.attempt_count,
+            )
+            self._access_grant_baselines[grant.id] = _AccessGrantBaseline(
+                state=grant_record.state,
+            )
+        return ConversationExecutionScope(
+            deployment=deployment_binding,
+            grant=grant,
+            session=session,
+            turn=turn,
+            dispatch=dispatch,
+        )
 
     def lock_public_deployment(
         self,
@@ -211,80 +580,7 @@ class SqlAlchemyConversationMemoryRepository:
         row = _execute(self._session, statement).one_or_none()
         if row is None:
             return None
-        app, workflow, deployment = row
-        if (
-            app.organization_id is None
-            or workflow.organization_id is None
-            or app.organization_id != workflow.organization_id
-            or workflow.app_id != app.id
-            or deployment.app_id != app.id
-            or deployment.id != app.active_deployment_id
-            or deployment.type != DeploymentType.CHATBOT
-            or not deployment.is_active
-            or deployment.version < 1
-        ):
-            return None
-        config = deployment.config if isinstance(deployment.config, dict) else {}
-        mapping_version = _safe_config_version(
-            config,
-            "conversation_mapping_version",
-            "mapping-v1",
-        )
-        memory_policy_version = _safe_config_version(
-            config,
-            "memory_policy_version",
-            "memory-v1",
-        )
-        if mapping_version is None or memory_policy_version is None:
-            return None
-        runtime_contract = None
-        try:
-            runtime_contract = validate_conversation_memory_runtime(
-                deployment.graph_snapshot,
-                config,
-            )
-        except ConversationMemoryRuntimeContractError:
-            # Lifecycle remains available while activation readiness stays
-            # fail-closed.  The run use case requires this safe projection.
-            runtime_contract = None
-        if runtime_contract is not None:
-            mapping_version = runtime_contract.mapping_version
-            memory_policy_version = runtime_contract.memory_policy_version
-        return PublicDeploymentBinding(
-            organization_id=workflow.organization_id,
-            app_id=app.id,
-            workflow_id=workflow.id,
-            deployment_id=deployment.id,
-            deployment_version=deployment.version,
-            mapping_version=mapping_version,
-            memory_policy_version=memory_policy_version,
-            memory_contract_version="conversation-memory-v1",
-            storage_generation=1,
-            runtime_contract_ready=runtime_contract is not None,
-            runtime_start_node_id=(
-                runtime_contract.start_node_id if runtime_contract else None
-            ),
-            runtime_input_variable=(
-                runtime_contract.input_variable if runtime_contract else None
-            ),
-            runtime_llm_node_id=(
-                runtime_contract.llm_node_id if runtime_contract else None
-            ),
-            runtime_answer_node_id=(
-                runtime_contract.answer_node_id if runtime_contract else None
-            ),
-            runtime_output_variable=(
-                runtime_contract.output_variable if runtime_contract else None
-            ),
-            runtime_max_turns=(
-                runtime_contract.memory.max_turns if runtime_contract else None
-            ),
-            runtime_max_context_tokens=(
-                runtime_contract.memory.max_context_tokens
-                if runtime_contract
-                else None
-            ),
-        )
+        return _public_deployment_binding(*row)
 
     def reserve_idempotency(
         self,
@@ -777,6 +1073,303 @@ class SqlAlchemyConversationMemoryRepository:
             content_revision=entry.content_revision,
         )
 
+    def list_prior_context_candidates(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        session_id: uuid.UUID,
+        before_turn_sequence: int,
+        limit: int,
+    ) -> tuple[ContextCandidatePair, ...]:
+        """Return newest-first pair references without projecting protected content."""
+
+        if limit <= 0:
+            return ()
+        user_entry = aliased(
+            ConversationMemoryEntryRecord,
+            name="context_user_entry",
+        )
+        assistant_entry = aliased(
+            ConversationMemoryEntryRecord,
+            name="context_assistant_entry",
+        )
+        dependency_count = (
+            select(func.count(MemoryEntryDependencyRecord.dependency_id))
+            .where(
+                MemoryEntryDependencyRecord.organization_id == organization_id,
+                MemoryEntryDependencyRecord.session_id == session_id,
+                or_(
+                    MemoryEntryDependencyRecord.entry_id
+                    == ConversationTurnRecord.user_entry_id,
+                    MemoryEntryDependencyRecord.entry_id
+                    == ConversationTurnRecord.assistant_entry_id,
+                ),
+            )
+            .correlate(ConversationTurnRecord)
+            .scalar_subquery()
+        )
+        statement = (
+            select(
+                ConversationTurnRecord.id.label("turn_id"),
+                ConversationTurnRecord.sequence.label("turn_sequence"),
+                ConversationTurnRecord.status.label("turn_status"),
+                user_entry.id.label("user_entry_id"),
+                user_entry.turn_id.label("user_turn_id"),
+                user_entry.sequence.label("user_sequence"),
+                user_entry.entry_type.label("user_entry_type"),
+                user_entry.content_revision.label("user_content_revision"),
+                user_entry.model_content_digest.label("user_content_digest"),
+                user_entry.dependency_proof_version.label(
+                    "user_dependency_proof_version"
+                ),
+                assistant_entry.id.label("assistant_entry_id"),
+                assistant_entry.turn_id.label("assistant_turn_id"),
+                assistant_entry.sequence.label("assistant_sequence"),
+                assistant_entry.entry_type.label("assistant_entry_type"),
+                assistant_entry.content_revision.label("assistant_content_revision"),
+                assistant_entry.model_content_digest.label("assistant_content_digest"),
+                assistant_entry.dependency_proof_version.label(
+                    "assistant_dependency_proof_version"
+                ),
+                dependency_count.label("dependency_count"),
+            )
+            .select_from(ConversationTurnRecord)
+            .outerjoin(
+                user_entry,
+                and_(
+                    user_entry.organization_id == organization_id,
+                    user_entry.session_id == session_id,
+                    user_entry.id == ConversationTurnRecord.user_entry_id,
+                    user_entry.turn_id == ConversationTurnRecord.id,
+                    user_entry.channel == "conversation",
+                    user_entry.lifecycle == EntryLifecycle.APPROVED.value,
+                    user_entry.invalidated_at.is_(None),
+                    or_(
+                        user_entry.expires_at.is_(None),
+                        user_entry.expires_at > func.clock_timestamp(),
+                    ),
+                ),
+            )
+            .outerjoin(
+                assistant_entry,
+                and_(
+                    assistant_entry.organization_id == organization_id,
+                    assistant_entry.session_id == session_id,
+                    assistant_entry.id == ConversationTurnRecord.assistant_entry_id,
+                    assistant_entry.turn_id == ConversationTurnRecord.id,
+                    assistant_entry.channel == "conversation",
+                    assistant_entry.lifecycle == EntryLifecycle.APPROVED.value,
+                    assistant_entry.invalidated_at.is_(None),
+                    or_(
+                        assistant_entry.expires_at.is_(None),
+                        assistant_entry.expires_at > func.clock_timestamp(),
+                    ),
+                ),
+            )
+            .where(
+                ConversationTurnRecord.organization_id == organization_id,
+                ConversationTurnRecord.session_id == session_id,
+                ConversationTurnRecord.sequence < before_turn_sequence,
+                ConversationTurnRecord.status == TurnStatus.COMPLETED.value,
+            )
+            .order_by(ConversationTurnRecord.sequence.desc())
+            .limit(limit)
+        )
+        rows = _execute(self._session, statement).mappings().all()
+        return tuple(_context_candidate_domain(row) for row in rows)
+
+    def find_context_plan(
+        self,
+        plan_id: uuid.UUID,
+    ) -> MemoryContextPlan | None:
+        statement = select(MemoryContextPlanRecord).where(
+            MemoryContextPlanRecord.id == plan_id
+        )
+        record = _execute(self._session, statement).scalar_one_or_none()
+        return _context_plan_domain(record) if record is not None else None
+
+    def add_context_plan(self, plan: MemoryContextPlan) -> None:
+        self._session.add(_context_plan_record(plan))
+
+    def find_context_lease(
+        self,
+        lease_id: uuid.UUID,
+    ) -> MemoryContextLease | None:
+        return self._load_context_lease(lease_id, for_update=False)
+
+    def lock_context_lease(
+        self,
+        lease_id: uuid.UUID,
+    ) -> MemoryContextLease | None:
+        return self._load_context_lease(lease_id, for_update=True)
+
+    def _load_context_lease(
+        self,
+        lease_id: uuid.UUID,
+        *,
+        for_update: bool,
+    ) -> MemoryContextLease | None:
+        statement = select(MemoryContextLeaseRecord).where(
+            MemoryContextLeaseRecord.id == lease_id
+        )
+        if for_update:
+            statement = statement.with_for_update().execution_options(
+                populate_existing=True
+            )
+        record = _execute(self._session, statement).scalar_one_or_none()
+        if record is None:
+            return None
+        lease = _context_lease_domain(record)
+        if for_update:
+            self._context_lease_baselines[lease.id] = _ContextLeaseBaseline(
+                state=record.state,
+                claim_generation=record.claim_generation,
+                provider_attempt_id=record.provider_attempt_id,
+            )
+        return lease
+
+    def add_context_lease(self, lease: MemoryContextLease) -> None:
+        self._session.add(_context_lease_record(lease))
+
+    def save_context_lease(self, lease: MemoryContextLease) -> None:
+        baseline = self._context_lease_baselines.get(lease.id)
+        if baseline is None:
+            raise StaleRevisionError()
+        provider_attempt_predicate = (
+            MemoryContextLeaseRecord.provider_attempt_id.is_(None)
+            if baseline.provider_attempt_id is None
+            else MemoryContextLeaseRecord.provider_attempt_id
+            == baseline.provider_attempt_id
+        )
+        statement = (
+            update(MemoryContextLeaseRecord)
+            .where(
+                MemoryContextLeaseRecord.id == lease.id,
+                MemoryContextLeaseRecord.organization_id == lease.organization_id,
+                MemoryContextLeaseRecord.session_id == lease.session_id,
+                MemoryContextLeaseRecord.state == baseline.state,
+                MemoryContextLeaseRecord.claim_generation == baseline.claim_generation,
+                provider_attempt_predicate,
+            )
+            .values(
+                state=lease.state.value,
+                claim_generation=lease.claim_generation,
+                provider_attempt_id=lease.provider_attempt_id,
+                claim_deadline_at=lease.claim_deadline_at,
+                updated_at=func.now(),
+            )
+            .execution_options(synchronize_session=False)
+        )
+        _require_single_row(_execute(self._session, statement))
+        self._context_lease_baselines[lease.id] = _ContextLeaseBaseline(
+            state=lease.state.value,
+            claim_generation=lease.claim_generation,
+            provider_attempt_id=lease.provider_attempt_id,
+        )
+
+    def get_context_entry(
+        self,
+        reference: ContextEntryReference,
+    ) -> ConversationMemoryEntry | None:
+        proof_predicate = (
+            ConversationMemoryEntryRecord.dependency_proof_version.is_(None)
+            if reference.dependency_proof_version is None
+            else ConversationMemoryEntryRecord.dependency_proof_version
+            == reference.dependency_proof_version
+        )
+        statement = select(ConversationMemoryEntryRecord).where(
+            ConversationMemoryEntryRecord.id == reference.entry_id,
+            ConversationMemoryEntryRecord.turn_id == reference.turn_id,
+            ConversationMemoryEntryRecord.sequence == reference.sequence,
+            ConversationMemoryEntryRecord.entry_type == reference.entry_type.value,
+            ConversationMemoryEntryRecord.content_revision
+            == reference.content_revision,
+            ConversationMemoryEntryRecord.model_content_digest
+            == reference.content_digest,
+            ConversationMemoryEntryRecord.channel == "conversation",
+            ConversationMemoryEntryRecord.lifecycle == EntryLifecycle.APPROVED.value,
+            ConversationMemoryEntryRecord.invalidated_at.is_(None),
+            proof_predicate,
+        )
+        record = _execute(self._session, statement).scalar_one_or_none()
+        return _entry_domain(record) if record is not None else None
+
+    def find_context_attempt(
+        self,
+        attempt_id: uuid.UUID,
+    ) -> MemoryContextProviderAttempt | None:
+        return self._load_context_attempt(attempt_id, for_update=False)
+
+    def lock_context_attempt(
+        self,
+        attempt_id: uuid.UUID,
+    ) -> MemoryContextProviderAttempt | None:
+        return self._load_context_attempt(attempt_id, for_update=True)
+
+    def _load_context_attempt(
+        self,
+        attempt_id: uuid.UUID,
+        *,
+        for_update: bool,
+    ) -> MemoryContextProviderAttempt | None:
+        statement = select(MemoryContextProviderAttemptRecord).where(
+            MemoryContextProviderAttemptRecord.id == attempt_id
+        )
+        if for_update:
+            statement = statement.with_for_update().execution_options(
+                populate_existing=True
+            )
+        record = _execute(self._session, statement).scalar_one_or_none()
+        if record is None:
+            return None
+        attempt = _context_attempt_domain(record)
+        if for_update:
+            self._context_attempt_baselines[attempt.id] = _ContextAttemptBaseline(
+                status=record.status,
+                version=record.version,
+                claim_generation=record.claim_generation,
+            )
+        return attempt
+
+    def add_context_attempt(self, attempt: MemoryContextProviderAttempt) -> None:
+        self._session.add(_context_attempt_record(attempt))
+
+    def save_context_attempt(self, attempt: MemoryContextProviderAttempt) -> None:
+        baseline = self._context_attempt_baselines.get(attempt.id)
+        if baseline is None:
+            raise StaleRevisionError()
+        statement = (
+            update(MemoryContextProviderAttemptRecord)
+            .where(
+                MemoryContextProviderAttemptRecord.id == attempt.id,
+                MemoryContextProviderAttemptRecord.organization_id
+                == attempt.organization_id,
+                MemoryContextProviderAttemptRecord.session_id == attempt.session_id,
+                MemoryContextProviderAttemptRecord.status == baseline.status,
+                MemoryContextProviderAttemptRecord.version == baseline.version,
+                MemoryContextProviderAttemptRecord.claim_generation
+                == baseline.claim_generation,
+            )
+            .values(
+                status=attempt.status.value,
+                version=attempt.version,
+                claim_generation=attempt.claim_generation,
+                claim_deadline_at=attempt.claim_deadline_at,
+                provider_started_at=attempt.provider_started_at,
+                usage_reference=attempt.usage_reference,
+                safe_failure_reason=attempt.safe_failure_reason,
+                terminal_at=attempt.terminal_at,
+                updated_at=func.now(),
+            )
+            .execution_options(synchronize_session=False)
+        )
+        _require_single_row(_execute(self._session, statement))
+        self._context_attempt_baselines[attempt.id] = _ContextAttemptBaseline(
+            status=attempt.status.value,
+            version=attempt.version,
+            claim_generation=attempt.claim_generation,
+        )
+
     def add_dispatch_job(self, job: MemoryTurnDispatchJob) -> None:
         self._session.add(_dispatch_record(job))
 
@@ -1127,6 +1720,276 @@ def _projection_domain(
     )
 
 
+def _context_candidate_domain(row: Any) -> ContextCandidatePair:
+    try:
+        dependency_count = int(row["dependency_count"])
+        if dependency_count < 0:
+            raise ValueError
+        return ContextCandidatePair(
+            turn_id=_context_uuid(row["turn_id"]),
+            turn_sequence=int(row["turn_sequence"]),
+            status=TurnStatus(row["turn_status"]),
+            user=_context_reference_from_row(row, "user"),
+            assistant=_context_reference_from_row(row, "assistant"),
+            dependency_count=dependency_count,
+        )
+    except (KeyError, TypeError, ValueError):
+        raise MemoryAdapterUnavailableError() from None
+
+
+def _context_reference_from_row(
+    row: Any,
+    prefix: str,
+) -> ContextEntryReference | None:
+    entry_id = row[f"{prefix}_entry_id"]
+    turn_id = row[f"{prefix}_turn_id"]
+    sequence = row[f"{prefix}_sequence"]
+    entry_type = row[f"{prefix}_entry_type"]
+    content_revision = row[f"{prefix}_content_revision"]
+    content_digest = row[f"{prefix}_content_digest"]
+    if any(
+        value is None
+        for value in (
+            entry_id,
+            turn_id,
+            sequence,
+            entry_type,
+            content_revision,
+            content_digest,
+        )
+    ):
+        return None
+    return ContextEntryReference(
+        entry_id=_context_uuid(entry_id),
+        turn_id=_context_uuid(turn_id),
+        sequence=int(sequence),
+        entry_type=EntryType(entry_type),
+        content_revision=int(content_revision),
+        content_digest=str(content_digest),
+        dependency_proof_version=row[f"{prefix}_dependency_proof_version"],
+    )
+
+
+def _context_plan_record(plan: MemoryContextPlan) -> MemoryContextPlanRecord:
+    return MemoryContextPlanRecord(
+        id=plan.id,
+        organization_id=plan.organization_id,
+        session_id=plan.session_id,
+        turn_id=plan.turn_id,
+        channel="conversation",
+        ordered_references=[
+            _context_candidate_payload(pair) for pair in plan.ordered_pairs
+        ],
+        policy_version=plan.policy_version,
+        content_digest=plan.content_digest,
+        lifecycle_revision=plan.lifecycle_revision,
+        content_revision=plan.content_revision,
+        source_revision=plan.turn_version,
+        authorization_revision_set_digest=(plan.authorization_revision_set_digest),
+        expires_at=plan.expires_at,
+        invalidated_at=None,
+    )
+
+
+def _context_plan_domain(record: MemoryContextPlanRecord) -> MemoryContextPlan:
+    try:
+        if record.turn_id is None or not isinstance(record.ordered_references, list):
+            raise ValueError
+        return MemoryContextPlan(
+            id=record.id,
+            organization_id=record.organization_id,
+            session_id=record.session_id,
+            turn_id=record.turn_id,
+            ordered_pairs=tuple(
+                _context_candidate_from_payload(payload)
+                for payload in record.ordered_references
+            ),
+            policy_version=record.policy_version,
+            content_digest=record.content_digest,
+            lifecycle_revision=record.lifecycle_revision,
+            content_revision=record.content_revision,
+            turn_version=record.source_revision,
+            authorization_revision_set_digest=(
+                record.authorization_revision_set_digest
+            ),
+            expires_at=record.expires_at,
+        )
+    except (KeyError, TypeError, ValueError):
+        raise MemoryAdapterUnavailableError() from None
+
+
+def _context_candidate_payload(pair: ContextCandidatePair) -> dict[str, object]:
+    return {
+        "turn_id": str(pair.turn_id),
+        "turn_sequence": pair.turn_sequence,
+        "status": pair.status.value,
+        "user": _context_reference_payload(pair.user),
+        "assistant": _context_reference_payload(pair.assistant),
+        "dependency_count": pair.dependency_count,
+    }
+
+
+def _context_candidate_from_payload(payload: Any) -> ContextCandidatePair:
+    if not isinstance(payload, dict):
+        raise ValueError
+    dependency_count = int(payload["dependency_count"])
+    if dependency_count < 0:
+        raise ValueError
+    return ContextCandidatePair(
+        turn_id=_context_uuid(payload["turn_id"]),
+        turn_sequence=int(payload["turn_sequence"]),
+        status=TurnStatus(payload["status"]),
+        user=_context_reference_from_payload(payload["user"]),
+        assistant=_context_reference_from_payload(payload["assistant"]),
+        dependency_count=dependency_count,
+    )
+
+
+def _context_reference_payload(
+    reference: ContextEntryReference | None,
+) -> dict[str, object] | None:
+    if reference is None:
+        return None
+    return {
+        "entry_id": str(reference.entry_id),
+        "turn_id": str(reference.turn_id),
+        "sequence": reference.sequence,
+        "entry_type": reference.entry_type.value,
+        "content_revision": reference.content_revision,
+        "content_digest": reference.content_digest,
+        "dependency_proof_version": reference.dependency_proof_version,
+    }
+
+
+def _context_reference_from_payload(
+    payload: Any,
+) -> ContextEntryReference | None:
+    if payload is None:
+        return None
+    if not isinstance(payload, dict):
+        raise ValueError
+    return ContextEntryReference(
+        entry_id=_context_uuid(payload["entry_id"]),
+        turn_id=_context_uuid(payload["turn_id"]),
+        sequence=int(payload["sequence"]),
+        entry_type=EntryType(payload["entry_type"]),
+        content_revision=int(payload["content_revision"]),
+        content_digest=str(payload["content_digest"]),
+        dependency_proof_version=payload.get("dependency_proof_version"),
+    )
+
+
+def _context_lease_record(
+    lease: MemoryContextLease,
+) -> MemoryContextLeaseRecord:
+    return MemoryContextLeaseRecord(
+        id=lease.id,
+        organization_id=lease.organization_id,
+        session_id=lease.session_id,
+        turn_id=lease.turn_id,
+        plan_id=lease.plan_id,
+        node_invocation_id=lease.node_invocation_id,
+        audience_kind=AudienceKind.PUBLIC_CHATBOT.value,
+        subject_type=None,
+        subject_id=None,
+        provider_capability_reference=lease.provider_capability_reference,
+        provider_capability_revision=lease.provider_capability_revision,
+        purpose="main_generation",
+        state=lease.state.value,
+        claim_generation=lease.claim_generation,
+        provider_attempt_id=lease.provider_attempt_id,
+        claim_deadline_at=lease.claim_deadline_at,
+        expires_at=lease.expires_at,
+        invalidated_at=None,
+    )
+
+
+def _context_lease_domain(
+    record: MemoryContextLeaseRecord,
+) -> MemoryContextLease:
+    if record.turn_id is None:
+        raise MemoryAdapterUnavailableError()
+    try:
+        return MemoryContextLease(
+            id=record.id,
+            organization_id=record.organization_id,
+            session_id=record.session_id,
+            turn_id=record.turn_id,
+            plan_id=record.plan_id,
+            node_invocation_id=record.node_invocation_id,
+            provider_capability_reference=record.provider_capability_reference,
+            provider_capability_revision=record.provider_capability_revision,
+            provider_attempt_id=record.provider_attempt_id,
+            state=ContextLeaseState(record.state),
+            claim_generation=record.claim_generation,
+            claim_deadline_at=record.claim_deadline_at,
+            expires_at=record.expires_at,
+        )
+    except (TypeError, ValueError):
+        raise MemoryAdapterUnavailableError() from None
+
+
+def _context_attempt_record(
+    attempt: MemoryContextProviderAttempt,
+) -> MemoryContextProviderAttemptRecord:
+    return MemoryContextProviderAttemptRecord(
+        id=attempt.id,
+        organization_id=attempt.organization_id,
+        session_id=attempt.session_id,
+        turn_id=attempt.turn_id,
+        lease_id=attempt.lease_id,
+        plan_id=attempt.plan_id,
+        node_invocation_id=attempt.node_invocation_id,
+        provider_capability_reference=attempt.provider_capability_reference,
+        provider_capability_revision=attempt.provider_capability_revision,
+        purpose="main_generation",
+        status=attempt.status.value,
+        version=attempt.version,
+        claim_generation=attempt.claim_generation,
+        claim_deadline_at=attempt.claim_deadline_at,
+        provider_started_at=attempt.provider_started_at,
+        provider_correlation_reference=None,
+        usage_reference=attempt.usage_reference,
+        safe_failure_reason=attempt.safe_failure_reason,
+        terminal_at=attempt.terminal_at,
+    )
+
+
+def _context_attempt_domain(
+    record: MemoryContextProviderAttemptRecord,
+) -> MemoryContextProviderAttempt:
+    if record.turn_id is None:
+        raise MemoryAdapterUnavailableError()
+    try:
+        return MemoryContextProviderAttempt(
+            id=record.id,
+            organization_id=record.organization_id,
+            session_id=record.session_id,
+            turn_id=record.turn_id,
+            lease_id=record.lease_id,
+            plan_id=record.plan_id,
+            node_invocation_id=record.node_invocation_id,
+            provider_capability_reference=record.provider_capability_reference,
+            provider_capability_revision=record.provider_capability_revision,
+            status=ContextAttemptState(record.status),
+            version=record.version,
+            claim_generation=record.claim_generation,
+            claim_deadline_at=record.claim_deadline_at,
+            provider_started_at=record.provider_started_at,
+            usage_reference=record.usage_reference,
+            safe_failure_reason=record.safe_failure_reason,
+            terminal_at=record.terminal_at,
+        )
+    except (TypeError, ValueError):
+        raise MemoryAdapterUnavailableError() from None
+
+
+def _context_uuid(value: object) -> uuid.UUID:
+    if isinstance(value, uuid.UUID):
+        return value
+    return uuid.UUID(str(value))
+
+
 def _dispatch_record(job: MemoryTurnDispatchJob) -> MemoryTurnDispatchJobRecord:
     return MemoryTurnDispatchJobRecord(
         id=job.id,
@@ -1428,6 +2291,97 @@ def _secret_replay_domain(
         associated_data_digest=record.associated_data_digest,
         expires_at=record.expires_at,
         created_at=record.created_at,
+    )
+
+
+def _public_deployment_binding(
+    app: App,
+    workflow: Workflow,
+    deployment: WorkflowDeployment,
+    *,
+    require_active: bool = True,
+) -> PublicDeploymentBinding | None:
+    if (
+        app.organization_id is None
+        or workflow.organization_id is None
+        or app.organization_id != workflow.organization_id
+        or workflow.app_id != app.id
+        or deployment.app_id != app.id
+        or deployment.type != DeploymentType.CHATBOT
+        or deployment.version < 1
+        or (
+            require_active
+            and (
+                deployment.id != app.active_deployment_id
+                or not deployment.is_active
+            )
+        )
+    ):
+        return None
+    config = deployment.config if isinstance(deployment.config, dict) else {}
+    mapping_version = _safe_config_version(
+        config,
+        "conversation_mapping_version",
+        "mapping-v1",
+    )
+    memory_policy_version = _safe_config_version(
+        config,
+        "memory_policy_version",
+        "memory-v1",
+    )
+    if mapping_version is None or memory_policy_version is None:
+        return None
+    runtime_contract = None
+    try:
+        runtime_contract = validate_conversation_memory_runtime(
+            deployment.graph_snapshot,
+            config,
+        )
+    except ConversationMemoryRuntimeContractError:
+        # Lifecycle remains available while activation readiness stays
+        # fail-closed.  Runtime use cases require the ready projection.
+        runtime_contract = None
+    if runtime_contract is not None:
+        mapping_version = runtime_contract.mapping_version
+        memory_policy_version = runtime_contract.memory_policy_version
+    runtime_current = (
+        deployment.id == app.active_deployment_id and deployment.is_active
+    )
+    return PublicDeploymentBinding(
+        organization_id=workflow.organization_id,
+        app_id=app.id,
+        workflow_id=workflow.id,
+        deployment_id=deployment.id,
+        deployment_version=deployment.version,
+        mapping_version=mapping_version,
+        memory_policy_version=memory_policy_version,
+        memory_contract_version="conversation-memory-v1",
+        storage_generation=1,
+        runtime_contract_ready=(
+            runtime_contract is not None
+            and runtime_current
+        ),
+        runtime_start_node_id=(
+            runtime_contract.start_node_id if runtime_contract else None
+        ),
+        runtime_input_variable=(
+            runtime_contract.input_variable if runtime_contract else None
+        ),
+        runtime_llm_node_id=(
+            runtime_contract.llm_node_id if runtime_contract else None
+        ),
+        runtime_answer_node_id=(
+            runtime_contract.answer_node_id if runtime_contract else None
+        ),
+        runtime_output_variable=(
+            runtime_contract.output_variable if runtime_contract else None
+        ),
+        runtime_max_turns=(
+            runtime_contract.memory.max_turns if runtime_contract else None
+        ),
+        runtime_max_context_tokens=(
+            runtime_contract.memory.max_context_tokens if runtime_contract else None
+        ),
     )
 
 

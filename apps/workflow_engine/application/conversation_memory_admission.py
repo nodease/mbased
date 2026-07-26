@@ -240,6 +240,7 @@ class AdmitConversationExecutionResult:
     execution_id: uuid.UUID
     state: ConversationExecutionState
     replayed: bool
+    safe_failure_reason: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -331,6 +332,7 @@ class AdmitConversationExecutionUseCase(_TransactionalUseCase):
                     execution_id=existing.execution_id,
                     state=existing.state,
                     replayed=True,
+                    safe_failure_reason=existing.safe_failure_reason,
                 )
             admission = ConversationExecutionAdmission.admit(command)
             self.repository.add(admission)
@@ -339,6 +341,7 @@ class AdmitConversationExecutionUseCase(_TransactionalUseCase):
                 execution_id=admission.execution_id,
                 state=admission.state,
                 replayed=False,
+                safe_failure_reason=None,
             )
 
         return self._execute(operation)

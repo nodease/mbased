@@ -405,7 +405,7 @@ def get_public_turn_status(
         raise _hidden_error() from None
     except Exception as error:
         raise _map_public_error(error) from None
-    _set_public_headers(response)
+    _set_public_headers(response, lifecycle_revision=result.lifecycle_revision)
     return {
         "turn": {
             "id": str(result.turn_id),

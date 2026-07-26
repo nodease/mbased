@@ -1,3 +1,4 @@
+import asyncio
 from datetime import datetime, timezone
 from typing import Annotated
 
@@ -17,7 +18,8 @@ from apps.gateway.api.deps import get_deployment_runtime_policy
 from apps.shared.db.session import get_db
 from apps.gateway.services.deployment_service import DeploymentService
 from apps.gateway.composition.memory import (
-    build_public_conversation_runtime_application,
+    public_conversation_runtime_required,
+    start_public_conversation_turn,
 )
 from apps.gateway.api.v1.endpoints.public_conversation import (
     _conversation_token,
@@ -36,6 +38,10 @@ from apps.gateway.middleware.public_conversation_cors import (
 from apps.shared.domain.deployment_runtime_policy import DeploymentRuntimePolicy
 
 router = APIRouter()
+
+
+_public_conversation_runtime_required = public_conversation_runtime_required
+_start_public_conversation_turn = start_public_conversation_turn
 
 
 class _PublicConversationRunEnvelope(BaseModel):
@@ -116,8 +122,8 @@ async def run_workflow_public(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             ) from None
         try:
-            application = build_public_conversation_runtime_application(db)
-            result = application.start_turn.execute(
+            result = await asyncio.to_thread(
+                _start_public_conversation_turn,
                 StartPublicConversationTurnCommand(
                     url_slug=url_slug,
                     access_token=_conversation_token(authorization),
@@ -158,6 +164,13 @@ async def run_workflow_public(
                 ),
             },
         }
+    if await asyncio.to_thread(_public_conversation_runtime_required, url_slug):
+        mark_public_conversation_transport_boundary(request.scope)
+        raise _safe_error(
+            "memory.conversation_required",
+            "A conversation envelope is required for this deployment.",
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        )
     # 웹 앱/임베딩: 공개 접근 (인증 불필요)
     return await DeploymentService.run_deployment(
         db=db,

@@ -10,7 +10,7 @@ import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Any, Callable, Mapping, Protocol
+from typing import Any, Callable, Literal, Mapping, Protocol
 
 from apps.shared.domain.conversation_memory_runtime import (
     ConversationMemoryRuntimeContract,
@@ -22,10 +22,14 @@ from apps.shared.utils.prompt_injection_guard import (
     PLATFORM_UNTRUSTED_CONTEXT_GUARDRAIL_PROMPT,
 )
 from apps.workflow_engine.application.conversation_memory_admission import (
+    ConversationExecutionFenceError,
     ConversationExecutionState,
 )
 from apps.workflow_engine.application.provider_execution import (
+    LLMCredentialNotAvailableError,
+    ProviderExecutionConfigurationError,
     ProviderInvocationOutcomeUnknownError,
+    ProviderStartCommitRetryableError,
 )
 
 _TEMPLATE_VARIABLE = re.compile(r"{{\s*([A-Za-z_][A-Za-z0-9_]*)\s*}}")
@@ -115,6 +119,24 @@ class ConversationMemoryCheckpoint:
 
 
 @dataclass(frozen=True, slots=True)
+class ConversationMemoryTerminalProjection:
+    outcome: Literal["completed", "failed", "outcome_unknown"]
+    safe_failure_reason: str | None
+    result_entry_id: uuid.UUID | None = None
+    result_digest: str | None = None
+    provider_attempt_id: uuid.UUID | None = None
+    usage_reference: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class ConversationMemoryTerminalRecovery:
+    binding: ConversationExecutionBinding
+    projection: ConversationMemoryTerminalProjection
+    requires_memory_failure: bool = False
+    requires_dispatch_acknowledgement: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class ExecuteConversationTurnCommand:
     envelope: ConversationTurnTaskEnvelope
     worker_owner: str
@@ -131,6 +153,18 @@ class ExecuteConversationTurnResult:
 
 class ConversationMemoryRuntimePort(Protocol):
     def resolve(self, envelope: ConversationTurnTaskEnvelope) -> ConversationExecutionBinding: ...
+
+    def resolve_terminal(
+        self,
+        envelope: ConversationTurnTaskEnvelope,
+        **kwargs,
+    ) -> ConversationMemoryTerminalRecovery | None: ...
+
+    def finalize_reference_failure(
+        self,
+        binding: ConversationExecutionBinding,
+        **kwargs,
+    ) -> ConversationMemoryTerminalProjection: ...
 
     def observe_admitted(self, binding: ConversationExecutionBinding, **kwargs) -> ConversationExecutionBinding: ...
 
@@ -149,6 +183,12 @@ class ConversationMemoryRuntimePort(Protocol):
         binding: ConversationExecutionBinding,
         **kwargs,
     ) -> ConversationMemoryCheckpoint | None: ...
+
+    def recover_terminal(
+        self,
+        binding: ConversationExecutionBinding,
+        **kwargs,
+    ) -> ConversationMemoryTerminalProjection | None: ...
 
     def mark_provider_started(self, binding: ConversationExecutionBinding, **kwargs) -> int: ...
 
@@ -194,6 +234,14 @@ class ConversationProviderPort(Protocol):
         **kwargs,
     ) -> None: ...
 
+    def reconcile_reference_terminal(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        provider_attempt_id: uuid.UUID,
+        usage_reference: str | None,
+    ) -> str: ...
+
 
 class ConversationObserverPort(Protocol):
     def record(self, **kwargs) -> None: ...
@@ -234,6 +282,89 @@ class ExecuteConversationTurnUseCase:
         envelope = command.envelope
         if envelope.minimum_worker_capability != self.worker_capability:
             raise ConversationExecutionRuntimeError("memory.worker_incompatible")
+        deterministic_admission_id = uuid.uuid5(
+            envelope.dispatch_id,
+            "conversation-workflow-admission-v1",
+        )
+        deterministic_execution_id = uuid.uuid5(
+            deterministic_admission_id,
+            "conversation-execution-v1",
+        )
+        stable_attempt_id = uuid.uuid5(
+            deterministic_execution_id,
+            "conversation-execution-attempt-v1",
+        )
+        terminal_recovery = self.memory.resolve_terminal(
+            envelope,
+            admission_id=deterministic_admission_id,
+            execution_id=deterministic_execution_id,
+            attempt_id=stable_attempt_id,
+        )
+        if terminal_recovery is not None:
+            binding = terminal_recovery.binding
+            self._require_envelope_binding(envelope, binding)
+            admitted = self.admissions.admit(binding, now=self.clock.now())
+            if (
+                admitted.admission_id != deterministic_admission_id
+                or admitted.execution_id != deterministic_execution_id
+            ):
+                raise ConversationExecutionRuntimeError(
+                    "memory.execution_binding_mismatch"
+                )
+            if admitted.state in {
+                ConversationExecutionState.COMPLETED,
+                ConversationExecutionState.FAILED,
+                ConversationExecutionState.OUTCOME_UNKNOWN,
+            }:
+                return self._return_terminal_admission(binding, admitted)
+            now = self.clock.now()
+            claimed = self.admissions.claim(
+                binding,
+                owner=command.worker_owner,
+                attempt_id=stable_attempt_id,
+                lease_deadline=now + self.lease_duration,
+                now=now,
+            )
+            projection = terminal_recovery.projection
+            if terminal_recovery.requires_memory_failure:
+                context_outcome = "failed"
+                if projection.provider_attempt_id is not None:
+                    usage_state = self.provider.reconcile_reference_terminal(
+                        organization_id=binding.organization_id,
+                        provider_attempt_id=projection.provider_attempt_id,
+                        usage_reference=projection.usage_reference,
+                    )
+                    if usage_state == "outcome_unknown":
+                        projection = ConversationMemoryTerminalProjection(
+                            outcome="outcome_unknown",
+                            safe_failure_reason="provider_outcome_unknown",
+                            provider_attempt_id=(
+                                projection.provider_attempt_id
+                            ),
+                            usage_reference=projection.usage_reference,
+                        )
+                        context_outcome = "outcome_unknown"
+                    elif usage_state == "succeeded":
+                        context_outcome = "succeeded"
+                projection = self.memory.finalize_reference_failure(
+                    binding,
+                    admission_id=admitted.admission_id,
+                    execution_id=admitted.execution_id,
+                    attempt_id=stable_attempt_id,
+                    safe_failure_reason=projection.safe_failure_reason,
+                    acknowledge_dispatch=(
+                        terminal_recovery.requires_dispatch_acknowledgement
+                    ),
+                    provider_attempt_id=projection.provider_attempt_id,
+                    context_outcome=context_outcome,
+                    execution_outcome=projection.outcome,
+                )
+            return self._reconcile_terminal_projection(
+                binding=binding,
+                claimed=claimed,
+                projection=projection,
+                worker_owner=command.worker_owner,
+            )
         binding = self.memory.resolve(envelope)
         self._require_envelope_binding(envelope, binding)
         graph = self.graphs.load(binding)
@@ -245,12 +376,43 @@ class ExecuteConversationTurnUseCase:
             ConversationExecutionState.FAILED,
             ConversationExecutionState.OUTCOME_UNKNOWN,
         }:
-            return ExecuteConversationTurnResult(
+            return self._return_terminal_admission(binding, admitted)
+        stable_attempt_id = uuid.uuid5(
+            admitted.execution_id,
+            "conversation-execution-attempt-v1",
+        )
+        node_invocation_id = uuid.uuid5(
+            admitted.execution_id,
+            f"conversation-node:{binding.llm_node_id}",
+        )
+        claimed = None
+        if admitted.state is ConversationExecutionState.LEASED:
+            now = self.clock.now()
+            claimed = self.admissions.claim(
+                binding,
+                owner=command.worker_owner,
+                attempt_id=stable_attempt_id,
+                lease_deadline=now + self.lease_duration,
+                now=now,
+            )
+            terminal_projection = self.memory.recover_terminal(
+                binding,
                 admission_id=admitted.admission_id,
                 execution_id=admitted.execution_id,
-                turn_id=binding.turn_id,
-                state=admitted.state,
+                attempt_id=stable_attempt_id,
+                node_invocation_id=node_invocation_id,
+                provider_attempt_id=_provider_attempt_id(
+                    admitted.execution_id,
+                    node_invocation_id,
+                ),
             )
+            if terminal_projection is not None:
+                return self._reconcile_terminal_projection(
+                    binding=binding,
+                    claimed=claimed,
+                    projection=terminal_projection,
+                    worker_owner=command.worker_owner,
+                )
         checkpoint = self.memory.recover_checkpoint(
             binding,
             execution_id=admitted.execution_id,
@@ -262,19 +424,21 @@ class ExecuteConversationTurnUseCase:
                 claim_generation=envelope.claim_generation,
                 broker_message_id=envelope.broker_message_id,
             )
-            self._observe("execution_admitted", binding, admitted.admission_id)
-        now = self.clock.now()
-        stable_attempt_id = uuid.uuid5(
-            admitted.execution_id,
-            "conversation-execution-attempt-v1",
-        )
-        claimed = self.admissions.claim(
-            binding,
-            owner=command.worker_owner,
-            attempt_id=stable_attempt_id,
-            lease_deadline=now + self.lease_duration,
-            now=now,
-        )
+            self._observe(
+                "execution_admitted",
+                binding,
+                admitted.admission_id,
+                admitted.execution_id,
+            )
+        if claimed is None:
+            now = self.clock.now()
+            claimed = self.admissions.claim(
+                binding,
+                owner=command.worker_owner,
+                attempt_id=stable_attempt_id,
+                lease_deadline=now + self.lease_duration,
+                now=now,
+            )
         if checkpoint is not None:
             return self._complete_from_checkpoint(
                 binding=binding,
@@ -288,25 +452,67 @@ class ExecuteConversationTurnUseCase:
             execution_id=claimed.execution_id,
             attempt_id=claimed.attempt_id,
         )
-        self._observe("execution_running", binding, claimed.admission_id)
+        self._observe(
+            "execution_running",
+            binding,
+            claimed.admission_id,
+            claimed.execution_id,
+        )
         input_text = self.memory.read_current_input(
             binding,
             execution_id=claimed.execution_id,
             attempt_id=claimed.attempt_id,
         )
-        node_invocation_id = uuid.uuid5(
-            claimed.execution_id,
-            f"conversation-node:{binding.llm_node_id}",
-        )
         llm_data = _llm_data(graph.graph, binding.llm_node_id)
-        preparation = self.provider.prepare(
-            binding=binding,
-            admission_id=claimed.admission_id,
-            execution_id=claimed.execution_id,
-            node_invocation_id=node_invocation_id,
-            node_data=llm_data,
-            deployment_config=graph.deployment_config,
-        )
+        try:
+            preparation = self.provider.prepare(
+                binding=binding,
+                admission_id=claimed.admission_id,
+                execution_id=claimed.execution_id,
+                node_invocation_id=node_invocation_id,
+                node_data=llm_data,
+                deployment_config=graph.deployment_config,
+            )
+        except (
+            LLMCredentialNotAvailableError,
+            ProviderExecutionConfigurationError,
+        ) as exc:
+            safe_reason = _safe_reason_code(exc, "provider_not_sent")
+            self.admissions.require_fence(
+                binding,
+                owner=command.worker_owner,
+                lease_generation=claimed.lease_generation,
+                now=self.clock.now(),
+            )
+            self.memory.fail(
+                binding,
+                execution_id=claimed.execution_id,
+                attempt_id=claimed.attempt_id,
+                safe_reason_code=safe_reason,
+            )
+            self.admissions.finish(
+                binding,
+                owner=command.worker_owner,
+                lease_generation=claimed.lease_generation,
+                outcome="failed",
+                result_entry_id=None,
+                result_digest=None,
+                safe_failure_reason=safe_reason,
+                now=self.clock.now(),
+            )
+            self._observe(
+                "execution_failed",
+                binding,
+                claimed.admission_id,
+                claimed.execution_id,
+                safe_failure_reason=safe_reason,
+            )
+            return ExecuteConversationTurnResult(
+                admission_id=claimed.admission_id,
+                execution_id=claimed.execution_id,
+                turn_id=binding.turn_id,
+                state=ConversationExecutionState.FAILED,
+            )
         context_build = self.memory.build_context(
             binding,
             node_invocation_id=node_invocation_id,
@@ -371,7 +577,15 @@ class ExecuteConversationTurnUseCase:
                 messages=messages,
                 before_provider_start=before_provider_start,
             )
+        except ConversationExecutionFenceError:
+            raise
         except ProviderInvocationOutcomeUnknownError:
+            self.admissions.require_fence(
+                binding,
+                owner=command.worker_owner,
+                lease_generation=claimed.lease_generation,
+                now=self.clock.now(),
+            )
             self.memory.finish_context_attempt(
                 binding,
                 context_attempt_id=context.attempt_id,
@@ -395,9 +609,27 @@ class ExecuteConversationTurnUseCase:
                 safe_failure_reason="provider_outcome_unknown",
                 now=self.clock.now(),
             )
+            self._observe(
+                "execution_outcome_unknown",
+                binding,
+                claimed.admission_id,
+                claimed.execution_id,
+                safe_failure_reason="provider_outcome_unknown",
+            )
+            raise
+        except ProviderStartCommitRetryableError:
+            # Memory's provider-start marker may already be durable while the
+            # canonical usage start commit is ambiguous.  A bounded retry must
+            # inspect the usage ledger before deciding whether send is allowed.
             raise
         except Exception as exc:
             safe_reason = _safe_reason_code(exc, "provider_not_sent")
+            self.admissions.require_fence(
+                binding,
+                owner=command.worker_owner,
+                lease_generation=claimed.lease_generation,
+                now=self.clock.now(),
+            )
             self.memory.finish_context_attempt(
                 binding,
                 context_attempt_id=context.attempt_id,
@@ -421,8 +653,21 @@ class ExecuteConversationTurnUseCase:
                 safe_failure_reason=safe_reason,
                 now=self.clock.now(),
             )
+            self._observe(
+                "execution_failed",
+                binding,
+                claimed.admission_id,
+                claimed.execution_id,
+                safe_failure_reason=safe_reason,
+            )
             raise
 
+        self.admissions.require_fence(
+            binding,
+            owner=command.worker_owner,
+            lease_generation=claimed.lease_generation,
+            now=self.clock.now(),
+        )
         if usage_reference is None:
             raise ConversationExecutionRuntimeError(
                 "provider_usage.binding_mismatch"
@@ -450,6 +695,70 @@ class ExecuteConversationTurnUseCase:
             checkpoint=checkpoint,
             worker_owner=command.worker_owner,
             resume_usage=False,
+        )
+
+    def _return_terminal_admission(
+        self,
+        binding: ConversationExecutionBinding,
+        admitted,
+    ) -> ExecuteConversationTurnResult:
+        terminal_event = {
+            ConversationExecutionState.COMPLETED: "execution_completed",
+            ConversationExecutionState.FAILED: "execution_failed",
+            ConversationExecutionState.OUTCOME_UNKNOWN: (
+                "execution_outcome_unknown"
+            ),
+        }[admitted.state]
+        self._observe(
+            terminal_event,
+            binding,
+            admitted.admission_id,
+            admitted.execution_id,
+            safe_failure_reason=admitted.safe_failure_reason,
+        )
+        return ExecuteConversationTurnResult(
+            admission_id=admitted.admission_id,
+            execution_id=admitted.execution_id,
+            turn_id=binding.turn_id,
+            state=admitted.state,
+        )
+
+    def _reconcile_terminal_projection(
+        self,
+        *,
+        binding: ConversationExecutionBinding,
+        claimed,
+        projection: ConversationMemoryTerminalProjection,
+        worker_owner: str,
+    ) -> ExecuteConversationTurnResult:
+        try:
+            state = ConversationExecutionState(projection.outcome)
+        except ValueError as exc:
+            raise ConversationExecutionRuntimeError(
+                "memory.terminal_projection_invalid"
+            ) from exc
+        self.admissions.finish(
+            binding,
+            owner=worker_owner,
+            lease_generation=claimed.lease_generation,
+            outcome=state.value,
+            result_entry_id=projection.result_entry_id,
+            result_digest=projection.result_digest,
+            safe_failure_reason=projection.safe_failure_reason,
+            now=self.clock.now(),
+        )
+        self._observe(
+            f"execution_{state.value}",
+            binding,
+            claimed.admission_id,
+            claimed.execution_id,
+            safe_failure_reason=projection.safe_failure_reason,
+        )
+        return ExecuteConversationTurnResult(
+            admission_id=claimed.admission_id,
+            execution_id=claimed.execution_id,
+            turn_id=binding.turn_id,
+            state=state,
         )
 
     def _complete_from_checkpoint(
@@ -503,7 +812,12 @@ class ExecuteConversationTurnUseCase:
             safe_failure_reason=None,
             now=self.clock.now(),
         )
-        self._observe("execution_completed", binding, claimed.admission_id)
+        self._observe(
+            "execution_completed",
+            binding,
+            claimed.admission_id,
+            claimed.execution_id,
+        )
         return ExecuteConversationTurnResult(
             admission_id=claimed.admission_id,
             execution_id=claimed.execution_id,
@@ -557,16 +871,30 @@ class ExecuteConversationTurnUseCase:
             raise ConversationExecutionRuntimeError("memory.runtime_binding_stale")
         return contract
 
-    def _observe(self, event: str, binding, admission_id) -> None:
-        try:
-            self.observer.record(
-                event=event,
-                organization_id=binding.organization_id,
-                admission_id=admission_id,
-                turn_id=binding.turn_id,
-            )
-        except Exception:
-            return
+    def _observe(
+        self,
+        event: str,
+        binding: ConversationExecutionBinding,
+        admission_id: uuid.UUID,
+        execution_id: uuid.UUID,
+        *,
+        safe_failure_reason: str | None = None,
+    ) -> None:
+        self.observer.record(
+            event=event,
+            organization_id=binding.organization_id,
+            admission_id=admission_id,
+            execution_id=execution_id,
+            app_id=binding.app_id,
+            workflow_id=binding.workflow_id,
+            deployment_id=binding.deployment_id,
+            deployment_version=binding.deployment_version,
+            session_id=binding.session_id,
+            turn_id=binding.turn_id,
+            node_id=binding.llm_node_id,
+            node_type="llmNode",
+            safe_failure_reason=safe_failure_reason,
+        )
 
 
 def _llm_data(graph: Mapping[str, Any], node_id: str) -> Mapping[str, Any]:
@@ -581,6 +909,16 @@ def _llm_data(graph: Mapping[str, Any], node_id: str) -> Mapping[str, Any]:
     if len(matches) != 1 or not isinstance(matches[0], Mapping):
         raise ConversationExecutionRuntimeError("memory.graph_unsupported")
     return matches[0]
+
+
+def _provider_attempt_id(
+    execution_id: uuid.UUID,
+    node_invocation_id: uuid.UUID,
+) -> uuid.UUID:
+    return uuid.uuid5(
+        execution_id,
+        f"provider_execution:{node_invocation_id}:main_generation",
+    )
 
 
 def _messages(
@@ -635,6 +973,8 @@ __all__ = [
     "ConversationMemoryCheckpoint",
     "ConversationMemoryContextBuild",
     "ConversationMemoryContextClaim",
+    "ConversationMemoryTerminalProjection",
+    "ConversationMemoryTerminalRecovery",
     "ConversationProviderPreparation",
     "ConversationProviderResult",
     "ExecuteConversationTurnCommand",

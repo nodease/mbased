@@ -86,6 +86,38 @@ class ConversationMemoryRuntimeContract:
     memory: ConversationMemoryNodePolicy
 
 
+def conversation_memory_runtime_requested(
+    graph_snapshot: Mapping[str, Any] | object,
+    deployment_config: Mapping[str, Any] | object | None,
+) -> bool:
+    """Detect Memory-on intent without accepting an invalid contract.
+
+    Public admission uses this before validation so a malformed Memory
+    deployment cannot fall back to the legacy execution path.
+    """
+
+    config = deployment_config if isinstance(deployment_config, Mapping) else {}
+    if config.get("conversation_memory") is not None:
+        return True
+    if not isinstance(graph_snapshot, Mapping):
+        return False
+    nodes = graph_snapshot.get("nodes")
+    if not isinstance(nodes, list):
+        return False
+    for node in nodes:
+        data = _node_data(node)
+        if "memory" not in data:
+            continue
+        memory = data.get("memory")
+        if isinstance(memory, Mapping):
+            if "enabled" in memory and memory.get("enabled") is not False:
+                return True
+            continue
+        if memory is not None:
+            return True
+    return False
+
+
 def validate_conversation_memory_runtime(
     graph_snapshot: Mapping[str, Any],
     deployment_config: Mapping[str, Any] | None,
@@ -436,5 +468,6 @@ __all__ = [
     "MAX_MEMORY_CONTEXT_TOKENS",
     "MAX_MEMORY_TEXT_BYTES",
     "MAX_MEMORY_TURNS",
+    "conversation_memory_runtime_requested",
     "validate_conversation_memory_runtime",
 ]

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import secrets
+import threading
 import uuid
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -108,6 +109,7 @@ class _TurnStatus:
             turn_state=TurnStatus.COMPLETED,
             display="Approved redacted answer",
             safe_failure_reason=None,
+            lifecycle_revision=7,
         )
 
 
@@ -353,11 +355,7 @@ def test_public_run_accepts_the_versioned_conversation_envelope(monkeypatch):
     )
     app.add_middleware(PublicConversationCorsBoundaryMiddleware)
     app.dependency_overrides[get_db] = lambda: object()
-    monkeypatch.setattr(
-        run,
-        "build_public_conversation_runtime_application",
-        lambda _db: SimpleNamespace(start_turn=start_turn),
-    )
+    monkeypatch.setattr(run, "_start_public_conversation_turn", start_turn.execute)
     monkeypatch.setattr(run, "_network_address", lambda _request: "198.51.100.0/24")
 
     response = TestClient(app).post(
@@ -394,12 +392,6 @@ def test_public_run_rejects_an_incomplete_conversation_envelope(monkeypatch):
     app.include_router(run.router, prefix="/api/v1")
     app.add_middleware(PublicConversationCorsBoundaryMiddleware)
     app.dependency_overrides[get_db] = lambda: object()
-    monkeypatch.setattr(
-        run,
-        "build_public_conversation_runtime_application",
-        lambda _db: SimpleNamespace(start_turn=start_turn),
-    )
-
     response = TestClient(app).post(
         "/api/v1/run-public/public-chatbot",
         json={"inputs": {"question": "hello"}, "conversation": {}},
@@ -408,6 +400,85 @@ def test_public_run_rejects_an_incomplete_conversation_envelope(monkeypatch):
     assert response.status_code == 422
     assert response.json()["detail"]["code"] == "memory.input_mapping_invalid"
     assert start_turn.commands == []
+
+
+def test_memory_enabled_public_run_without_conversation_fails_closed(monkeypatch):
+    app = FastAPI()
+    app.include_router(run.router, prefix="/api/v1")
+    app.dependency_overrides[get_db] = lambda: object()
+    monkeypatch.setattr(run, "_public_conversation_runtime_required", lambda _slug: True)
+
+    async def legacy_run(**_kwargs):
+        raise AssertionError("Memory-enabled deployment must not use legacy execution")
+
+    monkeypatch.setattr(run.DeploymentService, "run_deployment", legacy_run)
+
+    response = TestClient(app).post(
+        "/api/v1/run-public/public-chatbot",
+        json={"inputs": {"question": "hello"}},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "memory.conversation_required"
+
+
+def test_memory_off_public_run_uses_legacy_execution(monkeypatch):
+    app = FastAPI()
+    app.include_router(run.router, prefix="/api/v1")
+    app.dependency_overrides[get_db] = lambda: object()
+    monkeypatch.setattr(run, "_public_conversation_runtime_required", lambda _slug: False)
+    calls = []
+
+    async def legacy_run(**kwargs):
+        calls.append(kwargs)
+        return {"status": "success"}
+
+    monkeypatch.setattr(run.DeploymentService, "run_deployment", legacy_run)
+
+    response = TestClient(app).post(
+        "/api/v1/run-public/public-chatbot",
+        json={"inputs": {"question": "hello"}},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "success"}
+    assert calls[0]["trigger_mode"] == "app"
+
+
+def test_public_run_offloads_memory_application_boundary(monkeypatch):
+    start_turn = _StartPublicTurn()
+    app = FastAPI()
+    app.include_router(run.router, prefix="/api/v1")
+    app.dependency_overrides[get_db] = lambda: object()
+    caller_thread = []
+    worker_thread = []
+
+    def start_in_worker(command):
+        worker_thread.append(threading.get_ident())
+        return start_turn.execute(command)
+
+    monkeypatch.setattr(run, "_start_public_conversation_turn", start_in_worker)
+    monkeypatch.setattr(run, "_network_address", lambda _request: "198.51.100.0/24")
+
+    async def record_caller(request, call_next):
+        caller_thread.append(threading.get_ident())
+        return await call_next(request)
+
+    app.middleware("http")(record_caller)
+    response = TestClient(app).post(
+        "/api/v1/run-public/public-chatbot",
+        json={
+            "inputs": {"question": "hello"},
+            "conversation": {"expected_lifecycle_revision": 3},
+        },
+        headers={
+            "Authorization": f"Conversation cag_v1_{secrets.token_urlsafe(32)}",
+            "Idempotency-Key": _key(),
+        },
+    )
+
+    assert response.status_code == 202
+    assert worker_thread[0] != caller_thread[0]
 
 
 def test_public_turn_status_returns_only_approved_display_projection(monkeypatch):
@@ -423,6 +494,7 @@ def test_public_turn_status_returns_only_approved_display_projection(monkeypatch
     assert response.status_code == 200
     assert response.headers["cache-control"] == "no-store"
     assert response.headers["referrer-policy"] == "no-referrer"
+    assert response.headers["etag"] == '"lifecycle-revision-7"'
     assert response.json() == {
         "turn": {
             "id": str(turn_id),

@@ -6,6 +6,11 @@ from decimal import Decimal
 
 import pytest
 
+from apps.shared.domain.provider_usage_ledger import (
+    ProviderUsageLedgerError,
+    ProviderUsageOperation,
+    ProviderUsageState,
+)
 from apps.workflow_engine.adapters.provider_usage import (
     PostgresProviderUsageRecorder,
 )
@@ -23,11 +28,6 @@ from apps.workflow_engine.application.provider_usage import (
     ProviderUsageIntent,
     ProviderUsageRecord,
     ProviderUsageRuntimeError,
-)
-from apps.shared.domain.provider_usage_ledger import (
-    ProviderUsageLedgerError,
-    ProviderUsageOperation,
-    ProviderUsageState,
 )
 from apps.workflow_engine.services import llm_service as workflow_llm_service
 from apps.workflow_engine.services.llm_service import LLMService
@@ -693,5 +693,108 @@ def test_checkpoint_recovery_classifies_started_usage_without_provider_replay() 
             "operation_id": operation_id,
             "expected_state_version": 2,
             "reason_code": "terminal_record_failed",
+        }
+    ]
+
+
+def test_reference_reconciliation_preserves_unsent_intent_fact() -> None:
+    organization_id = uuid.uuid4()
+    provider_attempt_id = uuid.uuid4()
+    operation_id = uuid.uuid4()
+    record = type(
+        "Operation",
+        (),
+        {
+            "id": operation_id,
+            "organization_id": organization_id,
+            "provider_attempt_id": provider_attempt_id,
+            "purpose": ProviderExecutionPurpose.MAIN_GENERATION.value,
+            "state": ProviderUsageState.INTENT.value,
+            "state_version": 1,
+        },
+    )()
+
+    class _Query:
+        def filter(self, *_criteria):
+            return self
+
+        def one_or_none(self):
+            return record
+
+    class _RecoverySession(_Session):
+        def query(self, _model):
+            return _Query()
+
+    class _RecoveryLedger:
+        def mark_outcome_unknown(self, *_args, **_kwargs):
+            pytest.fail("INTENT must remain the canonical pre-send fact")
+
+    recorder = PostgresProviderUsageRecorder(
+        session_factory=_RecoverySession,
+        ledger_service=_RecoveryLedger(),  # type: ignore[arg-type]
+    )
+
+    outcome = recorder.reconcile_reference_terminal(
+        organization_id=organization_id,
+        provider_attempt_id=provider_attempt_id,
+        operation_reference=str(operation_id),
+    )
+
+    assert outcome == "not_started"
+
+
+def test_reference_reconciliation_classifies_started_usage_with_allowed_reason() -> None:
+    organization_id = uuid.uuid4()
+    provider_attempt_id = uuid.uuid4()
+    operation_id = uuid.uuid4()
+    record = type(
+        "Operation",
+        (),
+        {
+            "id": operation_id,
+            "organization_id": organization_id,
+            "provider_attempt_id": provider_attempt_id,
+            "purpose": ProviderExecutionPurpose.MAIN_GENERATION.value,
+            "state": ProviderUsageState.PROVIDER_STARTED.value,
+            "state_version": 2,
+        },
+    )()
+
+    class _Query:
+        def filter(self, *_criteria):
+            return self
+
+        def one_or_none(self):
+            return record
+
+    class _RecoverySession(_Session):
+        def query(self, _model):
+            return _Query()
+
+    class _RecoveryLedger:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def mark_outcome_unknown(self, _db, **kwargs):
+            self.calls.append(kwargs)
+
+    ledger = _RecoveryLedger()
+    recorder = PostgresProviderUsageRecorder(
+        session_factory=_RecoverySession,
+        ledger_service=ledger,  # type: ignore[arg-type]
+    )
+
+    outcome = recorder.reconcile_reference_terminal(
+        organization_id=organization_id,
+        provider_attempt_id=provider_attempt_id,
+        operation_reference=str(operation_id),
+    )
+
+    assert outcome == "outcome_unknown"
+    assert ledger.calls == [
+        {
+            "operation_id": operation_id,
+            "expected_state_version": 2,
+            "reason_code": "stale_provider_started",
         }
     ]

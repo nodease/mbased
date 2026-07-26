@@ -113,6 +113,46 @@ def test_public_run_blocks_unresolved_external_configuration_before_publish(
     assert celery.captured is None
 
 
+@pytest.mark.parametrize("enabled", [True, 1, "true", "yes"])
+def test_legacy_execution_rejects_memory_on_snapshot_before_any_side_effect(
+    monkeypatch,
+    enabled,
+):
+    from apps.gateway.services import deployment_service as deployment_module
+
+    app_row, deployment_row = _deployed_app(DeploymentType.CHATBOT)
+    deployment_row.graph_snapshot = {
+        "nodes": [
+            {
+                "id": "llm",
+                "type": "llmNode",
+                "data": {"memory": {"enabled": enabled}},
+            }
+        ],
+        "edges": [],
+    }
+    deployment_row.config = {}
+    db = _Db(rows=[app_row, deployment_row])
+    celery = _CaptureCelery()
+    monkeypatch.setattr(deployment_module, "celery_app", celery)
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(
+            deployment_module.DeploymentService.run_deployment(
+                db=db,
+                url_slug=app_row.url_slug,
+                user_inputs={},
+                trigger_mode="app",
+                runtime_policy=DEFAULT_DEPLOYMENT_RUNTIME_POLICY,
+                require_auth=False,
+            )
+        )
+
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.detail["code"] == "memory.conversation_required"
+    assert celery.captured is None
+
+
 def _run_authenticated(
     db,
     deployment_id,

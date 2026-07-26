@@ -391,7 +391,13 @@ def _running_binding(repository: _Repository, uow: _Uow):
     return replace(binding, turn_version=running.turn_version)
 
 
-def _build(repository: _Repository, binding, provider_attempt_id):
+def _build(
+    repository: _Repository,
+    binding,
+    provider_attempt_id,
+    *,
+    expires_at=NOW + timedelta(minutes=2),
+):
     return BuildMemoryContextUseCase(
         repository=repository,
         uow=_Uow(repository),
@@ -402,13 +408,22 @@ def _build(repository: _Repository, binding, provider_attempt_id):
             provider_capability_reference="capability-1",
             provider_capability_revision="capability-v1",
             provider_attempt_id=provider_attempt_id,
-            expires_at=NOW + timedelta(minutes=2),
+            expires_at=expires_at,
             now=NOW,
         )
     )
 
 
-def _claim(repository, binding, built, provider_attempt_id, *, token_counter=None):
+def _claim(
+    repository,
+    binding,
+    built,
+    provider_attempt_id,
+    *,
+    token_counter=None,
+    claim_deadline_at=NOW + timedelta(minutes=1),
+    now=NOW,
+):
     return ClaimMemoryContextUseCase(
         repository=repository,
         uow=_Uow(repository),
@@ -426,8 +441,8 @@ def _claim(repository, binding, built, provider_attempt_id, *, token_counter=Non
             provider_capability_reference="capability-1",
             provider_capability_revision="capability-v1",
             provider_attempt_id=provider_attempt_id,
-            claim_deadline_at=NOW + timedelta(minutes=1),
-            now=NOW,
+            claim_deadline_at=claim_deadline_at,
+            now=now,
         )
     )
 
@@ -476,6 +491,244 @@ def test_claim_materializes_chronological_history_and_is_same_attempt_idempotent
         _claim(repository, binding, built, uuid.uuid4())
 
 
+def test_expired_claimed_attempt_reclaims_with_a_new_generation_and_deadline() -> None:
+    repository = _Repository()
+    binding = _running_binding(repository, _Uow(repository))
+    repository.candidates = (_pair(repository, 1, "user", "answer"),)
+    provider_attempt_id = uuid.uuid4()
+    built = _build(
+        repository,
+        binding,
+        provider_attempt_id,
+        expires_at=NOW + timedelta(minutes=5),
+    )
+    first_deadline = NOW + timedelta(seconds=20)
+    first = _claim(
+        repository,
+        binding,
+        built,
+        provider_attempt_id,
+        claim_deadline_at=first_deadline,
+    )
+    recovery_now = NOW + timedelta(seconds=211)
+    recovery_deadline = recovery_now + timedelta(seconds=20)
+
+    recovered = _claim(
+        repository,
+        binding,
+        built,
+        provider_attempt_id,
+        claim_deadline_at=recovery_deadline,
+        now=recovery_now,
+    )
+
+    lease = repository.leases[built.lease_id]
+    attempt = repository.attempts[provider_attempt_id]
+    assert recovered.attempt_id == first.attempt_id
+    assert recovered.attempt_version == first.attempt_version + 1
+    assert recovered.replayed is True
+    assert lease.claim_generation == 2
+    assert lease.claim_deadline_at == recovery_deadline
+    assert attempt.claim_generation == 2
+    assert attempt.claim_deadline_at == recovery_deadline
+    assert MarkContextProviderStartedUseCase(
+        repository=repository,
+        uow=_Uow(repository),
+    ).execute(
+        MarkContextProviderStartedCommand(
+            organization_id=binding.organization_id,
+            attempt_id=provider_attempt_id,
+            expected_version=recovered.attempt_version,
+            usage_reference="usage-operation-recovered",
+            now=recovery_now + timedelta(seconds=1),
+        )
+    ) == recovered.attempt_version + 1
+
+
+def test_expired_provider_started_attempt_only_reenters_same_usage_callback() -> None:
+    repository = _Repository()
+    binding = _running_binding(repository, _Uow(repository))
+    repository.candidates = (_pair(repository, 1, "user", "answer"),)
+    provider_attempt_id = uuid.uuid4()
+    built = _build(
+        repository,
+        binding,
+        provider_attempt_id,
+        expires_at=NOW + timedelta(minutes=5),
+    )
+    first_deadline = NOW + timedelta(seconds=20)
+    claimed = _claim(
+        repository,
+        binding,
+        built,
+        provider_attempt_id,
+        claim_deadline_at=first_deadline,
+    )
+    started_version = MarkContextProviderStartedUseCase(
+        repository=repository,
+        uow=_Uow(repository),
+    ).execute(
+        MarkContextProviderStartedCommand(
+            organization_id=binding.organization_id,
+            attempt_id=provider_attempt_id,
+            expected_version=claimed.attempt_version,
+            usage_reference="usage-operation-1",
+            now=NOW + timedelta(seconds=1),
+        )
+    )
+    prior_attempt = copy.deepcopy(repository.attempts[provider_attempt_id])
+
+    recovery_now = NOW + timedelta(seconds=211)
+    recovered = _claim(
+        repository,
+        binding,
+        built,
+        provider_attempt_id,
+        claim_deadline_at=recovery_now + timedelta(seconds=20),
+        now=recovery_now,
+    )
+
+    lease = repository.leases[built.lease_id]
+    assert recovered.attempt_id == provider_attempt_id
+    assert recovered.attempt_version == started_version
+    assert recovered.replayed is True
+    assert lease.claim_generation == 1
+    assert lease.claim_deadline_at == first_deadline
+    assert repository.attempts[provider_attempt_id] == prior_attempt
+    marker = MarkContextProviderStartedUseCase(
+        repository=repository,
+        uow=_Uow(repository),
+    )
+    assert marker.execute(
+        MarkContextProviderStartedCommand(
+            organization_id=binding.organization_id,
+            attempt_id=provider_attempt_id,
+            expected_version=recovered.attempt_version,
+            usage_reference="usage-operation-1",
+            now=recovery_now,
+        )
+    ) == started_version
+    with pytest.raises(MemoryContextConflictError):
+        marker.execute(
+            MarkContextProviderStartedCommand(
+                organization_id=binding.organization_id,
+                attempt_id=provider_attempt_id,
+                expected_version=recovered.attempt_version,
+                usage_reference="different-usage",
+                now=recovery_now,
+            )
+        )
+
+
+def test_expired_terminal_attempt_cannot_reclaim_send_authority() -> None:
+    repository = _Repository()
+    binding = _running_binding(repository, _Uow(repository))
+    repository.candidates = (_pair(repository, 1, "user", "answer"),)
+    provider_attempt_id = uuid.uuid4()
+    built = _build(
+        repository,
+        binding,
+        provider_attempt_id,
+        expires_at=NOW + timedelta(minutes=5),
+    )
+    first_deadline = NOW + timedelta(seconds=20)
+    claimed = _claim(
+        repository,
+        binding,
+        built,
+        provider_attempt_id,
+        claim_deadline_at=first_deadline,
+    )
+    started_version = MarkContextProviderStartedUseCase(
+        repository=repository,
+        uow=_Uow(repository),
+    ).execute(
+        MarkContextProviderStartedCommand(
+            organization_id=binding.organization_id,
+            attempt_id=provider_attempt_id,
+            expected_version=claimed.attempt_version,
+            usage_reference="usage-operation-1",
+            now=NOW + timedelta(seconds=1),
+        )
+    )
+    FinishContextProviderAttemptUseCase(
+        repository=repository,
+        uow=_Uow(repository),
+    ).execute(
+        FinishContextProviderAttemptCommand(
+            organization_id=binding.organization_id,
+            attempt_id=provider_attempt_id,
+            expected_version=started_version,
+            outcome=ContextAttemptState.SUCCEEDED,
+            safe_failure_reason=None,
+            now=NOW + timedelta(seconds=2),
+        )
+    )
+    prior_attempt = copy.deepcopy(repository.attempts[provider_attempt_id])
+
+    recovery_now = NOW + timedelta(seconds=211)
+    with pytest.raises(MemoryContextConflictError):
+        _claim(
+            repository,
+            binding,
+            built,
+            provider_attempt_id,
+            claim_deadline_at=recovery_now + timedelta(seconds=20),
+            now=recovery_now,
+        )
+
+    lease = repository.leases[built.lease_id]
+    assert lease.claim_generation == 1
+    assert lease.claim_deadline_at == first_deadline
+    assert repository.attempts[provider_attempt_id] == prior_attempt
+
+
+@pytest.mark.parametrize(
+    "stale_fence",
+    ["authorization", "execution"],
+)
+def test_expired_claim_recovery_rechecks_current_authorization_and_execution(
+    stale_fence: str,
+) -> None:
+    repository = _Repository()
+    binding = _running_binding(repository, _Uow(repository))
+    repository.candidates = (_pair(repository, 1, "user", "answer"),)
+    provider_attempt_id = uuid.uuid4()
+    built = _build(
+        repository,
+        binding,
+        provider_attempt_id,
+        expires_at=NOW + timedelta(minutes=5),
+    )
+    first_deadline = NOW + timedelta(seconds=20)
+    _claim(
+        repository,
+        binding,
+        built,
+        provider_attempt_id,
+        claim_deadline_at=first_deadline,
+    )
+    recovery_now = NOW + timedelta(seconds=211)
+    if stale_fence == "authorization":
+        repository.scope.grant.expires_at = recovery_now
+    else:
+        repository.scope.turn.status = TurnStatus.COMPLETED
+
+    with pytest.raises(MemoryContextUnavailableError):
+        _claim(
+            repository,
+            binding,
+            built,
+            provider_attempt_id,
+            claim_deadline_at=recovery_now + timedelta(seconds=20),
+            now=recovery_now,
+        )
+
+    lease = repository.leases[built.lease_id]
+    assert lease.claim_generation == 1
+    assert lease.claim_deadline_at == first_deadline
+
+
 def test_newest_first_barrier_never_skips_an_invalid_or_oversized_pair() -> None:
     repository = _Repository()
     binding = _running_binding(repository, _Uow(repository))
@@ -485,6 +738,33 @@ def test_newest_first_barrier_never_skips_an_invalid_or_oversized_pair() -> None
     repository.entries.pop(newest.assistant.entry_id)
     attempt_id = uuid.uuid4()
     built = _build(repository, binding, attempt_id)
+
+    with pytest.raises(MemoryContextUnavailableError):
+        _claim(repository, binding, built, attempt_id)
+
+    assert repository.attempts == {}
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["cross_organization", "invalidated", "expired"],
+)
+def test_claim_revalidates_candidate_scope_and_lifecycle_after_build(
+    mutation: str,
+) -> None:
+    repository = _Repository()
+    binding = _running_binding(repository, _Uow(repository))
+    pair = _pair(repository, 1, "user", "answer")
+    repository.candidates = (pair,)
+    attempt_id = uuid.uuid4()
+    built = _build(repository, binding, attempt_id)
+    entry = repository.entries[pair.user.entry_id]
+    if mutation == "cross_organization":
+        entry.organization_id = uuid.uuid4()
+    elif mutation == "invalidated":
+        entry.invalidated_at = NOW
+    else:
+        entry.expires_at = NOW
 
     with pytest.raises(MemoryContextUnavailableError):
         _claim(repository, binding, built, attempt_id)
