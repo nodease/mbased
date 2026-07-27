@@ -104,6 +104,7 @@ COPY --from=builder /model-routing-hf-cache /opt/huggingface
 
 # 앱 코드 복사 (모노레포 구조 유지)
 COPY apps/shared /app/apps/shared
+COPY apps/memory /app/apps/memory
 COPY apps/workflow_engine /app/apps/workflow_engine
 
 # Entrypoint 스크립트 복사

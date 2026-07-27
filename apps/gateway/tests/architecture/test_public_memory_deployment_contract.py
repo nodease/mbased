@@ -87,11 +87,13 @@ def test_standard_deployment_paths_support_bounded_public_memory_key_rotation():
 def test_runtime_images_include_memory_and_helm_schedules_replay_retention():
     gateway_dockerfile = _read("docker/gateway/Dockerfile")
     logger_dockerfile = _read("docker/log_system/Dockerfile")
+    worker_dockerfile = _read("docker/workflow_engine/Dockerfile")
     values = _read("infra/helm/moduly/values.yaml")
     beat_template = _read("infra/helm/moduly/templates/beat-deployment.yaml")
 
     assert "COPY apps/memory /app/apps/memory" in gateway_dockerfile
     assert "COPY apps/memory /app/apps/memory" in logger_dockerfile
+    assert "COPY apps/memory /app/apps/memory" in worker_dockerfile
     assert "beat:\n  enabled: true" in values
     assert "default .Values.worker.image.repository" in beat_template
     assert "- apps.shared.celery_app:celery_app" in beat_template
