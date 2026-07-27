@@ -5,12 +5,14 @@ from __future__ import annotations
 import re
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from enum import StrEnum
 from typing import Literal, Protocol
 
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _SAFE_VERSION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+CONVERSATION_EXECUTION_ADMISSION_RETENTION = timedelta(days=8)
+MAX_ADMISSION_RETENTION_PURGE_BATCH = 500
 
 
 class ConversationExecutionState(StrEnum):
@@ -60,6 +62,8 @@ class ConversationExecutionAdmission:
     updated_at: datetime
     terminal_at: datetime | None
 
+
+    retention_expires_at: datetime | None
     @classmethod
     def admit(
         cls,
@@ -95,6 +99,7 @@ class ConversationExecutionAdmission:
             created_at=command.now,
             updated_at=command.now,
             terminal_at=None,
+            retention_expires_at=None,
         )
 
     def ensure_same_admission(self, command: "AdmitConversationExecutionCommand") -> None:
@@ -191,6 +196,12 @@ class ConversationExecutionAdmission:
                 and self.result_digest == result_digest
                 and self.safe_failure_reason == safe_failure_reason
             ):
+                if (
+                    self.terminal_at is None
+                    or self.retention_expires_at is None
+                    or self.retention_expires_at <= self.terminal_at
+                ):
+                    raise ConversationExecutionConflictError()
                 return True
             raise ConversationExecutionConflictError()
         self.require_fence(owner=owner, lease_generation=lease_generation, now=now)
@@ -201,8 +212,9 @@ class ConversationExecutionAdmission:
         self.safe_failure_reason = safe_failure_reason
         self.updated_at = now
         self.terminal_at = now
-        return False
 
+        self.retention_expires_at = now + CONVERSATION_EXECUTION_ADMISSION_RETENTION
+        return False
     def require_fence(self, *, owner: str, lease_generation: int, now: datetime) -> None:
         if (
             self.state is not ConversationExecutionState.LEASED
@@ -282,6 +294,17 @@ class FinishConversationExecutionResult:
     replayed: bool
 
 
+@dataclass(frozen=True, slots=True)
+class PurgeExpiredConversationExecutionAdmissionsCommand:
+    now: datetime
+    limit: int = MAX_ADMISSION_RETENTION_PURGE_BATCH
+
+
+@dataclass(frozen=True, slots=True)
+class PurgeExpiredConversationExecutionAdmissionsResult:
+    deleted_count: int
+
+
 class ConversationExecutionAdmissionRepositoryPort(Protocol):
     def find_by_dispatch(self, *, organization_id, dispatch_id): ...
 
@@ -290,6 +313,8 @@ class ConversationExecutionAdmissionRepositoryPort(Protocol):
     def add(self, admission: ConversationExecutionAdmission) -> None: ...
 
     def save(self, admission: ConversationExecutionAdmission) -> None: ...
+
+    def delete_expired_terminal(self, *, now: datetime, limit: int) -> int: ...
 
 
 class ConversationExecutionUnitOfWorkPort(Protocol):
@@ -406,6 +431,28 @@ class FinishConversationExecutionUseCase(_TransactionalUseCase):
         return self._execute(operation)
 
 
+class PurgeExpiredConversationExecutionAdmissionsUseCase(_TransactionalUseCase):
+    def execute(
+        self,
+        command: PurgeExpiredConversationExecutionAdmissionsCommand,
+    ) -> PurgeExpiredConversationExecutionAdmissionsResult:
+        if (
+            command.now.tzinfo is None
+            or command.now.utcoffset() is None
+            or not 1 <= command.limit <= MAX_ADMISSION_RETENTION_PURGE_BATCH
+        ):
+            raise ValueError("conversation admission retention policy is invalid")
+
+        return self._execute(
+            lambda: PurgeExpiredConversationExecutionAdmissionsResult(
+                deleted_count=self.repository.delete_expired_terminal(
+                    now=command.now,
+                    limit=command.limit,
+                )
+            )
+        )
+
+
 def _validate_admit(command: AdmitConversationExecutionCommand) -> None:
     if (
         command.deployment_version < 1
@@ -456,6 +503,7 @@ __all__ = [
     "ClaimConversationExecutionCommand",
     "ClaimConversationExecutionResult",
     "ClaimConversationExecutionUseCase",
+    "CONVERSATION_EXECUTION_ADMISSION_RETENTION",
     "ConversationExecutionAdmission",
     "ConversationExecutionConflictError",
     "ConversationExecutionFenceError",
@@ -463,4 +511,8 @@ __all__ = [
     "FinishConversationExecutionCommand",
     "FinishConversationExecutionResult",
     "FinishConversationExecutionUseCase",
+    "MAX_ADMISSION_RETENTION_PURGE_BATCH",
+    "PurgeExpiredConversationExecutionAdmissionsCommand",
+    "PurgeExpiredConversationExecutionAdmissionsResult",
+    "PurgeExpiredConversationExecutionAdmissionsUseCase",
 ]

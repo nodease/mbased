@@ -8,6 +8,7 @@ import pytest
 
 from apps.workflow_engine.application.conversation_memory_admission import (
     AdmitConversationExecutionCommand,
+    CONVERSATION_EXECUTION_ADMISSION_RETENTION,
     AdmitConversationExecutionUseCase,
     ClaimConversationExecutionCommand,
     ClaimConversationExecutionUseCase,
@@ -16,6 +17,8 @@ from apps.workflow_engine.application.conversation_memory_admission import (
     ConversationExecutionFenceError,
     FinishConversationExecutionCommand,
     FinishConversationExecutionUseCase,
+    PurgeExpiredConversationExecutionAdmissionsCommand,
+    PurgeExpiredConversationExecutionAdmissionsUseCase,
 )
 
 
@@ -27,6 +30,8 @@ class _Repository:
     def __init__(self) -> None:
         self.rows: dict[tuple[uuid.UUID, uuid.UUID], ConversationExecutionAdmission] = {}
 
+        self.deleted_calls = []
+        self.deleted_count = 0
     def find_by_dispatch(self, *, organization_id, dispatch_id):
         return self.rows.get((organization_id, dispatch_id))
 
@@ -39,6 +44,10 @@ class _Repository:
     def save(self, admission):
         self.rows[(admission.organization_id, admission.dispatch_id)] = admission
 
+
+    def delete_expired_terminal(self, *, now, limit):
+        self.deleted_calls.append((now, limit))
+        return self.deleted_count
 
 class _UnitOfWork:
     def __init__(self, repository: _Repository) -> None:
@@ -103,6 +112,8 @@ def test_duplicate_dispatch_converges_on_one_durable_execution() -> None:
     assert replay.admission_id == first.admission_id
     assert replay.execution_id == first.execution_id
     assert len(repository.rows) == 1
+    admission = repository.rows[(command.organization_id, command.dispatch_id)]
+    assert admission.retention_expires_at is None
 
 
 def test_same_dispatch_with_different_fingerprint_or_binding_fails_closed() -> None:
@@ -228,8 +239,13 @@ def test_terminal_replay_is_idempotent_but_conflicting_result_is_rejected() -> N
     first = use_case.execute(finish)
     replay = use_case.execute(finish)
 
+    admission = repository.rows[(command.organization_id, command.dispatch_id)]
     assert first.replayed is False
     assert replay.replayed is True
+    assert admission.terminal_at == finish.now
+    assert admission.retention_expires_at == (
+        finish.now + CONVERSATION_EXECUTION_ADMISSION_RETENTION
+    )
     with pytest.raises(ConversationExecutionConflictError):
         use_case.execute(
             FinishConversationExecutionCommand(
@@ -243,3 +259,44 @@ def test_terminal_replay_is_idempotent_but_conflicting_result_is_rejected() -> N
                 }
             )
         )
+
+
+def test_retention_purge_deletes_only_one_bounded_batch() -> None:
+    repository = _Repository()
+    repository.deleted_count = 7
+    use_case = PurgeExpiredConversationExecutionAdmissionsUseCase(
+        repository=repository,
+        uow=_UnitOfWork(repository),
+    )
+
+    result = use_case.execute(
+        PurgeExpiredConversationExecutionAdmissionsCommand(now=_now(), limit=100)
+    )
+
+    assert result.deleted_count == 7
+    assert repository.deleted_calls == [(_now(), 100)]
+
+
+@pytest.mark.parametrize(
+    "now,limit",
+    [
+        (datetime(2026, 7, 22, 12), 100),
+        (_now(), 0),
+        (_now(), 501),
+    ],
+)
+def test_retention_purge_rejects_unbounded_or_naive_requests(
+    now: datetime, limit: int
+) -> None:
+    repository = _Repository()
+    use_case = PurgeExpiredConversationExecutionAdmissionsUseCase(
+        repository=repository,
+        uow=_UnitOfWork(repository),
+    )
+
+    with pytest.raises(ValueError, match="retention policy is invalid"):
+        use_case.execute(
+            PurgeExpiredConversationExecutionAdmissionsCommand(now=now, limit=limit)
+        )
+
+    assert repository.deleted_calls == []

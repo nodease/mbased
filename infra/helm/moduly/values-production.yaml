@@ -55,6 +55,10 @@ memoryPublicConversation:
   runtimeWorkerReady: false
   runtimeWorkerQueue: "conversation-memory-v1"
   runtimeMinimumWorkerCapability: "memory-runtime-v1"
+  deploymentRateLimit: 120
+  organizationRateLimit: 600
+  networkRateLimit: 60
+  grantRateLimit: 20
   purgeWorkerReady: false
   replayBackupErasureMode: "unconfirmed"
   capabilityHmacPrimaryVersion: ""

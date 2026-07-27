@@ -27,7 +27,7 @@ FastAPI request/response, Celery task, SQLAlchemy expression와 provider SDK는 
 ## Session Surface Composition
 
 - MBA-317 Gateway composition은 public Chatbot adapter를 Conversation Session create/close/reset/delete/transcript/purge-status port에 연결한다. MBA-318은 root-level `conversation` envelope을 public StartTurn admission과 content-free dispatch publisher에 연결하며 Workflow Engine의 durable admission/lease fence가 실행을 소유한다.
-- `PublicConversationCorsBoundaryMiddleware`는 public route prefix의 outer transport boundary를 소유한다. Endpoint 진입 전 dependency/body validation과 router/preflight 오류를 포함한 모든 응답에 `Cache-Control: no-store`, `Referrer-Policy: no-referrer`를 적용하고 전역 `Access-Control-*` header와 `Vary: Origin`을 제거한다.
+- `PublicConversationCorsBoundaryMiddleware`는 public route prefix의 outer transport boundary를 소유한다. Conversation 전용 subpath는 path로, legacy와 공유하는 root run은 `Conversation` authorization, idempotency header 또는 preflight requested header로 body parsing 전에 분류한다. Endpoint 진입 전 malformed/non-object body, dependency/router/preflight 오류를 포함한 모든 Conversation 응답에 `Cache-Control: no-store`, `Referrer-Policy: no-referrer`를 적용하고 전역 `Access-Control-*` header와 `Vary: Origin`을 제거한다. Transport signal이 없는 Memory-OFF legacy root 호출의 기존 CORS 동작은 유지한다.
 - Authenticated internal Chatbot adapter는 별도 access policy와 route/CSRF/session namespace 계약이 구현된 뒤 연결하는 후속 target이다.
 - Workflow Editor test adapter는 일반 test execution만 수행하고 Conversation Session port를 호출하지 않는다. Editor session은 별도 feature/security contract 전까지 composition allowlist에 등록하지 않는다.
 - Schedule, webhook, API batch와 subworkflow가 임의 public/authenticated adapter를 재사용해 session을 만들 수 없다.
@@ -148,6 +148,8 @@ Dispatcher는 skip-locked 또는 동등한 atomic claim을 사용한다. Publish
 Memory-owned periodic reconciler는 bounded due scan과 `FOR UPDATE SKIP LOCKED`로 `pending`, due `reconcile_required`, expired `claimed`와 cleanup이 남은 `terminal` dispatch를 찾는다. Publish 재시도와 expired claim 회수는 current generation command만 호출하고, attempt 상한에 도달하면 같은 terminal finalizer로 Turn/session 점유를 해제한다. 한 item의 conflict나 adapter 실패는 다른 due item 처리를 막지 않으며 실패 row는 다음 beat에 다시 선택된다.
 
 Workflow execution admission과 lease/heartbeat는 Workflow domain이 소유한다. Memory는 admission reference와 safe state projection만 보존한다. Admission 성공 뒤 Memory acknowledgement가 유실되면 dispatch reconciler가 dispatch ID로 Workflow admission lookup port를 호출해 복구한다.
+
+Workflow admission은 terminal 전에는 retention expiry를 갖지 않고 completed/failed/outcome-unknown 전이 시 canonical terminal 전이 시각 기준 8일 expiry를 고정한다. `deployment_id`/version은 실행 당시 immutable snapshot이므로 mutable Deployment control row의 FK로 묶지 않아 deployment 삭제를 차단하지 않는다. Versioned Conversation Worker queue의 1분 periodic task가 expiry/index 순서로 최대 500개를 `FOR UPDATE SKIP LOCKED` claim해 한 transaction에서 삭제하며, active admission이나 future expiry는 선택하지 않는다. 이는 MBA-386의 별도 execution journal이나 운영 조회 projection을 도입하지 않는다.
 
 ### ConversationMemoryEntry
 

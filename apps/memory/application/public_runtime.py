@@ -99,6 +99,8 @@ class StartPublicConversationTurnResult:
     turn_state: TurnStatus
     replayed: bool
     dispatch_publish_required: bool = False
+    display: str | None = None
+    safe_failure_reason: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -352,6 +354,14 @@ class StartPublicConversationTurnUseCase:
                         and now >= dispatch.next_attempt_at
                     )
                 ),
+                display=_approved_display(
+                    repository=self.repository,
+                    content_cipher=self.content_cipher,
+                    binding=binding,
+                    session=session,
+                    turn=turn,
+                ),
+                safe_failure_reason=turn.safe_failure_reason,
             )
 
         key_version, fingerprint = self._fingerprint(
@@ -555,13 +565,18 @@ def _mapped_input(
     binding: PublicDeploymentBinding, inputs: Mapping[str, object]
 ) -> str:
     variable = binding.runtime_input_variable
+    max_length = binding.runtime_input_max_length
+    if type(max_length) is not int or not (
+        1 <= max_length <= MAX_MEMORY_CONTENT_BYTES
+    ):
+        raise ValueError("memory.input_mapping_invalid")
     if not isinstance(inputs, Mapping) or not variable or set(inputs) != {variable}:
         raise ValueError("memory.input_mapping_invalid")
     value = inputs.get(variable)
     if not isinstance(value, str):
         raise ValueError("memory.input_mapping_invalid")
     length = len(value.encode("utf-8"))
-    if not 1 <= length <= MAX_MEMORY_CONTENT_BYTES:
+    if not 1 <= length <= max_length:
         raise ValueError("memory.input_mapping_invalid")
     return value
 
@@ -637,7 +652,9 @@ class GetPublicTurnStatusUseCase:
                 turn_id=turn.id,
                 turn_sequence=turn.sequence,
                 turn_state=turn.status,
-                display=self._approved_display(
+                display=_approved_display(
+                    repository=self.repository,
+                    content_cipher=self.content_cipher,
                     binding=binding,
                     session=session,
                     turn=turn,
@@ -693,44 +710,46 @@ class GetPublicTurnStatusUseCase:
             raise AccessGrantNotUsableError()
         return grant, session
 
-    def _approved_display(
-        self,
-        *,
-        binding: PublicDeploymentBinding,
-        session: ConversationSession,
-        turn: ConversationTurn,
-    ) -> str | None:
-        if turn.status is not TurnStatus.COMPLETED:
-            return None
-        if turn.assistant_entry_id is None:
-            raise AccessGrantNotUsableError()
-        entry = self.repository.get_entry(
+
+def _approved_display(
+    *,
+    repository,
+    content_cipher: MemoryContentCipherPort,
+    binding: PublicDeploymentBinding,
+    session: ConversationSession,
+    turn: ConversationTurn,
+) -> str | None:
+    if turn.status is not TurnStatus.COMPLETED:
+        return None
+    if turn.assistant_entry_id is None:
+        raise AccessGrantNotUsableError()
+    entry = repository.get_entry(
+        organization_id=binding.organization_id,
+        session_id=session.id,
+        entry_id=turn.assistant_entry_id,
+    )
+    if (
+        entry is None
+        or entry.turn_id != turn.id
+        or entry.entry_type is not EntryType.ASSISTANT_TURN
+        or entry.lifecycle is not EntryLifecycle.APPROVED
+        or entry.content is None
+        or entry.content.display is None
+    ):
+        raise AccessGrantNotUsableError()
+    display = content_cipher.reveal(
+        entry.content.display,
+        associated_data=memory_content_aad(
             organization_id=binding.organization_id,
             session_id=session.id,
-            entry_id=turn.assistant_entry_id,
-        )
-        if (
-            entry is None
-            or entry.turn_id != turn.id
-            or entry.entry_type is not EntryType.ASSISTANT_TURN
-            or entry.lifecycle is not EntryLifecycle.APPROVED
-            or entry.content is None
-            or entry.content.display is None
-        ):
-            raise AccessGrantNotUsableError()
-        display = self.content_cipher.reveal(
-            entry.content.display,
-            associated_data=memory_content_aad(
-                organization_id=binding.organization_id,
-                session_id=session.id,
-                turn_id=turn.id,
-                entry_id=entry.id,
-                projection="display",
-            ),
-        )
-        if display is None:
-            raise AccessGrantNotUsableError()
-        return display
+            turn_id=turn.id,
+            entry_id=entry.id,
+            projection="display",
+        ),
+    )
+    if display is None:
+        raise AccessGrantNotUsableError()
+    return display
 
 
 def _turn_result(
@@ -739,6 +758,8 @@ def _turn_result(
     *,
     replayed: bool,
     dispatch_publish_required: bool = False,
+    display: str | None = None,
+    safe_failure_reason: str | None = None,
 ):
     return StartPublicConversationTurnResult(
         session_id=turn.session_id,
@@ -750,6 +771,8 @@ def _turn_result(
         turn_state=turn.status,
         replayed=replayed,
         dispatch_publish_required=dispatch_publish_required,
+        display=display,
+        safe_failure_reason=safe_failure_reason,
     )
 
 

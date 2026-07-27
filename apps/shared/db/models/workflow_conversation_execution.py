@@ -44,19 +44,23 @@ class ConversationWorkflowExecutionAdmissionRecord(Base):
             "(state = 'admitted' AND lease_owner IS NULL "
             "AND lease_deadline IS NULL AND attempt_id IS NULL "
             "AND result_entry_id IS NULL AND result_digest IS NULL "
-            "AND safe_failure_reason IS NULL AND terminal_at IS NULL) OR "
+            "AND safe_failure_reason IS NULL AND terminal_at IS NULL "
+            "AND retention_expires_at IS NULL) OR "
             "(state = 'leased' AND lease_owner IS NOT NULL "
             "AND lease_deadline IS NOT NULL AND attempt_id IS NOT NULL "
             "AND result_entry_id IS NULL AND result_digest IS NULL "
-            "AND safe_failure_reason IS NULL AND terminal_at IS NULL) OR "
+            "AND safe_failure_reason IS NULL AND terminal_at IS NULL "
+            "AND retention_expires_at IS NULL) OR "
             "(state = 'completed' AND lease_owner IS NOT NULL "
             "AND attempt_id IS NOT NULL AND result_entry_id IS NOT NULL "
             "AND length(result_digest) = 64 AND safe_failure_reason IS NULL "
-            "AND terminal_at IS NOT NULL) OR "
+            "AND terminal_at IS NOT NULL AND retention_expires_at IS NOT NULL "
+            "AND retention_expires_at > terminal_at) OR "
             "(state IN ('failed', 'outcome_unknown') "
             "AND lease_owner IS NOT NULL AND attempt_id IS NOT NULL "
             "AND result_entry_id IS NULL AND result_digest IS NULL "
-            "AND safe_failure_reason IS NOT NULL AND terminal_at IS NOT NULL)",
+            "AND safe_failure_reason IS NOT NULL AND terminal_at IS NOT NULL "
+            "AND retention_expires_at IS NOT NULL AND retention_expires_at > terminal_at)",
             name="ck_conv_workflow_admission_state_fields",
         ),
         Index(
@@ -75,6 +79,11 @@ class ConversationWorkflowExecutionAdmissionRecord(Base):
             "ix_conv_workflow_admission_lease",
             "state",
             "lease_deadline",
+        ),
+        Index(
+            "ix_conv_workflow_admission_retention",
+            "retention_expires_at",
+            "id",
         ),
         UniqueConstraint(
             "execution_id",
@@ -105,7 +114,6 @@ class ConversationWorkflowExecutionAdmissionRecord(Base):
     )
     deployment_id: Mapped[uuid.UUID] = mapped_column(
         PGUUID(as_uuid=True),
-        ForeignKey("workflow_deployments.id", ondelete="RESTRICT"),
         nullable=False,
     )
     deployment_version: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -159,5 +167,8 @@ class ConversationWorkflowExecutionAdmissionRecord(Base):
         DateTime(timezone=True), nullable=True
     )
 
+    retention_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
 __all__ = ["ConversationWorkflowExecutionAdmissionRecord"]

@@ -2496,6 +2496,9 @@ def _public_deployment_binding(
         runtime_input_variable=(
             runtime_contract.input_variable if runtime_contract else None
         ),
+        runtime_input_max_length=(
+            runtime_contract.input_max_length if runtime_contract else None
+        ),
         runtime_llm_node_id=(
             runtime_contract.llm_node_id if runtime_contract else None
         ),

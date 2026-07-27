@@ -119,6 +119,7 @@ REQUIRED_MEMORY_SCHEMA: dict[str, frozenset[str]] = {
             "version",
             "lease_generation",
             "lease_deadline",
+            "retention_expires_at",
         }
     ),
     "conversation_purge_jobs": frozenset(

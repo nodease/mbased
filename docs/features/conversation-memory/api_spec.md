@@ -6,7 +6,7 @@ Status: Implemented public lifecycle and initial runtime; advanced follow-up pen
 
 이 문서는 [ADR-0030](../../decisions/ADR-0030-memory-bounded-context.md)과 [ADR-0033](../../decisions/ADR-0033-conversation-memory-contract-completion.md)의 목표 API와 runtime application contract를 정의한다. MBA-316은 transport-independent Session/Turn lifecycle과 dispatch command, repository/UnitOfWork의 dormant subset을 구현했고, MBA-317은 Public Chatbot의 session create/close/reset/delete, Access Grant/receipt verifier, bounded encrypted secret replay, transcript projection, purge-status와 Gateway composition을 구현했다. MBA-318은 Public turn admission/dispatch, 제한된 Workflow topology 실행, bounded reference context와 provider fence를 연결한다. 이 public lifecycle/runtime surface는 필요한 Memory table·column이 실제 DB introspection에서 확인된 뒤 `MEMORY_PUBLIC_CONVERSATION_ENABLED=true`, 독립 capability/replay/admission/content-encryption key material, 승인된 `MEMORY_PUBLIC_REPLAY_BACKUP_ERASURE_MODE`와 `MEMORY_PUBLIC_PURGE_WORKER_READY=true`가 함께 설정된 경우에만 startup validation을 통과한다. Runtime Worker activation을 끈 뒤에도 보존 중인 transcript를 읽어야 하므로 content cipher는 lifecycle activation 동안 계속 구성한다. 준비 상태는 특정 Alembic revision 문자열이나 현재 head와의 일치가 아니라 이 surface가 소비하는 schema capability로 판정한다. 기본 Docker/Helm/Kubernetes 구성은 두 activation flag가 모두 false이고, MBA-320 physical purge worker가 배포되기 전에는 readiness를 true로 설정하지 않는다. 미확인 schema capability, backup contract, worker readiness 또는 누락된 key를 route별 우발적 503으로 늦추지 않고 process activation 단계에서 fail-closed한다.
 
-MBA-318은 `POST /api/v1/run-public/{url_slug}`의 root-level `conversation` envelope을 durable turn/dispatch와 Workflow admission으로 연결하고 `202 Accepted`를 반환한다. Public turn status endpoint는 현재 grant, deployment audience와 turn scope를 검증한 뒤 safe state와 승인된 display projection만 반환하며, invalid/missing/wrong-scope capability에는 동일한 resource-hidden 응답을 유지한다. 현재 Chatbot의 `inputs.memory_mode`와 `inputs.conversation_id`는 legacy contract이며 target API에 포함하지 않는다.
+MBA-318은 `POST /api/v1/run-public/{url_slug}`의 root-level `conversation` envelope을 durable turn/dispatch와 Workflow admission으로 연결한다. 새 요청과 non-terminal exact retry는 `202 Accepted`, 이미 completed/failed/cancelled인 exact retry는 현재 승인된 display 또는 bounded safe failure projection과 함께 `200 OK`를 반환한다. Public turn status endpoint는 현재 grant, deployment audience와 turn scope를 검증한 뒤 safe state와 승인된 display projection만 반환하며, invalid/missing/wrong-scope capability에는 동일한 resource-hidden 응답을 유지한다. 현재 Chatbot의 `inputs.memory_mode`와 `inputs.conversation_id`는 legacy contract이며 target API에 포함하지 않는다.
 
 Endpoint path는 목표 contract다. 구현 PR은 additive versioning과 guided migration으로 도입하고 기존 Workflow/Chatbot API 문서를 함께 갱신해야 한다. Authenticated internal Chatbot endpoint는 별도 내부 Chatbot 접근 정책·배포 surface 구현에 의존하며 이 Conversation Memory 설계만으로 현재 제공되는 기능이 아니다. Numeric retention/rate limit은 운영 설정이지만 이 문서의 security/idempotency baseline을 완화할 수 없다.
 
@@ -40,6 +40,8 @@ Public conversation page는 `Referrer-Policy: no-referrer`와 strict Content Sec
 
 Canonical Public Conversation endpoint와 framework가 허용하는 trailing-slash redirect alias는 모두 같은 outer transport/CORS boundary를 사용한다. 이 경계는 전역 `Access-Control-*` header와 `Vary: Origin`을 제거하며 alias의 preflight나 redirect response도 전역 credentialed CORS header를 상속하지 않는다.
 
+Root public-run path는 legacy Memory-OFF와 Conversation transport를 공유하므로 outer middleware가 body parsing 전에 `Authorization: Conversation`, `Idempotency-Key`, 또는 preflight의 requested `authorization`/`idempotency-key` header로 Conversation 호출을 분류한다. 분류된 malformed JSON, non-object body와 OPTIONS도 동일하게 CORS를 제거하고 no-store/no-referrer를 적용한다. 이 transport signal이 없는 legacy Memory-OFF 요청은 기존 CORS 동작을 유지하며, endpoint가 유효한 `conversation` envelope을 확인하면 scope marker로 같은 경계를 확정한다.
+
 ## HTTP Surface
 
 ### Public Conversation
@@ -47,7 +49,7 @@ Canonical Public Conversation endpoint와 framework가 허용하는 trailing-sla
 | Method | Path | Purpose | MBA-318 상태 |
 | --- | --- | --- | --- |
 | POST | `/api/v1/run-public/{url_slug}/conversations` | Public session과 Access Grant 생성 | 구현됨 |
-| POST | `/api/v1/run-public/{url_slug}` | target `conversation` runtime envelope | 구현됨; durable turn/dispatch 생성 후 `202 Accepted` |
+| POST | `/api/v1/run-public/{url_slug}` | target `conversation` runtime envelope | 구현됨; non-terminal은 `202`, terminal exact retry는 `200` |
 | GET | `/api/v1/run-public/{url_slug}/conversation/turns/{turn_id}` | 현재 grant의 turn 상태/완료 결과 조회 | safe state와 승인된 display projection만 반환; invalid scope는 hidden |
 | GET | `/api/v1/run-public/{url_slug}/conversation/transcript` | 허용 시 redacted public transcript 조회 | 구현됨; completed bounded projection만 반환 |
 | POST | `/api/v1/run-public/{url_slug}/conversation/close` | 현재 grant session close | 구현됨 |
@@ -82,7 +84,7 @@ Authenticated endpoint는 client-supplied subject, organization, workflow와 int
 | --- | ---: | --- |
 | Create public/authenticated session | `201 Created` | 같은 scope/fingerprint면 동일 safe response. Public raw token은 10분 replay TTL 안에서만 재반환하고 이후 `409 memory.secret_replay_expired` |
 | Run accepted, still pending/running | `202 Accepted` | 동일 `turn_id`, state와 status URL 반환 |
-| Run completed within request wait budget | `200 OK` | 동일 redacted completion response 반환 |
+| Run terminal exact replay | `200 OK` | completed는 동일 approved display, failed/cancelled는 동일 bounded safe failure 반환 |
 | Close | `200 OK` | 동일 terminal lifecycle response 반환 |
 | Reset | `201 Created` | 동일 새 session/grant response 반환 |
 | Delete accepted | `202 Accepted` | 동일 purge receipt/reference 반환 |
@@ -176,6 +178,8 @@ Public Access Grant는 authorization header로 전달한다. Client가 `subject`
 ```
 
 `Idempotency-Key` header는 public run과 동일하게 필수다. Gateway가 이를 canonical request ID로 정규화하며 body의 임의 request ID는 계약에 포함하지 않는다.
+
+Mapped Start input은 frozen graph의 required text/paragraph variable 하나만 허용한다. `max_length`는 UTF-8 byte 상한으로 canonical runtime binding에 보존되며, 생략 시에도 server upper bound 16 KiB가 적용된다. Graph가 정한 값보다 긴 입력은 admission, dispatch 또는 provider I/O 전에 `422 memory.input_mapping_invalid`로 거부한다.
 
 ### Success Response
 

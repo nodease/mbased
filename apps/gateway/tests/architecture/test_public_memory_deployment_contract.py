@@ -165,3 +165,23 @@ def test_standard_deployment_defaults_keep_the_runtime_queue_contract_explicit()
             "providerCostCapMicrousd",
         ):
             assert f'{value_name}: ""' in source
+
+
+def test_public_run_rate_limit_defaults_are_explicit_across_deployment_paths():
+    compose = _read("docker/docker-compose.yml")
+    values = _read("infra/helm/moduly/values.yaml")
+    production_values = _read("infra/helm/moduly/values-production.yaml")
+    gateway_template = _read("infra/helm/moduly/templates/gateway-deployment.yaml")
+
+    expected = {
+        "DEPLOYMENT": ("deploymentRateLimit", 120),
+        "ORGANIZATION": ("organizationRateLimit", 600),
+        "NETWORK": ("networkRateLimit", 60),
+        "GRANT": ("grantRateLimit", 20),
+    }
+    for environment_suffix, (value_name, default) in expected.items():
+        environment_name = f"MEMORY_PUBLIC_{environment_suffix}_RATE_LIMIT"
+        assert f"{environment_name}:-{default}" in compose
+        assert environment_name in gateway_template
+        assert f"{value_name}: {default}" in values
+        assert f"{value_name}: {default}" in production_values

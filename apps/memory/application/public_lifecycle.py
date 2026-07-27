@@ -74,6 +74,7 @@ class PublicDeploymentBinding:
     runtime_contract_ready: bool = False
     runtime_start_node_id: str | None = None
     runtime_input_variable: str | None = None
+    runtime_input_max_length: int | None = None
     runtime_llm_node_id: str | None = None
     runtime_answer_node_id: str | None = None
     runtime_output_variable: str | None = None

@@ -6,7 +6,11 @@ from types import SimpleNamespace
 import pytest
 
 from apps.shared.celery_app import celery_app
-from apps.shared.domain.conversation_memory_task import ConversationTurnTaskEnvelope
+from apps.shared.domain.conversation_memory_task import (
+    CONVERSATION_ADMISSION_RETENTION_TASK_NAME,
+    CONVERSATION_TURN_TASK_QUEUE,
+    ConversationTurnTaskEnvelope,
+)
 from apps.workflow_engine import tasks
 from apps.workflow_engine.application.conversation_memory_admission import (
     ConversationExecutionState,
@@ -135,3 +139,18 @@ def test_task_schedules_bounded_recovery_without_exposing_exception_text(
         captured["countdown"]
         > CONVERSATION_PROVIDER_MAX_TIMEOUT_SECONDS
     )
+
+
+def test_admission_retention_task_is_bounded_and_uses_the_versioned_queue() -> None:
+    task = celery_app.tasks[CONVERSATION_ADMISSION_RETENTION_TASK_NAME]
+    schedule = celery_app.conf.beat_schedule["conversation-admission-retention"]
+
+    assert task.name == tasks.purge_expired_conversation_execution_admissions.name
+    assert task.max_retries == 3
+    assert task.ignore_result is True
+    assert celery_app.conf.task_routes[CONVERSATION_ADMISSION_RETENTION_TASK_NAME] == {
+        "queue": CONVERSATION_TURN_TASK_QUEUE
+    }
+    assert schedule["task"] == CONVERSATION_ADMISSION_RETENTION_TASK_NAME
+    assert schedule["schedule"] == 60.0
+    assert schedule["options"] == {"queue": CONVERSATION_TURN_TASK_QUEUE}

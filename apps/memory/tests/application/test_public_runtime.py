@@ -51,6 +51,7 @@ def _binding(**changes) -> PublicDeploymentBinding:
         "runtime_contract_ready": True,
         "runtime_start_node_id": "start",
         "runtime_input_variable": "question",
+        "runtime_input_max_length": 16_384,
         "runtime_llm_node_id": "llm",
         "runtime_answer_node_id": "answer",
         "runtime_output_variable": "answer",
@@ -756,3 +757,93 @@ def test_turn_cap_is_rechecked_under_the_locked_start_transaction():
     assert repository.turns == {}
     assert cipher.values == []
     assert publisher.calls == []
+
+
+@pytest.mark.parametrize(
+    "input_text,max_length,accepted",
+    [
+        ("abcd", 4, True),
+        ("abcde", 4, False),
+        ("가", 3, True),
+        ("가나", 3, False),
+    ],
+)
+def test_public_turn_enforces_the_frozen_start_input_byte_limit(
+    input_text: str, max_length: int, accepted: bool
+) -> None:
+    repository = _Repository(_binding(runtime_input_max_length=max_length))
+    use_case, _cipher, admission = _use_case(repository)
+
+    if accepted:
+        result = use_case.execute(_command(input_text))
+        assert result.turn_state is TurnStatus.PENDING_DISPATCH
+        assert len(admission.calls) == 1
+    else:
+        with pytest.raises(ValueError, match="memory.input_mapping_invalid"):
+            use_case.execute(_command(input_text))
+        assert repository.turns == {}
+        assert admission.calls == []
+
+
+def test_exact_retry_of_completed_turn_returns_approved_display_without_publish() -> None:
+    repository = _Repository(_binding())
+    publisher = _Publisher()
+    use_case, cipher, _admission = _use_case(repository, publisher=publisher)
+    started = use_case.execute(_command())
+    turn = repository.turns[started.turn_id]
+    assistant_entry_id = uuid.uuid4()
+    turn.status = TurnStatus.COMPLETED
+    turn.assistant_entry_id = assistant_entry_id
+    repository.entries[assistant_entry_id] = ConversationMemoryEntry.approved_assistant(
+        entry_id=assistant_entry_id,
+        organization_id=repository.binding.organization_id,
+        session_id=repository.session.id,
+        turn_id=turn.id,
+        sequence=turn.sequence * 2,
+        channel="conversation",
+        content=ProtectedEntryContent(
+            display=cipher.protect("Approved redacted answer", associated_data="test"),
+            model=cipher.protect("raw model projection", associated_data="test"),
+        ),
+        content_revision=1,
+        idempotency_key_hash="2" * 64,
+        now=_now(),
+    )
+
+    replay = use_case.execute(_command())
+
+    assert replay.replayed is True
+    assert replay.turn_state is TurnStatus.COMPLETED
+    assert replay.display == "Approved redacted answer"
+    assert replay.safe_failure_reason is None
+    assert len(publisher.calls) == 1
+
+
+@pytest.mark.parametrize(
+    "terminal_state,transition",
+    [
+        (TurnStatus.FAILED, "fail"),
+        (TurnStatus.CANCELLED, "cancel"),
+    ],
+)
+def test_exact_retry_of_safe_terminal_failure_does_not_republish(
+    terminal_state: TurnStatus, transition: str
+) -> None:
+    repository = _Repository(_binding())
+    publisher = _Publisher()
+    use_case, _cipher, _admission = _use_case(repository, publisher=publisher)
+    started = use_case.execute(_command())
+    turn = repository.turns[started.turn_id]
+    getattr(turn, transition)(
+        expected_version=turn.version,
+        safe_reason_code="memory.provider_failed",
+        now=_now(),
+    )
+
+    replay = use_case.execute(_command())
+
+    assert replay.replayed is True
+    assert replay.turn_state is terminal_state
+    assert replay.display is None
+    assert replay.safe_failure_reason == "memory.provider_failed"
+    assert len(publisher.calls) == 1

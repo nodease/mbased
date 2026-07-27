@@ -28,6 +28,9 @@ from apps.shared.db.models.conversation_memory import (
     MemorySummaryGenerationJobRecord,
     MemoryTurnDispatchJobRecord,
 )
+from apps.shared.db.models.workflow_conversation_execution import (
+    ConversationWorkflowExecutionAdmissionRecord,
+)
 
 ROOT = Path(__file__).resolve().parents[4]
 
@@ -600,3 +603,24 @@ def test_schema_readiness_requires_stable_public_replay_scope_columns():
 
     assert result.ready is False
     assert result.missing_columns == {"conversation_purge_jobs": ["app_id"]}
+
+
+def test_workflow_admission_retention_is_bounded_without_blocking_deployment_delete():
+    table = ConversationWorkflowExecutionAdmissionRecord.__table__
+    state_fields = str(
+        _check_constraint(
+            ConversationWorkflowExecutionAdmissionRecord,
+            "ck_conv_workflow_admission_state_fields",
+        ).sqltext
+    )
+
+    assert "retention_expires_at" in table.c
+    assert table.c.deployment_id.foreign_keys == set()
+    assert "retention_expires_at > terminal_at" in state_fields
+    assert "retention_expires_at IS NULL" in state_fields
+    assert "ix_conv_workflow_admission_retention" in {
+        index.name for index in table.indexes
+    }
+    assert "retention_expires_at" in REQUIRED_MEMORY_SCHEMA[
+        "conversation_workflow_execution_admissions"
+    ]

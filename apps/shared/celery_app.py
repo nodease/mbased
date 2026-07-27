@@ -10,6 +10,7 @@ Moduly Celery 앱 설정
 import os
 
 from apps.shared.domain.conversation_memory_task import (
+    CONVERSATION_ADMISSION_RETENTION_TASK_NAME,
     CONVERSATION_TURN_TASK_NAME,
     CONVERSATION_TURN_TASK_QUEUE,
 )
@@ -56,6 +57,9 @@ celery_app.conf.update(
     # 태스크 라우팅: 큐별로 분리
     task_routes={
         CONVERSATION_TURN_TASK_NAME: {"queue": CONVERSATION_TURN_TASK_QUEUE},
+        CONVERSATION_ADMISSION_RETENTION_TASK_NAME: {
+            "queue": CONVERSATION_TURN_TASK_QUEUE
+        },
         "workflow.*": {"queue": "workflow"},
         "log.*": {"queue": "log"},
         "audit.*": {"queue": "log"},  # 감사 로그도 log_system 워커가 소비
@@ -94,6 +98,11 @@ celery_app.conf.update(
             "task": "memory.turn_dispatch.reconcile",
             "schedule": 15.0,
             "options": {"queue": "log"},
+        },
+        "conversation-admission-retention": {
+            "task": CONVERSATION_ADMISSION_RETENTION_TASK_NAME,
+            "schedule": 60.0,
+            "options": {"queue": CONVERSATION_TURN_TASK_QUEUE},
         },
         "knowledge-collection-sync-recovery": {
             "task": "workflow.knowledge_collection_sync.recover",

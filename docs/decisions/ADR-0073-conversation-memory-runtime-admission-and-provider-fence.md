@@ -377,6 +377,59 @@ Memory와 usage ledger의 두 `provider_started` marker가 서로 다른 replay 
   audit는 MBA-385에서 atomic reservation/commit 가능성을 포함해 구현한다. 그 변경도 usage
   intent와 provider-start no-replay 순서를 유지한다.
 
+### Public root transport와 frozen runtime 계약 수렴
+
+- Context: root public-run은 Memory-OFF legacy 호출과 Conversation 호출을 같은 path에서
+  처리한다. Endpoint가 body를 읽은 뒤에만 Conversation marker를 설정하면 malformed JSON,
+  non-object body와 OPTIONS가 전역 credentialed CORS를 먼저 상속한다. 동시에 frozen Start
+  `max_length`, context 4,096 token 상한, run rate baseline과 terminal exact replay status가
+  validator/application/deployment/API adapter 사이에서 서로 다르게 구현돼 있었다.
+- Options considered: middleware가 request body를 buffer/parse, Conversation 전용 root path를
+  즉시 분리, 기존 path에서 필수 transport header로 사전 분류하고 endpoint marker를 보강하는
+  방식을 검토했다.
+- Final decision: outer middleware는 root path의 `Conversation` authorization,
+  `Idempotency-Key`, preflight requested authorization/idempotency header를 body parsing 전
+  Conversation transport signal로 사용한다. Signal이 없는 Memory-OFF legacy 호출의 CORS는
+  유지하고 valid envelope은 endpoint marker로 확정한다. Frozen Start `max_length`는 canonical
+  runtime binding에 보존해 UTF-8 byte 상한으로 admission 전에 적용한다. Context 상한은
+  4,096, 60초 run rate 기본값은 deployment 120/organization 600/network 60/grant 20으로
+  requirements, composition과 Docker/Helm에 동일하게 고정한다. Non-terminal run은 `202`,
+  completed/failed/cancelled exact retry는 새 publish 없이 approved display 또는 bounded safe
+  failure를 담은 `200` turn projection을 반환한다.
+- Rationale: header discriminator는 ASGI body를 이중 소비하지 않으면서 framework validation과
+  preflight 이전에 secret-bearing Conversation 응답을 sanitize한다. Canonical frozen binding과
+  배포 기본값을 단일 계약에 맞추면 validation 결과 손실과 문서/코드 drift를 제거한다.
+- Affected files: shared runtime validator, Memory public binding/runtime/admission, Gateway run/CORS
+  composition, Docker/Helm defaults, API/component/test 문서와 관련 tests.
+- Follow-up review: external JavaScript SDK나 별도 cross-origin surface가 필요하면 현재 root
+  discriminator를 확장하지 않고 별도 path, exact origin/preflight와 credentialless 계약을 새
+  ADR로 승인한다.
+
+### Workflow admission terminal retention과 deployment snapshot
+
+- Context: `conversation_workflow_execution_admissions.deployment_id`의 `RESTRICT` FK는 admission
+  row 하나만 있어도 Deployment 삭제를 막았고 terminal row에는 expiry나 bounded cleanup이
+  없어 운영 데이터가 무기한 증가했다. 반면 별도 durable execution journal은 MBA-386으로
+  분리돼 현재 PR에서 다시 도입할 수 없다.
+- Options considered: Deployment 삭제 시 admission cascade, `RESTRICT` 유지와 수동 운영 삭제,
+  deployment identity를 immutable snapshot으로 유지하되 control-row FK를 제거하고 terminal
+  admission만 bounded retention하는 방식을 검토했다.
+- Final decision: admission의 deployment ID/version은 실행 당시 immutable snapshot으로 저장하고
+  `workflow_deployments` FK를 두지 않는다. Admitted/leased row는 expiry가 없고 terminal 전이는
+  canonical terminal 전이 시각에서 8일 뒤 `retention_expires_at`을 한 번 고정하며 exact finish replay가 이를
+  연장하지 않는다. DB constraint가 non-terminal NULL과 terminal `expiry > terminal_at`을
+  강제한다. Versioned Conversation queue의 1분 periodic task는 `(retention_expires_at, id)`
+  순서로 최대 500개 expired terminal row를 `FOR UPDATE SKIP LOCKED`로 삭제한다.
+- Rationale: snapshot은 과거 execution correlation을 유지하면서 mutable control row lifecycle을
+  막지 않는다. 8일은 public conversation/purge의 최대 운영 접근 기간과 맞고 bounded batch와
+  skip-locked claim은 active execution이나 동시 worker를 방해하지 않는다.
+- Affected files: Workflow admission domain/repository/task, admission model와 additive migration,
+  Memory schema readiness, shared Celery route/schedule, data model/component/test 문서와 tests.
+- Follow-up review: MBA-386이 execution journal/운영 projection을 도입할 때 현재 admission을
+  장기 history로 재사용하지 않고 별도 조회 권한, retention과 migration을 승인한다. Retention
+  수치를 변경할 때는 public purge/access 기간과 운영 증거 요구를 함께 재검토한다.
+
+
 ## 결과
 
 - Public conversation의 raw content는 Memory content store와 provider process-local request

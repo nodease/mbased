@@ -107,6 +107,7 @@ def test_valid_initial_public_conversation_contract_is_canonicalized() -> None:
     assert contract is not None
     assert contract.start_node_id == "start"
     assert contract.input_variable == "question"
+    assert contract.input_max_length == 16_384
     assert contract.llm_node_id == "llm"
     assert contract.answer_node_id == "answer"
     assert contract.output_variable == "answer"
@@ -316,3 +317,34 @@ def test_validation_does_not_mutate_the_frozen_snapshot() -> None:
 
     assert graph == before_graph
     assert config == before_config
+
+
+@pytest.mark.parametrize(
+    "max_context_tokens,accepted",
+    [(4_096, True), (4_097, False)],
+)
+def test_memory_context_token_limit_matches_the_public_contract(
+    max_context_tokens: int, accepted: bool
+) -> None:
+    graph = _graph()
+    graph["nodes"][1]["data"]["memory"]["maxContextTokens"] = max_context_tokens
+
+    if accepted:
+        contract = validate_conversation_memory_runtime(graph, _config())
+        assert contract is not None
+        assert contract.memory.max_context_tokens == max_context_tokens
+    else:
+        _invalid(graph, _config(), "memory.memory_policy_unsupported")
+
+
+@pytest.mark.parametrize("max_length", [1, 16_384])
+def test_start_input_max_length_is_preserved_in_the_runtime_contract(
+    max_length: int,
+) -> None:
+    graph = _graph()
+    graph["nodes"][0]["data"]["variables"][0]["max_length"] = max_length
+
+    contract = validate_conversation_memory_runtime(graph, _config())
+
+    assert contract is not None
+    assert contract.input_max_length == max_length

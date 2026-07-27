@@ -24,19 +24,23 @@ _ADMISSION_STATE_FIELDS_CHECK = (
     "(state = 'admitted' AND lease_owner IS NULL "
     "AND lease_deadline IS NULL AND attempt_id IS NULL "
     "AND result_entry_id IS NULL AND result_digest IS NULL "
-    "AND safe_failure_reason IS NULL AND terminal_at IS NULL) OR "
+    "AND safe_failure_reason IS NULL AND terminal_at IS NULL "
+    "AND retention_expires_at IS NULL) OR "
     "(state = 'leased' AND lease_owner IS NOT NULL "
     "AND lease_deadline IS NOT NULL AND attempt_id IS NOT NULL "
     "AND result_entry_id IS NULL AND result_digest IS NULL "
-    "AND safe_failure_reason IS NULL AND terminal_at IS NULL) OR "
+    "AND safe_failure_reason IS NULL AND terminal_at IS NULL "
+    "AND retention_expires_at IS NULL) OR "
     "(state = 'completed' AND lease_owner IS NOT NULL "
     "AND attempt_id IS NOT NULL AND result_entry_id IS NOT NULL "
     "AND length(result_digest) = 64 AND safe_failure_reason IS NULL "
-    "AND terminal_at IS NOT NULL) OR "
+    "AND terminal_at IS NOT NULL AND retention_expires_at IS NOT NULL "
+    "AND retention_expires_at > terminal_at) OR "
     "(state IN ('failed', 'outcome_unknown') "
     "AND lease_owner IS NOT NULL AND attempt_id IS NOT NULL "
     "AND result_entry_id IS NULL AND result_digest IS NULL "
-    "AND safe_failure_reason IS NOT NULL AND terminal_at IS NOT NULL)"
+    "AND safe_failure_reason IS NOT NULL AND terminal_at IS NOT NULL "
+    "AND retention_expires_at IS NOT NULL AND retention_expires_at > terminal_at)"
 )
 
 
@@ -152,6 +156,7 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.Column("terminal_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("retention_expires_at", sa.DateTime(timezone=True), nullable=True),
         sa.CheckConstraint(
             "deployment_version >= 1 AND storage_generation >= 1 "
             "AND version >= 1 AND lease_generation >= 0",
@@ -188,12 +193,6 @@ def upgrade() -> None:
             name="fk_conv_workflow_admission_app",
             ondelete="CASCADE",
         ),
-        sa.ForeignKeyConstraint(
-            ["deployment_id"],
-            ["workflow_deployments.id"],
-            name="fk_conv_workflow_admission_deployment",
-            ondelete="RESTRICT",
-        ),
         sa.PrimaryKeyConstraint(
             "id",
             name="pk_conv_workflow_execution_admissions",
@@ -218,6 +217,11 @@ def upgrade() -> None:
         "ix_conv_workflow_admission_lease",
         "conversation_workflow_execution_admissions",
         ["state", "lease_deadline"],
+    )
+    op.create_index(
+        "ix_conv_workflow_admission_retention",
+        "conversation_workflow_execution_admissions",
+        ["retention_expires_at", "id"],
     )
 
 
@@ -245,6 +249,10 @@ def downgrade() -> None:
     if has_runtime_data:
         raise RuntimeError(CONVERSATION_MEMORY_RUNTIME_DOWNGRADE_GUARD)
 
+    op.drop_index(
+        "ix_conv_workflow_admission_retention",
+        table_name="conversation_workflow_execution_admissions",
+    )
     op.drop_index(
         "ix_conv_workflow_admission_lease",
         table_name="conversation_workflow_execution_admissions",

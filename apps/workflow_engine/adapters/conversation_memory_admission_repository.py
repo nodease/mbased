@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from apps.shared.db.models.workflow_conversation_execution import (
@@ -91,12 +91,48 @@ class SqlAlchemyConversationExecutionAdmissionRepository:
             "safe_failure_reason",
             "updated_at",
             "terminal_at",
+            "retention_expires_at",
         ):
             value = getattr(admission, field)
             if field == "state":
                 value = value.value
             setattr(record, field, value)
 
+
+    def delete_expired_terminal(self, *, now, limit: int) -> int:
+        candidate_ids = tuple(
+            self.db.execute(
+                select(
+                    ConversationWorkflowExecutionAdmissionRecord.id
+                )
+                .where(
+                    ConversationWorkflowExecutionAdmissionRecord.state.in_(
+                        ("completed", "failed", "outcome_unknown")
+                    ),
+                    ConversationWorkflowExecutionAdmissionRecord.retention_expires_at
+                    .is_not(None),
+                    ConversationWorkflowExecutionAdmissionRecord.retention_expires_at
+                    <= now,
+                )
+                .order_by(
+                    ConversationWorkflowExecutionAdmissionRecord.retention_expires_at,
+                    ConversationWorkflowExecutionAdmissionRecord.id,
+                )
+                .limit(limit)
+                .with_for_update(skip_locked=True)
+            )
+            .scalars()
+            .all()
+        )
+
+        if not candidate_ids:
+            return 0
+        self.db.execute(
+            delete(ConversationWorkflowExecutionAdmissionRecord).where(
+                ConversationWorkflowExecutionAdmissionRecord.id.in_(candidate_ids)
+            )
+        )
+        return len(candidate_ids)
 
 def _record(
     admission: ConversationExecutionAdmission,
@@ -130,6 +166,7 @@ def _record(
         created_at=admission.created_at,
         updated_at=admission.updated_at,
         terminal_at=admission.terminal_at,
+        retention_expires_at=admission.retention_expires_at,
     )
 
 
@@ -165,6 +202,7 @@ def _domain(
         created_at=record.created_at,
         updated_at=record.updated_at,
         terminal_at=record.terminal_at,
+        retention_expires_at=record.retention_expires_at,
     )
 
 

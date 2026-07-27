@@ -374,14 +374,14 @@ def public_conversation_admission_policy_from_environment(
         deployment_rate_limit=_integer(
             environ,
             "MEMORY_PUBLIC_DEPLOYMENT_RATE_LIMIT",
-            60,
+            120,
             1,
             100_000,
         ),
         organization_rate_limit=_integer(
             environ,
             "MEMORY_PUBLIC_ORGANIZATION_RATE_LIMIT",
-            240,
+            600,
             1,
             100_000,
         ),
@@ -395,7 +395,7 @@ def public_conversation_admission_policy_from_environment(
         grant_rate_limit=_integer(
             environ,
             "MEMORY_PUBLIC_GRANT_RATE_LIMIT",
-            30,
+            20,
             1,
             100_000,
         ),

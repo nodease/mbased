@@ -328,8 +328,17 @@ def test_non_conversation_authorization_uses_typed_resource_hidden_contract(
 
 
 class _StartPublicTurn:
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        turn_state: TurnStatus = TurnStatus.PENDING_DISPATCH,
+        display: str | None = None,
+        safe_failure_reason: str | None = None,
+    ) -> None:
         self.commands = []
+        self.turn_state = turn_state
+        self.display = display
+        self.safe_failure_reason = safe_failure_reason
 
     def execute(self, command):
         self.commands.append(command)
@@ -340,8 +349,10 @@ class _StartPublicTurn:
             turn_sequence=2,
             turn_version=1,
             lifecycle_revision=3,
-            turn_state=TurnStatus.PENDING_DISPATCH,
+            turn_state=self.turn_state,
             replayed=False,
+            display=self.display,
+            safe_failure_reason=self.safe_failure_reason,
         )
 
 
@@ -633,3 +644,55 @@ def test_public_runtime_policy_errors_keep_typed_safe_status_codes(
         "Cache-Control": "no-store",
         "Referrer-Policy": "no-referrer",
     }
+
+
+@pytest.mark.parametrize(
+    "turn_state,display,failure_reason",
+    [
+        (TurnStatus.COMPLETED, "Approved redacted answer", None),
+        (TurnStatus.FAILED, None, "memory.provider_failed"),
+        (TurnStatus.CANCELLED, None, "memory.request_cancelled"),
+    ],
+)
+def test_public_run_exact_terminal_retry_returns_the_turn_projection(
+    monkeypatch,
+    turn_state: TurnStatus,
+    display: str | None,
+    failure_reason: str | None,
+) -> None:
+    start_turn = _StartPublicTurn(
+        turn_state=turn_state,
+        display=display,
+        safe_failure_reason=failure_reason,
+    )
+    app = FastAPI()
+    app.include_router(run.router, prefix="/api/v1")
+    app.add_middleware(PublicConversationCorsBoundaryMiddleware)
+    app.dependency_overrides[get_db] = lambda: object()
+    monkeypatch.setattr(run, "_start_public_conversation_turn", start_turn.execute)
+    monkeypatch.setattr(run, "_network_address", lambda _request: "198.51.100.0/24")
+
+    response = TestClient(app).post(
+        "/api/v1/run-public/public-chatbot",
+        json={
+            "inputs": {"question": "Where is the handbook?"},
+            "conversation": {"expected_lifecycle_revision": 3},
+        },
+        headers={
+            "Authorization": "Conversation valid-capability",
+            "Idempotency-Key": _key(),
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "turn": {
+            "id": response.json()["turn"]["id"],
+            "sequence": 2,
+            "status": turn_state.value,
+            "display": display,
+            "failure_reason": failure_reason,
+        }
+    }
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["referrer-policy"] == "no-referrer"

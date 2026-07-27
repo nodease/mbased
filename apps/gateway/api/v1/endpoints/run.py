@@ -32,6 +32,7 @@ from apps.gateway.api.v1.endpoints.public_conversation import (
 from apps.memory.application.public_runtime import (
     StartPublicConversationTurnCommand,
 )
+from apps.memory.domain.conversation import TurnStatus
 from apps.gateway.middleware.public_conversation_cors import (
     mark_public_conversation_transport_boundary,
 )
@@ -146,12 +147,27 @@ async def run_workflow_public(
             raise
         except Exception as error:
             raise _map_public_error(error) from None
-        response.status_code = status.HTTP_202_ACCEPTED
         _set_public_headers(
             response,
             lifecycle_revision=result.lifecycle_revision,
         )
         turn_id = str(result.turn_id)
+        if result.turn_state in {
+            TurnStatus.COMPLETED,
+            TurnStatus.FAILED,
+            TurnStatus.CANCELLED,
+        }:
+            response.status_code = status.HTTP_200_OK
+            return {
+                "turn": {
+                    "id": turn_id,
+                    "sequence": result.turn_sequence,
+                    "status": result.turn_state.value,
+                    "display": result.display,
+                    "failure_reason": result.safe_failure_reason,
+                }
+            }
+        response.status_code = status.HTTP_202_ACCEPTED
         return {
             "status": "accepted",
             "conversation": {

@@ -258,6 +258,11 @@ def test_composition_reuses_one_process_scoped_redis_pool(monkeypatch):
 def test_composition_uses_documented_safe_defaults_for_public_session_create():
     policy = public_conversation_admission_policy_from_environment({})
 
+    assert policy.window_seconds == 60
+    assert policy.deployment_rate_limit == 120
+    assert policy.organization_rate_limit == 600
+    assert policy.network_rate_limit == 60
+    assert policy.grant_rate_limit == 20
     assert policy.create_window_seconds == 600
     assert policy.create_deployment_network_rate_limit == 10
     assert policy.create_deployment_rate_limit == 200

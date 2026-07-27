@@ -8,6 +8,7 @@ Workflow-Engine Celery 태스크 정의
 import logging
 import time
 import uuid
+from datetime import datetime, timezone
 from typing import Any, Dict
 
 from celery.exceptions import Retry
@@ -51,6 +52,7 @@ from apps.workflow_engine.application.conversation_memory_execution import (
     ExecuteConversationTurnCommand,
 )
 from apps.shared.domain.conversation_memory_task import (
+    CONVERSATION_ADMISSION_RETENTION_TASK_NAME,
     CONVERSATION_TURN_TASK_NAME,
     ConversationTurnTaskEnvelope,
 )
@@ -179,6 +181,47 @@ def execute_conversation_turn(self, payload: Dict[str, Any]):
         "status": result.state.value,
         "admission_id": str(result.admission_id),
     }
+
+
+@celery_app.task(
+    name=CONVERSATION_ADMISSION_RETENTION_TASK_NAME,
+    bind=True,
+    max_retries=3,
+    ignore_result=True,
+    base=RedactedWorkflowTask,
+)
+def purge_expired_conversation_execution_admissions(self):
+    """Delete a bounded batch of expired terminal admission snapshots."""
+
+    from apps.workflow_engine.adapters.conversation_memory_admission_repository import (
+        SqlAlchemyConversationExecutionAdmissionRepository,
+        SqlAlchemyConversationExecutionUnitOfWork,
+    )
+    from apps.workflow_engine.application.conversation_memory_admission import (
+        PurgeExpiredConversationExecutionAdmissionsCommand,
+        PurgeExpiredConversationExecutionAdmissionsUseCase,
+    )
+
+    session = SessionLocal()
+    try:
+        result = PurgeExpiredConversationExecutionAdmissionsUseCase(
+            repository=SqlAlchemyConversationExecutionAdmissionRepository(session),
+            uow=SqlAlchemyConversationExecutionUnitOfWork(session),
+        ).execute(
+            PurgeExpiredConversationExecutionAdmissionsCommand(
+                now=datetime.now(timezone.utc)
+            )
+        )
+        return {"status": "completed", "deleted_count": result.deleted_count}
+    except Exception:
+        retries = getattr(getattr(self, "request", None), "retries", 0)
+        raise self.retry(
+            exc=Exception("memory.admission_retention_failed"),
+            countdown=min(2 ** max(int(retries or 0), 0), 30),
+        ) from None
+    finally:
+        session.close()
+
 
 
 @celery_app.task(

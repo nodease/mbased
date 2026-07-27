@@ -17,7 +17,7 @@ MEMORY_MAPPING_VERSION = "conversation-mapping-v1"
 MEMORY_POLICY_VERSION = "memory-policy-v1"
 MEMORY_STORAGE_GENERATION = 1
 MAX_MEMORY_TURNS = 20
-MAX_MEMORY_CONTEXT_TOKENS = 8_192
+MAX_MEMORY_CONTEXT_TOKENS = 4_096
 MAX_MEMORY_TEXT_BYTES = 16_384
 
 _SAFE_VERSION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$")
@@ -80,6 +80,7 @@ class ConversationMemoryRuntimeContract:
     memory_policy_version: str
     start_node_id: str
     input_variable: str
+    input_max_length: int
     llm_node_id: str
     answer_node_id: str
     output_variable: str
@@ -199,7 +200,7 @@ def validate_conversation_memory_runtime(
         raise _error("memory.input_mapping_invalid")
     if output_node != answer_id:
         raise _error("memory.output_mapping_invalid")
-    _validate_start(_node_data(start), input_variable)
+    input_max_length = _validate_start(_node_data(start), input_variable)
     policy = _validate_llm(_node_data(llm), start_id, input_variable)
     _validate_answer(_node_data(answer), llm_id, output_variable)
 
@@ -210,6 +211,7 @@ def validate_conversation_memory_runtime(
         memory_policy_version=runtime["memory_policy_version"],
         start_node_id=start_id,
         input_variable=input_variable,
+        input_max_length=input_max_length,
         llm_node_id=llm_id,
         answer_node_id=answer_id,
         output_variable=output_variable,
@@ -264,7 +266,7 @@ def _runtime_binding(raw: Mapping[str, Any]) -> dict[str, Any]:
     return result
 
 
-def _validate_start(data: Mapping[str, Any], input_variable: str) -> None:
+def _validate_start(data: Mapping[str, Any], input_variable: str) -> int:
     variables = data.get("variables")
     if not isinstance(variables, list) or len(variables) != 1:
         raise _error("memory.input_mapping_invalid")
@@ -282,6 +284,7 @@ def _validate_start(data: Mapping[str, Any], input_variable: str) -> None:
         type(max_length) is not int or not 1 <= max_length <= MAX_MEMORY_TEXT_BYTES
     ):
         raise _error("memory.input_mapping_invalid")
+    return max_length if max_length is not None else MAX_MEMORY_TEXT_BYTES
 
 
 def _validate_llm(

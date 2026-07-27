@@ -43,7 +43,7 @@ def _client() -> TestClient:
         raise HTTPException(status_code=409, detail="safe conflict")
 
     @app.post("/api/v1/run-public/chat")
-    def legacy_public_run():
+    def legacy_public_run(_body: dict):
         return {"ok": True}
 
     return TestClient(app)
@@ -145,8 +145,62 @@ def test_public_security_headers_cover_pre_endpoint_and_router_failures():
 def test_legacy_public_run_route_is_not_changed_by_target_cors_boundary():
     response = _client().post(
         "/api/v1/run-public/chat",
+        json={},
         headers={"Origin": "https://parent.example"},
     )
 
     assert response.status_code == 200
     assert response.headers["access-control-allow-origin"] == "https://parent.example"
+
+
+def test_root_conversation_malformed_json_is_sanitized_before_body_validation():
+    response = _client().post(
+        "/api/v1/run-public/chat",
+        content="{",
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": "Conversation valid-capability",
+            "Idempotency-Key": "safe-idempotency-key",
+            "Origin": "https://parent.example",
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["referrer-policy"] == "no-referrer"
+    assert "access-control-allow-origin" not in response.headers
+    assert "origin" not in response.headers.get("vary", "").lower()
+
+
+def test_root_conversation_non_object_body_is_sanitized_before_endpoint_entry():
+    response = _client().post(
+        "/api/v1/run-public/chat",
+        json=[],
+        headers={
+            "Authorization": "Conversation valid-capability",
+            "Idempotency-Key": "safe-idempotency-key",
+            "Origin": "https://parent.example",
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["referrer-policy"] == "no-referrer"
+    assert "access-control-allow-origin" not in response.headers
+
+
+def test_root_conversation_preflight_is_rejected_without_a_cors_grant():
+    response = _client().options(
+        "/api/v1/run-public/chat",
+        headers={
+            "Origin": "https://parent.example",
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": "Authorization, Idempotency-Key",
+        },
+    )
+
+    assert response.status_code == 404
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["referrer-policy"] == "no-referrer"
+    assert "access-control-allow-origin" not in response.headers
+    assert "access-control-allow-credentials" not in response.headers

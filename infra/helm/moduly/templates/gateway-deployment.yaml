@@ -147,6 +147,14 @@ spec:
           value: {{ .Values.memoryPublicConversation.runtimeWorkerQueue | quote }}
         - name: MEMORY_RUNTIME_MINIMUM_WORKER_CAPABILITY
           value: {{ .Values.memoryPublicConversation.runtimeMinimumWorkerCapability | quote }}
+        - name: MEMORY_PUBLIC_DEPLOYMENT_RATE_LIMIT
+          value: {{ .Values.memoryPublicConversation.deploymentRateLimit | quote }}
+        - name: MEMORY_PUBLIC_ORGANIZATION_RATE_LIMIT
+          value: {{ .Values.memoryPublicConversation.organizationRateLimit | quote }}
+        - name: MEMORY_PUBLIC_NETWORK_RATE_LIMIT
+          value: {{ .Values.memoryPublicConversation.networkRateLimit | quote }}
+        - name: MEMORY_PUBLIC_GRANT_RATE_LIMIT
+          value: {{ .Values.memoryPublicConversation.grantRateLimit | quote }}
         - name: MEMORY_PUBLIC_PURGE_WORKER_READY
           value: {{ .Values.memoryPublicConversation.purgeWorkerReady | quote }}
         - name: MEMORY_PUBLIC_REPLAY_BACKUP_ERASURE_MODE

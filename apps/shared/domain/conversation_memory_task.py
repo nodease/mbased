@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any, Mapping
 
 CONVERSATION_TURN_TASK_NAME = "workflow.execute_conversation_turn"
+CONVERSATION_ADMISSION_RETENTION_TASK_NAME = "workflow.conversation_admission_retention_purge"
 CONVERSATION_TURN_TASK_QUEUE = "conversation-memory-v1"
 CONVERSATION_TURN_TASK_VERSION = "conversation-turn-task-v1"
 _SAFE_VERSION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -96,6 +97,7 @@ class ConversationTurnTaskEnvelope:
 
 
 __all__ = [
+    "CONVERSATION_ADMISSION_RETENTION_TASK_NAME",
     "CONVERSATION_TURN_TASK_NAME",
     "CONVERSATION_TURN_TASK_QUEUE",
     "CONVERSATION_TURN_TASK_VERSION",
