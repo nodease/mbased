@@ -37,8 +37,7 @@ class ConversationWorkflowExecutionAdmissionRecord(Base):
             name="ck_conv_workflow_admission_fingerprint",
         ),
         CheckConstraint(
-            "state IN ('admitted', 'leased', 'completed', 'failed', "
-            "'outcome_unknown')",
+            "state IN ('admitted', 'leased', 'completed', 'failed', 'outcome_unknown')",
             name="ck_conv_workflow_admission_state",
         ),
         CheckConstraint(
@@ -121,7 +120,10 @@ class ConversationWorkflowExecutionAdmissionRecord(Base):
         nullable=False,
     )
     state: Mapped[str] = mapped_column(
-        String(24), nullable=False, default="admitted", server_default=text("'admitted'")
+        String(24),
+        nullable=False,
+        default="admitted",
+        server_default=text("'admitted'"),
     )
     version: Mapped[int] = mapped_column(
         Integer, nullable=False, default=1, server_default=text("1")
@@ -142,116 +144,20 @@ class ConversationWorkflowExecutionAdmissionRecord(Base):
     result_digest: Mapped[str | None] = mapped_column(String(64), nullable=True)
     safe_failure_reason: Mapped[str | None] = mapped_column(String(128), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_utc_now, server_default=text("now()")
+        DateTime(timezone=True),
+        nullable=False,
+        default=_utc_now,
+        server_default=text("now()"),
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, default=_utc_now, server_default=text("now()")
+        DateTime(timezone=True),
+        nullable=False,
+        default=_utc_now,
+        server_default=text("now()"),
     )
     terminal_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
 
 
-class ConversationWorkflowExecutionEventRecord(Base):
-    """Content-free durable journal for public conversation execution."""
-
-    __tablename__ = "conversation_workflow_execution_events"
-    __table_args__ = (
-        CheckConstraint(
-            "deployment_version >= 1",
-            name="ck_conv_workflow_event_deployment_version",
-        ),
-        CheckConstraint(
-            "actor_type = 'public'",
-            name="ck_conv_workflow_event_public_actor",
-        ),
-        CheckConstraint(
-            "event_type IN ('execution_admitted', 'execution_running', "
-            "'execution_completed', 'execution_failed', "
-            "'execution_outcome_unknown')",
-            name="ck_conv_workflow_event_type",
-        ),
-        CheckConstraint(
-            "(event_type IN ('execution_failed', 'execution_outcome_unknown') "
-            "AND safe_failure_reason IS NOT NULL) OR "
-            "(event_type NOT IN ('execution_failed', "
-            "'execution_outcome_unknown') AND safe_failure_reason IS NULL)",
-            name="ck_conv_workflow_event_failure_reason",
-        ),
-        UniqueConstraint(
-            "admission_id",
-            "event_type",
-            name="uq_conv_workflow_event_admission_type",
-        ),
-        Index(
-            "ix_conv_workflow_event_execution_created",
-            "execution_id",
-            "created_at",
-        ),
-        Index(
-            "ix_conv_workflow_event_org_created",
-            "organization_id",
-            "created_at",
-        ),
-    )
-
-    id: Mapped[uuid.UUID] = mapped_column(
-        PGUUID(as_uuid=True), primary_key=True, nullable=False, default=uuid.uuid4
-    )
-    organization_id: Mapped[uuid.UUID] = mapped_column(
-        PGUUID(as_uuid=True),
-        ForeignKey("organization.id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    admission_id: Mapped[uuid.UUID] = mapped_column(
-        PGUUID(as_uuid=True),
-        ForeignKey(
-            "conversation_workflow_execution_admissions.id",
-            ondelete="CASCADE",
-        ),
-        nullable=False,
-    )
-    execution_id: Mapped[uuid.UUID] = mapped_column(
-        PGUUID(as_uuid=True), nullable=False
-    )
-    app_id: Mapped[uuid.UUID] = mapped_column(
-        PGUUID(as_uuid=True),
-        ForeignKey("apps.id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    workflow_id: Mapped[uuid.UUID] = mapped_column(
-        PGUUID(as_uuid=True),
-        ForeignKey("workflows.id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    deployment_id: Mapped[uuid.UUID] = mapped_column(
-        PGUUID(as_uuid=True),
-        ForeignKey("workflow_deployments.id", ondelete="RESTRICT"),
-        nullable=False,
-    )
-    deployment_version: Mapped[int] = mapped_column(Integer, nullable=False)
-    session_id: Mapped[uuid.UUID] = mapped_column(
-        PGUUID(as_uuid=True), nullable=False
-    )
-    turn_id: Mapped[uuid.UUID] = mapped_column(PGUUID(as_uuid=True), nullable=False)
-    node_id: Mapped[str] = mapped_column(String(255), nullable=False)
-    node_type: Mapped[str] = mapped_column(String(64), nullable=False)
-    actor_type: Mapped[str] = mapped_column(
-        String(16), nullable=False, default="public", server_default=text("'public'")
-    )
-    event_type: Mapped[str] = mapped_column(String(40), nullable=False)
-    safe_failure_reason: Mapped[str | None] = mapped_column(
-        String(128), nullable=True
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=_utc_now,
-        server_default=text("now()"),
-    )
-
-
-__all__ = [
-    "ConversationWorkflowExecutionAdmissionRecord",
-    "ConversationWorkflowExecutionEventRecord",
-]
+__all__ = ["ConversationWorkflowExecutionAdmissionRecord"]

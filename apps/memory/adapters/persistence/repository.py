@@ -1452,6 +1452,64 @@ class SqlAlchemyConversationMemoryRepository:
     def add_dispatch_job(self, job: MemoryTurnDispatchJob) -> None:
         self._session.add(_dispatch_record(job))
 
+    def list_due_dispatch_jobs(
+        self,
+        *,
+        now: datetime,
+        limit: int,
+    ) -> tuple[MemoryTurnDispatchJob, ...]:
+        if not 1 <= limit <= 500:
+            raise ValueError("dispatch reconciliation limit must be between 1 and 500")
+        due_at = func.coalesce(
+            MemoryTurnDispatchJobRecord.next_attempt_at,
+            MemoryTurnDispatchJobRecord.claim_deadline_at,
+            MemoryTurnDispatchJobRecord.created_at,
+        )
+        statement = (
+            select(MemoryTurnDispatchJobRecord)
+            .join(
+                ConversationTurnRecord,
+                and_(
+                    ConversationTurnRecord.organization_id
+                    == MemoryTurnDispatchJobRecord.organization_id,
+                    ConversationTurnRecord.id == MemoryTurnDispatchJobRecord.turn_id,
+                    ConversationTurnRecord.session_id
+                    == MemoryTurnDispatchJobRecord.session_id,
+                ),
+            )
+            .where(
+                or_(
+                    MemoryTurnDispatchJobRecord.status == DispatchStatus.PENDING.value,
+                    and_(
+                        MemoryTurnDispatchJobRecord.status
+                        == DispatchStatus.RECONCILE_REQUIRED.value,
+                        MemoryTurnDispatchJobRecord.next_attempt_at <= now,
+                    ),
+                    and_(
+                        MemoryTurnDispatchJobRecord.status
+                        == DispatchStatus.CLAIMED.value,
+                        MemoryTurnDispatchJobRecord.claim_deadline_at <= now,
+                    ),
+                    and_(
+                        MemoryTurnDispatchJobRecord.status
+                        == DispatchStatus.TERMINAL.value,
+                        ConversationTurnRecord.status.in_(
+                            (
+                                TurnStatus.PENDING_DISPATCH.value,
+                                TurnStatus.QUEUED.value,
+                                TurnStatus.RUNNING.value,
+                            )
+                        ),
+                    ),
+                )
+            )
+            .order_by(due_at, MemoryTurnDispatchJobRecord.id)
+            .limit(limit)
+            .with_for_update(skip_locked=True, of=MemoryTurnDispatchJobRecord)
+        )
+        records = _execute(self._session, statement).scalars().all()
+        return tuple(_dispatch_domain(record) for record in records)
+
     def lock_dispatch_job(
         self,
         *,

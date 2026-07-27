@@ -489,8 +489,7 @@ def test_public_idempotency_result_snapshot_migration_is_additive_and_reversible
     ):
         assert f'sa.Column("{column}"' in source
         assert (
-            f'op.drop_column("conversation_idempotency_records", "{column}")'
-            in source
+            f'op.drop_column("conversation_idempotency_records", "{column}")' in source
         )
     assert "access_token" not in source
     assert "purge_receipt" not in source
@@ -498,13 +497,9 @@ def test_public_idempotency_result_snapshot_migration_is_additive_and_reversible
 
 def test_public_replay_authorization_scope_migration_is_additive_and_reversible():
     migrations = list(
-        (
-            ROOT
-            / "apps"
-            / "shared"
-            / "alembic"
-            / "versions"
-        ).glob("*_add_public_replay_authorization_scope.py")
+        (ROOT / "apps" / "shared" / "alembic" / "versions").glob(
+            "*_add_public_replay_authorization_scope.py"
+        )
     )
 
     assert len(migrations) == 1
@@ -570,13 +565,13 @@ def test_schema_readiness_requires_public_idempotency_result_snapshot_columns():
         "result_previous_lifecycle_revision",
     }
 
-    assert snapshot_columns <= REQUIRED_MEMORY_SCHEMA[
-        "conversation_idempotency_records"
-    ]
+    assert (
+        snapshot_columns <= REQUIRED_MEMORY_SCHEMA["conversation_idempotency_records"]
+    )
     assert snapshot_columns.isdisjoint(REQUIRED_MEMORY_SCHEMA["conversation_turns"])
 
 
-def test_schema_readiness_requires_runtime_admission_and_execution_journal():
+def test_schema_readiness_requires_runtime_admission_fence():
     assert {
         "id",
         "organization_id",
@@ -589,16 +584,6 @@ def test_schema_readiness_requires_runtime_admission_and_execution_journal():
         "lease_generation",
         "lease_deadline",
     } <= REQUIRED_MEMORY_SCHEMA["conversation_workflow_execution_admissions"]
-    assert {
-        "id",
-        "organization_id",
-        "admission_id",
-        "execution_id",
-        "session_id",
-        "turn_id",
-        "event_type",
-        "safe_failure_reason",
-    } <= REQUIRED_MEMORY_SCHEMA["conversation_workflow_execution_events"]
 
 
 def test_schema_readiness_requires_stable_public_replay_scope_columns():
@@ -609,9 +594,7 @@ def test_schema_readiness_requires_stable_public_replay_scope_columns():
         "authorization_verifier_hash",
     } <= REQUIRED_MEMORY_SCHEMA["conversation_idempotency_records"]
 
-    schema = {
-        name: set(columns) for name, columns in REQUIRED_MEMORY_SCHEMA.items()
-    }
+    schema = {name: set(columns) for name, columns in REQUIRED_MEMORY_SCHEMA.items()}
     schema["conversation_purge_jobs"].remove("app_id")
     result = check_memory_schema_readiness_with_inspector(_Inspector(schema))
 

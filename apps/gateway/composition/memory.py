@@ -9,7 +9,7 @@ from functools import lru_cache
 import redis
 from sqlalchemy.orm import Session
 
-from apps.gateway.adapters.queue.conversation_turn_publisher import (
+from apps.memory.adapters.queue.conversation_turn_publisher import (
     CeleryConversationTurnPublisher,
 )
 
@@ -45,7 +45,6 @@ from apps.memory.application.public_runtime import (
     StartPublicConversationTurnUseCase,
 )
 from apps.memory.domain.errors import PublicConversationFeatureDisabledError
-from apps.gateway.services.workflow_budget_service import WorkflowBudgetDecisionAdapter
 from apps.shared.celery_app import celery_app
 from apps.shared.db.session import SessionLocal
 from apps.shared.domain.conversation_memory_task import CONVERSATION_TURN_TASK_QUEUE
@@ -83,11 +82,7 @@ def build_public_conversation_application(
     uow = SqlAlchemyMemoryUnitOfWork(db)
     secrets = HmacPublicSecretIssuer.from_environment(values)
     replay_cipher = FernetSecretReplayCipher.from_environment(values)
-    content_cipher = (
-        FernetMemoryContentCipher.from_environment(values)
-        if public_conversation_runtime_enabled_from_environment(values)
-        else None
-    )
+    content_cipher = FernetMemoryContentCipher.from_environment(values)
     admission_key = _admission_key(values)
     admission = RedisPublicConversationAdmission(
         redis_client if redis_client is not None else _redis_client(values),
@@ -157,7 +152,6 @@ def build_public_conversation_runtime_application(
             secrets=secrets,
             content_cipher=content_cipher,
             fingerprinter=fingerprinter,
-            budget=WorkflowBudgetDecisionAdapter(db),
             admission=admission,
             dispatch_publisher=CeleryConversationTurnPublisher(
                 celery_app=celery_app,
@@ -266,10 +260,12 @@ def validate_public_conversation_security_configuration(
     secrets = HmacPublicSecretIssuer.from_environment(values)
     replay_cipher = FernetSecretReplayCipher.from_environment(values)
     admission_key = _admission_key(values)
+    content_cipher = FernetMemoryContentCipher.from_environment(values)
     _require_distinct_public_security_keys(
         *secrets.configuration_key_materials(),
         *replay_cipher.configuration_key_materials(),
         admission_key,
+        *content_cipher.configuration_key_materials(),
     )
     _require_public_purge_worker_ready(values)
 

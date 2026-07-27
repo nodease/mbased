@@ -58,15 +58,46 @@ Memory와 usage ledger의 두 `provider_started` marker가 서로 다른 replay 
    checkpoint에 먼저 한 번 저장한다. `CompleteTurn` retry는 checkpoint를 읽어 final entry를
    idempotent하게 승인하며 provider를 다시 호출하지 않는다. Public 응답과 turn status는
    승인된 mapped display projection만 반환한다.
-9. Public 실행 observability는 explicit public principal과 safe correlation을 가진
-   content-free WorkflowRun/WorkflowNodeRun projection이다. App creator를 user로 합성하지
-   않고 inputs/outputs는 빈 객체로 유지한다. Observer 장애는 canonical admission, usage,
-   Memory completion 또는 public response의 권위가 아니며 durable safe journal로
-   reconciliation한다.
+9. Public 실행 task와 optional observer boundary는 explicit public principal과 safe opaque
+   correlation만 전달한다. App creator를 user로 합성하지 않고 raw inputs/outputs, prompt,
+   context, token과 provider response를 broker/result/observer payload에 넣지 않는다. Durable
+   execution journal과 운영 조회 projection은 MBA-386에서 별도 retention·조회 계약과 함께
+   도입하며 canonical admission, usage, Memory completion 또는 public response의 권위가 아니다.
 10. Production activation은 별도 rollout/readiness gate다. Versioned worker routing,
     retention/physical purge와 legacy cutover가 준비되기 전에는 default-off를 유지한다.
 
 ## 구현 결정 기록
+
+### MBA-318 변경 범위 경계
+
+- Context: MBA-318 리뷰 보강 과정에서 Memory runtime 자체 외에 Workflow 월 예산 이중
+  fence와 전용 execution journal까지 같은 PR에 구현되면서 변경량과 검토 경계가 커졌다.
+- Options considered: 현재 구현 전체를 MBA-318에 유지, runtime 연결만 남기고 모든 안전성
+  보강을 후속 처리, Memory 도입에 직접 필요한 기능과 병합 전 필수 운영 안전성만 남기고
+  독립 운영 기능을 후속 이슈로 분리하는 세 방식을 검토했다.
+- Final decision:
+  - 이슈 직접 범위는 versioned Memory config/mapping, Public StartTurn과 durable dispatch,
+    Turn/Entry 암호화·status/transcript, Workflow admission/lease, bounded context,
+    ProviderExecutionCapability와 ADR-0069 usage no-replay 순서, final assistant checkpoint 및
+    additive migration이다.
+  - 필수 운영 안전성은 autonomous dispatch reconciliation과 terminal cleanup,
+    claim/retry/crash/redelivery fencing, exact versioned queue/capable Worker, schema/key readiness,
+    runtime-disabled historical transcript decrypt, organization/session-bound signed cursor,
+    completed Turn/content/provider 상한, Knowledge·legacy fail-closed 및 secret redaction이다.
+  - Workflow 월 예산의 Gateway/Worker 이중 fence와 차단 audit는 MBA-385, 전용 durable
+    conversation execution journal과 운영 projection은 MBA-386으로 이동한다.
+- Rationale: dispatch 유실, provider replay, stale owner write, transcript scope 우회와 key/readiness
+  누락은 현재 Memory runtime을 안전하게 운영하기 위한 merge 전 불변조건이다. 반면 월 예산
+  정책과 전용 journal은 독립된 소유 domain·migration·운영 조회/retention 결정을 가지므로
+  별도 변경으로 검토하는 편이 architecture와 rollback 경계를 명확히 한다.
+- Affected files: `apps/memory/`, Gateway/Workflow conversation composition과 tests,
+  `apps/shared/celery_app.py`, Docker/Helm 배포 계약, Conversation Memory 문서. 제거 전 전체
+  구현은 `backup/mba-318-pre-rescope-aa233352`에 보존한다.
+- Follow-up review: [MBA-385](https://linear.app/yoonki1207/issue/MBA-385)는 atomic budget
+  reservation 가능성을 포함해 pre-dispatch/provider-before-send fence와 audit를 검토하고,
+  [MBA-386](https://linear.app/yoonki1207/issue/MBA-386)는 content-free schema, idempotency,
+  organization scope, bounded retention과 운영 조회 projection을 승인한 뒤 구현한다. 두
+  후속 이슈는 MBA-318의 provider no-replay와 raw-content 비영속 계약을 약화할 수 없다.
 
 ### Provider 상한의 production source
 
@@ -183,41 +214,18 @@ Memory와 usage ledger의 두 `provider_started` marker가 서로 다른 replay 
 - Follow-up review: provider timeout 정책이 180초를 넘도록 변경되면 같은 변경에서 lease와
   recovery deadline 계약도 함께 갱신하고 heartbeat/fencing 전략을 재검토한다.
 
-### Content-free execution journal
-
-- Context: process-local logging observer는 public Workflow execution projection을
-  durable하게 남기지 못하고, observer 오류를 무시하면 canonical execution은 완료돼도
-  safe observability row가 영구 누락될 수 있었다.
-- Options considered: legacy WorkflowRun/WorkflowNodeRun에 빈 payload를 삽입, AuditLog에
-  high-cardinality 상태를 기록, 전용 content-free idempotent journal을 검토했다.
-- Final decision: public actor와 organization/app/workflow/deployment/session/turn/node의
-  opaque correlation, event type과 bounded safe failure reason만 갖는 전용 durable
-  journal을 사용한다. Admission/event unique key로 재전달을 idempotent하게 만들고
-  inputs, outputs, prompt, token, context와 provider response column은 두지 않는다.
-  Journal write 실패는 삼키지 않고 task를 retry하며 terminal redelivery는 canonical
-  admission에서 누락된 terminal event를 재구성한다.
-- Rationale: lifecycle AuditLog cardinality를 오염시키지 않으면서 ADR의 public principal과
-  no-content 계약을 DB 수준에서 고정한다. Journal은 execution 권위가 아니지만 누락을
-  성공으로 숨기지 않아 bounded reconciliation이 가능하다.
-- Affected files: `apps/shared/db/models/workflow_conversation_execution.py`,
-  `apps/shared/alembic/versions/b20e1f2a3b45_add_conversation_execution_journal.py`,
-  `apps/workflow_engine/adapters/conversation_execution_observer.py`,
-  `apps/workflow_engine/application/conversation_memory_execution.py`와 관련 테스트.
-- Follow-up review: 운영 조회/retention surface를 추가할 때 raw content join을 금지하고
-  organization scope, bounded retention과 삭제 정책을 별도 승인한다.
-
 ### Production execution scope와 runtime schema readiness
 
 - Context: application Port에만 execution scope 조회 계약이 있고 production SQL adapter가
-  구현하지 않으면 Worker는 모든 delivery의 첫 authorization에서 실패한다. 또한 admission과
-  journal table이 readiness 집합에서 빠지면 Gateway가 runtime을 활성화한 뒤에야 Worker의
-  DB 오류가 드러난다.
+  구현하지 않으면 Worker는 모든 delivery의 첫 authorization에서 실패한다. 또한 admission
+  table이 readiness 집합에서 빠지면 Gateway가 runtime을 활성화한 뒤에야 Worker의 DB 오류가
+  드러난다.
 - Options considered: 여러 repository 조회를 조합, application에서 row를 순차 조회, 하나의
   tenant-bound locked join과 required schema capability gate를 검토했다.
 - Final decision: Session, Turn, Dispatch, Access Grant, App, Workflow와 active Deployment를
   organization/turn/dispatch identity로 한 번에 조회하고 관련 row를 current transaction에서
-  잠근다. Public runtime의 admission과 content-free journal table/핵심 column도 Memory
-  readiness의 필수 capability로 검사한다.
+  잠근다. Public runtime의 Workflow admission table/핵심 column도 Memory readiness의 필수
+  capability로 검사한다.
 - Rationale: 단일 locked scope는 authorization과 deployment binding 사이의 혼합 snapshot을
   피하고, schema gate는 provider side effect가 가능한 runtime을 incomplete migration 위에서
   시작하지 못하게 한다.
@@ -254,8 +262,8 @@ Memory와 usage ledger의 두 `provider_started` marker가 서로 다른 replay 
 
 ### Cross-transaction terminal과 lifecycle 변경의 reference-only 수렴
 
-- Context: context attempt, Memory Turn/checkpoint, Workflow admission과 content-free journal은
-  서로 다른 transaction에서 commit된다. 각 commit 사이 crash 뒤 211초 recovery 전에
+- Context: context attempt, Memory Turn/checkpoint와 Workflow admission은 서로 다른
+  transaction에서 commit된다. 각 commit 사이 crash 뒤 211초 recovery 전에
   close, grant revoke 또는 active deployment 교체가 일어나면 active authorization resolver는
   의도대로 실행 권한을 거부하지만, 이미 저장된 terminal/usage 사실과 provisional row까지
   정리하지 못해 Turn과 admission이 영구 잔존할 수 있다.
@@ -269,7 +277,7 @@ Memory와 usage ledger의 두 `provider_started` marker가 서로 다른 replay 
   lease generation을 획득한 뒤에만 dispatch ACK, Turn/entry/session terminal cleanup과
   admission finish를 진행한다. Completed/failed/outcome-unknown projection은 predecessor
   version, execution/attempt, assistant entry/digest와 safe reason이 정확히 일치할 때만
-  재생하며 terminal admission의 누락 journal은 active execution 권한 없이 복구한다.
+  재생하며 terminal admission은 active execution 권한 없이 Memory projection을 복구한다.
   Historical running cleanup은 Memory marker가 아니라 ADR-0069 usage ledger를 권위로 사용해
   `intent`는 provider 미호출 실패, `provider_started`/`outcome_unknown`은 outcome unknown,
   terminal usage는 canonical outcome으로 분류한다. Lifecycle이 이미 stale한 provisional
@@ -351,28 +359,23 @@ Memory와 usage ledger의 두 `provider_started` marker가 서로 다른 replay 
 - Follow-up review: 새 contract version은 기존 queue의 의미를 변경하지 않고 새 versioned
   queue/capability를 추가해 drain과 rollback이 가능한 rollout을 유지한다.
 
-### Pre-provider 실패 분류와 Workflow 월 예산의 이중 fence
+### Pre-provider 실패 분류
 
 - Context: current input/context/mapping의 영구 오류도 RUNNING Turn과 leased admission을 남겨
-  poison retry가 반복됐고, public Conversation 경로는 Workflow 월 예산을 pre-dispatch와
-  provider 직전 모두 우회했다.
+  poison retry가 반복됐다.
 - Options considered: 모든 pre-provider 오류 terminal 처리, 모두 retryable 처리, typed
-  deterministic 오류만 terminalize하고 예산을 Gateway/Worker 두 경계에서 재검사하는 방식을
-  검토했다.
+  deterministic 오류만 terminalize하는 방식을 검토했다.
 - Final decision: current input unavailable, context unavailable/conflict, invalid mapping과 typed
   provider preparation failure는 current fence 아래 context attempt(있을 때), Memory Turn과
-  Workflow admission을 같은 safe reason으로 failed 처리한다. Adapter/storage/budget unavailable은
-  terminalize하지 않고 retryable하게 남긴다. Gateway는 새 logical request만 admission/write 전
-  shared budget decision을 검사하고, Worker는 durable usage intent 뒤 provider marker/I/O 직전에
-  일회용 DB session으로 재검사한다. Blocked는 usage intent를 `budget.exceeded` definitive failure로
-  닫고 terminalize하며 unavailable은 fail-closed retry다.
+  Workflow admission을 같은 safe reason으로 failed 처리한다. Adapter/storage unavailable은
+  terminalize하지 않고 retryable하게 남긴다.
 - Rationale: 오류의 치유 가능성에 따른 분류가 영구 lease와 premature terminalization을 함께
-  방지한다. 두 예산 fence는 queue 대기 중 사용량 변화와 request/Worker TOCTOU를 막고 exact
-  retry가 기존 Turn을 복구할 수 있게 한다.
+  방지하고 exact retry가 기존 Turn을 복구할 수 있게 한다.
 - Affected files: Gateway/Worker conversation composition, public runtime, execution orchestration,
-  provider usage adapter, workflow budget adapter 및 관련 Memory/Gateway/Workflow 테스트.
-- Follow-up review: Budget 서비스가 atomic reservation을 제공하면 provider 직전 read decision을
-  reservation/commit 계약으로 승격하되 usage intent와 provider-start no-replay 순서를 유지한다.
+  provider usage adapter 및 관련 Memory/Gateway/Workflow 테스트.
+- Follow-up review: Workflow 월 예산의 pre-dispatch/provider-before-send 이중 fence와 차단
+  audit는 MBA-385에서 atomic reservation/commit 가능성을 포함해 구현한다. 그 변경도 usage
+  intent와 provider-start no-replay 순서를 유지한다.
 
 ## 결과
 

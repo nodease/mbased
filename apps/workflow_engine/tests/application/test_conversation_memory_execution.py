@@ -11,10 +11,8 @@ from apps.memory.domain.errors import (
     MemoryAdapterUnavailableError,
     MemoryContextConflictError,
     MemoryContextUnavailableError,
-    WorkflowBudgetUnavailableError,
 )
 from apps.shared.domain.conversation_memory_task import ConversationTurnTaskEnvelope
-from apps.shared.domain.workflow_budget import BudgetExecutionDecision
 from apps.workflow_engine.application.conversation_memory_execution import (
     ConversationExecutionBinding,
     ConversationExecutionGraph,
@@ -470,7 +468,7 @@ class _Observer:
 
 class _FailingObserver:
     def record(self, **_kwargs):
-        raise RuntimeError("journal unavailable")
+        raise RuntimeError("observer unavailable")
 
 
 class _FailingOnceObserver(_Observer):
@@ -481,18 +479,8 @@ class _FailingOnceObserver(_Observer):
     def record(self, **kwargs):
         if kwargs["event"] == self.event:
             self.event = None
-            raise RuntimeError("journal unavailable")
+            raise RuntimeError("observer unavailable")
         super().record(**kwargs)
-
-
-class _Budget:
-    def __init__(self, status="allowed"):
-        self.status = status
-        self.calls = []
-
-    def evaluate(self, **kwargs):
-        self.calls.append(kwargs)
-        return BudgetExecutionDecision(status=self.status)
 
 
 def _envelope(binding):
@@ -513,20 +501,17 @@ def _use_case(
     *,
     provider=None,
     observer=None,
-    budget=None,
     graph=None,
 ):
     memory = _Memory(binding)
     admission = _Admission(binding)
     provider = provider or _Provider()
-    budget = budget or _Budget()
     return (
         ExecuteConversationTurnUseCase(
             memory=memory,
             admissions=admission,
             graphs=_GraphStore(binding, graph=graph),
             provider=provider,
-            budget=budget,
             observer=observer or _Observer(),
             clock=_Clock(),
             worker_capability="memory-runtime-v1",
@@ -620,14 +605,14 @@ def test_execution_observer_receives_only_safe_public_correlation() -> None:
         assert record["safe_failure_reason"] is None
 
 
-def test_durable_observer_failure_remains_retryable() -> None:
+def test_observer_failure_remains_retryable() -> None:
     binding = _binding()
     use_case, memory, admission, provider = _use_case(
         binding,
         observer=_FailingObserver(),
     )
 
-    with pytest.raises(RuntimeError, match="journal unavailable"):
+    with pytest.raises(RuntimeError, match="observer unavailable"):
         use_case.execute(
             ExecuteConversationTurnCommand(
                 envelope=_envelope(binding),
@@ -641,7 +626,7 @@ def test_durable_observer_failure_remains_retryable() -> None:
     assert provider.events == []
 
 
-def test_terminal_redelivery_reconciles_missing_journal_event() -> None:
+def test_terminal_redelivery_emits_safe_observer_event() -> None:
     binding = _binding()
     observer = _Observer()
     use_case, memory, admission, provider = _use_case(
@@ -729,7 +714,7 @@ def test_reference_only_completed_split_finishes_with_exact_result_identity() ->
     "failed_event",
     ["execution_admitted", "execution_running"],
 )
-def test_reference_only_lifecycle_cleanup_fails_safe_after_journal_crash(
+def test_reference_only_lifecycle_cleanup_fails_safe_after_observer_error(
     failed_event: str,
 ) -> None:
     binding = _binding()
@@ -744,7 +729,7 @@ def test_reference_only_lifecycle_cleanup_fails_safe_after_journal_crash(
         delivery_attempt_id=uuid.uuid4(),
     )
 
-    with pytest.raises(RuntimeError, match="journal unavailable"):
+    with pytest.raises(RuntimeError, match="observer unavailable"):
         use_case.execute(command)
 
     memory.terminal_binding = memory.binding
@@ -954,7 +939,7 @@ def test_outcome_unknown_never_replays_provider_and_releases_turn_safely() -> No
         ),
     ],
 )
-def test_terminal_memory_redelivery_reconciles_admission_and_journal_without_provider_replay(
+def test_terminal_memory_redelivery_reconciles_admission_and_observer_without_provider_replay(
     provider_error: Exception,
     expected_outcome: ConversationExecutionState,
     safe_failure_reason: str,
@@ -1358,51 +1343,3 @@ def test_invalid_port_input_terminalizes_after_context_claim_without_provider_io
     assert "fail:memory.input_mapping_invalid" in memory.events
     assert admission.events[-1] == "finish:failed"
     assert provider.events == ["prepare"]
-
-
-def test_current_budget_block_terminalizes_before_provider_start_and_io():
-    binding = _binding()
-    budget = _Budget("blocked")
-    use_case, memory, admission, provider = _use_case(
-        binding,
-        budget=budget,
-    )
-
-    result = use_case.execute(
-        ExecuteConversationTurnCommand(
-            envelope=_envelope(binding),
-            worker_owner="worker-a",
-            delivery_attempt_id=uuid.uuid4(),
-        )
-    )
-
-    assert result.state is ConversationExecutionState.FAILED
-    assert budget.calls == [{"workflow_id": binding.workflow_id, "now": NOW}]
-    assert provider.events == ["prepare", "intent"]
-    assert "memory_start:usage-operation-1" not in memory.events
-    assert "context_finish:failed" in memory.events
-    assert "fail:budget.exceeded" in memory.events
-    assert admission.events[-1] == "finish:failed"
-
-
-def test_budget_evaluation_unavailable_remains_retryable_and_fails_closed():
-    binding = _binding()
-    budget = _Budget("unavailable")
-    use_case, memory, admission, provider = _use_case(
-        binding,
-        budget=budget,
-    )
-
-    with pytest.raises(WorkflowBudgetUnavailableError):
-        use_case.execute(
-            ExecuteConversationTurnCommand(
-                envelope=_envelope(binding),
-                worker_owner="worker-a",
-                delivery_attempt_id=uuid.uuid4(),
-            )
-        )
-
-    assert provider.events == ["prepare", "intent"]
-    assert "memory_start:usage-operation-1" not in memory.events
-    assert not any(event.startswith("fail:") for event in memory.events)
-    assert not any(event.startswith("finish:") for event in admission.events)

@@ -27,8 +27,6 @@ from apps.memory.domain.conversation import SessionLifecycle, TurnStatus
 from apps.memory.domain.errors import (
     AccessGrantNotUsableError,
     PublicConversationTurnLimitExceededError,
-    WorkflowBudgetBlockedError,
-    WorkflowBudgetUnavailableError,
 )
 
 
@@ -620,8 +618,6 @@ def test_transcript_serializes_typed_turns_and_forwards_the_opaque_cursor(monkey
             409,
             "memory.turn_limit_exceeded",
         ),
-        (WorkflowBudgetBlockedError(), 429, "budget.exceeded"),
-        (WorkflowBudgetUnavailableError(), 503, "budget.unavailable"),
     ],
 )
 def test_public_runtime_policy_errors_keep_typed_safe_status_codes(

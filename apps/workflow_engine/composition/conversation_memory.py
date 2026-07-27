@@ -19,12 +19,6 @@ from apps.workflow_engine.adapters.conversation_memory_runtime import (
     SqlAlchemyConversationExecutionGraphAdapter,
     SqlAlchemyConversationMemoryRuntimeAdapter,
 )
-from apps.workflow_engine.adapters.conversation_execution_observer import (
-    SqlAlchemyConversationExecutionJournalObserver,
-)
-from apps.workflow_engine.adapters.workflow_budget import (
-    DisposableWorkflowBudgetDecisionAdapter,
-)
 from apps.workflow_engine.application.conversation_memory_execution import (
     ExecuteConversationTurnUseCase,
 )
@@ -124,12 +118,7 @@ def build_conversation_turn_use_case(
             usage_recorder=recorder,
             limits=limits,
         ),
-        budget=DisposableWorkflowBudgetDecisionAdapter(
-            session_factory=session_factory,
-        ),
-        observer=SqlAlchemyConversationExecutionJournalObserver(
-            session_factory=session_factory,
-        ),
+        observer=None,
         clock=type("_Clock", (), {"now": staticmethod(runtime_clock)})(),
         worker_capability=values.get(
             "MEMORY_RUNTIME_MINIMUM_WORKER_CAPABILITY",

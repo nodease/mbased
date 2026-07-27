@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from apps.gateway.adapters.queue import conversation_turn_publisher as adapter
+from apps.memory.adapters.queue import conversation_turn_publisher as adapter
 from apps.memory.domain.conversation import DispatchStatus, MemoryTurnDispatchJob
 from apps.shared.domain.conversation_memory_task import (
     CONVERSATION_TURN_TASK_QUEUE,

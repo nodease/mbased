@@ -90,6 +90,11 @@ celery_app.conf.update(
             "schedule": 60.0,
             "options": {"queue": "log"},
         },
+        "memory-turn-dispatch-reconciliation": {
+            "task": "memory.turn_dispatch.reconcile",
+            "schedule": 15.0,
+            "options": {"queue": "log"},
+        },
         "knowledge-collection-sync-recovery": {
             "task": "workflow.knowledge_collection_sync.recover",
             "schedule": 30.0,

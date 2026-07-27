@@ -16,8 +16,6 @@ from apps.memory.domain.errors import (
     AccessGrantNotUsableError,
     MemoryContextConflictError,
     MemoryContextUnavailableError,
-    WorkflowBudgetBlockedError,
-    WorkflowBudgetUnavailableError,
 )
 from apps.shared.domain.conversation_memory_runtime import (
     ConversationMemoryRuntimeContract,
@@ -25,7 +23,6 @@ from apps.shared.domain.conversation_memory_runtime import (
     validate_conversation_memory_runtime,
 )
 from apps.shared.domain.conversation_memory_task import ConversationTurnTaskEnvelope
-from apps.shared.domain.workflow_budget import BudgetExecutionDecision
 from apps.shared.utils.prompt_injection_guard import (
     PLATFORM_UNTRUSTED_CONTEXT_GUARDRAIL_PROMPT,
 )
@@ -247,15 +244,6 @@ class ConversationExecutionGraphPort(Protocol):
     ) -> ConversationExecutionGraph: ...
 
 
-class ConversationWorkflowBudgetPort(Protocol):
-    def evaluate(
-        self,
-        *,
-        workflow_id: uuid.UUID,
-        now: datetime,
-    ) -> BudgetExecutionDecision: ...
-
-
 class ConversationProviderPort(Protocol):
     def prepare(self, **kwargs) -> ConversationProviderPreparation: ...
 
@@ -300,8 +288,7 @@ class ExecuteConversationTurnUseCase:
         admissions: ConversationExecutionAdmissionPort,
         graphs: ConversationExecutionGraphPort,
         provider: ConversationProviderPort,
-        budget: ConversationWorkflowBudgetPort,
-        observer: ConversationObserverPort,
+        observer: ConversationObserverPort | None,
         clock: ClockPort,
         worker_capability: str,
         lease_duration: timedelta,
@@ -311,7 +298,6 @@ class ExecuteConversationTurnUseCase:
         self.admissions = admissions
         self.graphs = graphs
         self.provider = provider
-        self.budget = budget
         self.observer = observer
         self.clock = clock
         self.worker_capability = worker_capability
@@ -602,7 +588,6 @@ class ExecuteConversationTurnUseCase:
                 lease_generation=claimed.lease_generation,
                 now=now_at_fence,
             )
-            self._require_budget_allows(binding.workflow_id, now_at_fence)
             self.memory.validate_current(
                 binding,
                 execution_id=claimed.execution_id,
@@ -628,17 +613,6 @@ class ExecuteConversationTurnUseCase:
                 before_provider_start=before_provider_start,
             )
         except ConversationExecutionFenceError:
-            raise
-        except WorkflowBudgetBlockedError as exc:
-            return self._fail_before_provider(
-                binding=binding,
-                claimed=claimed,
-                worker_owner=command.worker_owner,
-                safe_reason=exc.code,
-                context=context,
-                context_attempt_version=context_attempt_version,
-            )
-        except WorkflowBudgetUnavailableError:
             raise
         except ProviderInvocationOutcomeUnknownError:
             self.admissions.require_fence(
@@ -755,25 +729,6 @@ class ExecuteConversationTurnUseCase:
             worker_owner=command.worker_owner,
             resume_usage=False,
         )
-
-    def _require_budget_allows(
-        self,
-        workflow_id: uuid.UUID,
-        now: datetime,
-    ) -> None:
-        try:
-            decision = self.budget.evaluate(workflow_id=workflow_id, now=now)
-        except WorkflowBudgetBlockedError:
-            raise
-        except WorkflowBudgetUnavailableError:
-            raise
-        except Exception as exc:
-            raise WorkflowBudgetUnavailableError() from exc
-        if decision.status == "allowed":
-            return
-        if decision.status == "blocked":
-            raise WorkflowBudgetBlockedError()
-        raise WorkflowBudgetUnavailableError()
 
     def _fail_before_provider(
         self,
@@ -1011,6 +966,8 @@ class ExecuteConversationTurnUseCase:
         *,
         safe_failure_reason: str | None = None,
     ) -> None:
+        if self.observer is None:
+            return
         self.observer.record(
             event=event,
             organization_id=binding.organization_id,

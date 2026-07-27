@@ -268,6 +268,7 @@ class _UnitOfWork:
 class _Secrets:
     def __init__(self) -> None:
         self._key = secrets.token_bytes(32)
+        self._cursor_codec = HmacPublicSecretIssuer(self._key, key_version="hmac-v1")
 
     def _issue(self, prefix: str, purpose: str) -> IssuedSecret:
         raw = f"{prefix}_v1_{secrets.token_urlsafe(32)}"
@@ -302,6 +303,12 @@ class _Secrets:
     def purge_receipt_verifiers(self, raw_value: str):
         verifier = self._verify("cpr", "purge", raw_value)
         return (verifier,) if verifier is not None else ()
+
+    def encode_transcript_cursor(self, **kwargs) -> str:
+        return self._cursor_codec.encode_transcript_cursor(**kwargs)
+
+    def decode_transcript_cursor(self, cursor: str, **kwargs) -> int:
+        return self._cursor_codec.decode_transcript_cursor(cursor, **kwargs)
 
 
 class _Cipher:
@@ -1634,5 +1641,41 @@ def test_transcript_fails_closed_when_completed_display_ciphertext_is_tampered()
         transcript.execute(
             url_slug="public-chatbot",
             access_token=created.access_token,
+            now=_now(),
+        )
+
+
+def test_transcript_cursor_cannot_be_reused_by_another_authorized_session():
+    components = _application()
+    repository = components[0]
+    create = _use_case(CreatePublicConversationUseCase, components)
+    first_session = create.execute(_create_command(suffix="cursor-session-one"))
+    cipher = _content_cipher()
+    repository.transcript_rows.extend(
+        _terminal_transcript_source(
+            repository=repository,
+            cipher=cipher,
+            sequence=sequence,
+            status=TurnStatus.FAILED,
+        )
+        for sequence in range(1, 52)
+    )
+    transcript = _use_case(
+        GetPublicTranscriptUseCase,
+        components,
+        content_cipher=cipher,
+    )
+    first_page = transcript.execute(
+        url_slug="public-chatbot",
+        access_token=first_session.access_token,
+        now=_now(),
+    )
+    second_session = create.execute(_create_command(suffix="cursor-session-two"))
+
+    with pytest.raises(AccessGrantNotUsableError):
+        transcript.execute(
+            url_slug="public-chatbot",
+            access_token=second_session.access_token,
+            cursor=first_page.next_cursor,
             now=_now(),
         )

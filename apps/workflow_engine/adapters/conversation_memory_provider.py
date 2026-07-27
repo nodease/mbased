@@ -6,7 +6,6 @@ import uuid
 from dataclasses import dataclass
 from typing import Any, Mapping
 
-from apps.memory.domain.errors import WorkflowBudgetBlockedError
 from apps.shared.domain.workflow_execution_identity import InvocationSegment
 from apps.workflow_engine.application.conversation_memory_execution import (
     ConversationExecutionBinding,
@@ -198,14 +197,7 @@ class ConversationMemoryProviderAdapter:
         current_attribution = lease.revalidate_current_binding()
         if current_attribution != attribution:
             raise ConversationProviderExecutionError("provider_usage.binding_mismatch")
-        try:
-            before_provider_start(usage_attempt.operation_reference)
-        except WorkflowBudgetBlockedError:
-            try:
-                usage_attempt.record_definitive_failure(reason_code="budget.exceeded")
-            except ProviderUsageRuntimeError as terminal_error:
-                raise ProviderInvocationOutcomeUnknownError() from terminal_error
-            raise
+        before_provider_start(usage_attempt.operation_reference)
         try:
             usage_attempt.mark_provider_started()
         except ProviderUsageRuntimeError as exc:

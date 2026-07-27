@@ -145,6 +145,8 @@ Pending turn과 같은 transaction에서 생성되는 durable outbox/process rec
 
 Dispatcher는 skip-locked 또는 동등한 atomic claim을 사용한다. Publish 성공 응답을 잃은 경우 같은 dispatch ID로 재발행할 수 있으며 Worker의 durable StartExecution admission이 중복을 제거한다. Admission 전에는 같은 dispatch를 재발행할 수 있지만 admission 이후 heartbeat/outcome이 불명확하면 Workflow execution reconciliation에 위임하고 Memory가 임의 workflow node side effect를 직접 재실행하지 않는다. Reconciliation 결과가 bounded deadline 안에 없으면 turn을 safe terminal failure로 닫아 session 점유를 해제한다.
 
+Memory-owned periodic reconciler는 bounded due scan과 `FOR UPDATE SKIP LOCKED`로 `pending`, due `reconcile_required`, expired `claimed`와 cleanup이 남은 `terminal` dispatch를 찾는다. Publish 재시도와 expired claim 회수는 current generation command만 호출하고, attempt 상한에 도달하면 같은 terminal finalizer로 Turn/session 점유를 해제한다. 한 item의 conflict나 adapter 실패는 다른 due item 처리를 막지 않으며 실패 row는 다음 beat에 다시 선택된다.
+
 Workflow execution admission과 lease/heartbeat는 Workflow domain이 소유한다. Memory는 admission reference와 safe state projection만 보존한다. Admission 성공 뒤 Memory acknowledgement가 유실되면 dispatch reconciler가 dispatch ID로 Workflow admission lookup port를 호출해 복구한다.
 
 ### ConversationMemoryEntry
@@ -437,8 +439,6 @@ Shared privacy boundary는 bounded content에 대해 classification, redacted pr
 기존 Budget adapter가 atomic reservation을 제공하지 않으면 summary strategy는 `window`로 제한한다. Reservation capability를 지원한다고 선언한 adapter만 `window_then_summary` composition에 주입할 수 있다.
 
 Price estimate가 unavailable, invalid 또는 unknown 때문에 zero이면 reservation을 거부하고 `budget.price_unavailable`을 반환한다. Summary provider는 호출하지 않으며 Memory/Budget adapter가 임의 가격 fallback을 만들지 않는다.
-Public main-generation의 월 예산은 두 단계로 강제한다. Gateway는 exact retry가 아닌 새 logical request만 Redis admission과 durable Turn/dispatch write 전에 shared Workflow budget read model로 검사한다. Worker는 durable usage intent 생성 뒤 current admission fence를 확인하고 provider-start marker 및 외부 I/O 직전에 일회용 DB session으로 같은 예산을 다시 검사한다. `blocked`는 usage intent를 `budget.exceeded` definitive failure로 닫고 context/Turn/admission을 terminalize하며 provider를 호출하지 않는다. `unavailable` 또는 adapter 예외는 fail-open하지 않고 provider marker/I/O 없이 retryable 상태를 유지한다. Exact retry는 기존 Turn 복구를 위해 Gateway gate를 반복 소비하지 않지만 Worker gate는 우회하지 않는다.
-
 Completed public Turn 상한은 session당 100개다. Read-only preflight에서 빠르게 거부한 뒤, mutation transaction이 잠근 current Session 안에서 count를 다시 읽어 동시 완료 race의 101번째 Turn을 `session.claim_turn`·dispatch 이전에 차단한다. Exact retry는 count와 무관하게 stored Turn identity를 먼저 복구한다.
 
 
@@ -460,18 +460,12 @@ provider 미전송 상태로 terminal 처리하지만 transient/untyped preparat
 가능하게 남긴다. Provider 응답을 받은 owner도 checkpoint와 usage success 전에 current
 lease generation을 다시 검증한다.
 
-Public execution observability는 `conversation_workflow_execution_events`의 content-free
-durable journal에 public actor와 safe opaque correlation/event/reason만 저장한다. Raw
-input/output, prompt, context, token과 provider response column은 두지 않는다. Journal
-write 실패는 task retry 대상으로 남기며 admission/event unique key와 terminal redelivery가
-누락 event를 idempotent하게 복구한다.
-
-Context attempt, Memory Turn/checkpoint, Workflow admission과 journal은 별도 transaction이므로
+Context attempt, Memory Turn/checkpoint와 Workflow admission은 별도 transaction이므로
 각 commit 직후 crash를 reference-only recovery state로 다룬다. Active resolve보다 먼저
 deterministic admission/execution/attempt와 frozen deployment correlation만 조회하되, runtime이
 여전히 usable한 최초 published delivery는 정상 경로로 통과시킨다. Close, grant revoke 또는
 active deployment 교체로 runtime이 stale이면 새 owner가 admission lease generation을
-획득한 뒤에만 dispatch/Turn/entry/session과 admission/journal을 terminal로 수렴시킨다.
+획득한 뒤에만 dispatch/Turn/entry/session과 admission을 terminal로 수렴시킨다.
 이 cleanup은 raw content를 읽거나 provider 권한을 복원하지 않는다. Running attempt는
 ADR-0069 usage ledger를 권위로 intent/provider-started/terminal을 분류하며, lifecycle 변경
 전에 저장된 provisional assistant checkpoint는 actual usage 사실을 보존하되 approved
@@ -485,10 +479,9 @@ Main-generation capability의 server-owned 상한은 Worker 환경의 다음 세
 
 이 값에는 임의 기본값을 두지 않는다. 누락, boolean, 0 이하 또는 정수 형식 오류는 composition 단계에서 provider I/O 전에 fail-closed한다. Client/Access Grant/graph payload는 이 상한을 설정하거나 늘릴 수 없다. 표준 배포는 runtime과 worker-ready를 default-off로 유지하며, 운영자가 승인한 상한, versioned queue/capability worker routing, schema와 dependent readiness를 함께 확인하기 전 `MEMORY_PUBLIC_RUNTIME_WORKER_READY=true`로 전환하지 않는다.
 
-Gateway process는 route serving 전에 public runtime 설정 검증을 실행한다. Runtime이
 Request fingerprint HMAC rotation은 Turn에 저장된 key version을 replay 권위로 사용한다. 새 logical request는 primary key로 서명하고 exact retry는 retained stored key로 다시 계산한다. Stored version이 없거나 keyring에서 제거됐으면 새 primary로 비교하거나 새 Turn을 만들지 않고 adapter-unavailable로 fail-closed한다.
 
-활성화됐는데 lifecycle, worker readiness, content encryption/fingerprint key 또는 key
+Gateway process는 route serving 전에 public runtime 설정 검증을 실행한다. Runtime이 활성화됐는데 lifecycle, worker readiness, content encryption/fingerprint key 또는 key
 분리가 불완전하면 첫 요청까지 오류를 늦추지 않고 startup을 fail-closed한다.
 
 ## Runtime Sequence
@@ -558,7 +551,7 @@ Public session create/run 전에 distributed atomic rate/concurrency limiter를 
 
 ### Transcript
 
-Server `ConversationTranscriptView`를 사용하고 client React state를 source of truth로 간주하지 않는다. Repository는 organization/session-scoped terminal Turn을 sequence 순서로 최대 51개만 읽고 application은 50개 page와 opaque cursor를 투영한다. Completed Turn은 approved AAD-bound display entry만 decrypt하며 failed/cancelled Turn은 content 없이 safe reason만 표시한다. Refresh/reset/delete 후 server lifecycle과 visible messages가 일치해야 한다. Transcript에 보이는 turn과 model Memory Context가 다를 수 있음을 safe 상태로 표현한다.
+Server `ConversationTranscriptView`를 사용하고 client React state를 source of truth로 간주하지 않는다. Repository는 organization/session-scoped terminal Turn을 sequence 순서로 최대 51개만 읽고 application은 50개 page와 organization/session-bound HMAC cursor를 투영한다. Completed Turn은 approved AAD-bound display entry만 decrypt하며 failed/cancelled Turn은 content 없이 safe reason만 표시한다. Runtime Worker가 비활성화돼도 lifecycle이 활성인 동안 content cipher와 retained keys를 구성해 보존 transcript를 읽을 수 있어야 한다. Refresh/reset/delete 후 server lifecycle과 visible messages가 일치해야 한다. Transcript에 보이는 turn과 model Memory Context가 다를 수 있음을 safe 상태로 표현한다.
 
 ## Observability
 

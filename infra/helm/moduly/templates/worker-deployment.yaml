@@ -86,6 +86,28 @@ spec:
               key: REDIS_PASSWORD
 
         {{- include "moduly.scheduleDispatchEnv" . | nindent 8 }}
+        {{- if .Values.memoryPublicConversation.runtimeEnabled }}
+        - name: MEMORY_RUNTIME_MINIMUM_WORKER_CAPABILITY
+          value: {{ .Values.memoryPublicConversation.runtimeMinimumWorkerCapability | quote }}
+        - name: MEMORY_CONTENT_ENCRYPTION_KEYS
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "moduly.secretName" . }}
+              key: MEMORY_CONTENT_ENCRYPTION_KEYS
+        - name: MEMORY_CONTENT_ENCRYPTION_PRIMARY_VERSION
+          value: {{ required "memoryPublicConversation.contentEncryptionPrimaryVersion is required when public memory runtime is enabled" .Values.memoryPublicConversation.contentEncryptionPrimaryVersion | quote }}
+        - name: MEMORY_CONTENT_DIGEST_HMAC_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "moduly.secretName" . }}
+              key: MEMORY_CONTENT_DIGEST_HMAC_KEY
+        - name: MEMORY_RUNTIME_PROVIDER_INPUT_TOKEN_CAP
+          value: {{ required "memoryPublicConversation.providerInputTokenCap is required when public memory runtime is enabled" .Values.memoryPublicConversation.providerInputTokenCap | quote }}
+        - name: MEMORY_RUNTIME_PROVIDER_OUTPUT_TOKEN_CAP
+          value: {{ required "memoryPublicConversation.providerOutputTokenCap is required when public memory runtime is enabled" .Values.memoryPublicConversation.providerOutputTokenCap | quote }}
+        - name: MEMORY_RUNTIME_PROVIDER_COST_CAP_MICROUSD
+          value: {{ required "memoryPublicConversation.providerCostCapMicrousd is required when public memory runtime is enabled" .Values.memoryPublicConversation.providerCostCapMicrousd | quote }}
+        {{- end }}
         
         # Sandbox configuration (for Code node execution)
         - name: SANDBOX_URL

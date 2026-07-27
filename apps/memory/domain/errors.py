@@ -98,11 +98,3 @@ class PublicConversationRateLimitedError(MemoryDomainError):
 
 class PublicConversationTurnLimitExceededError(MemoryDomainError):
     code = "memory.turn_limit_exceeded"
-
-
-class WorkflowBudgetBlockedError(MemoryDomainError):
-    code = "budget.exceeded"
-
-
-class WorkflowBudgetUnavailableError(MemoryDomainError):
-    code = "budget.unavailable"

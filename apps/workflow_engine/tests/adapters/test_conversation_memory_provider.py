@@ -6,7 +6,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from apps.memory.domain.errors import WorkflowBudgetBlockedError
 from apps.workflow_engine.adapters.conversation_memory_provider import (
     ConversationMemoryProviderAdapter,
     ConversationProviderLimits,
@@ -160,8 +159,6 @@ def test_usage_start_commit_failure_remains_retryable_without_provider_io() -> N
         deployment_config={},
     )
 
-    import pytest
-
     with pytest.raises(ProviderStartCommitRetryableError):
         adapter.generate(
             binding=binding,
@@ -252,8 +249,6 @@ def test_malformed_provider_response_is_immediately_durable_outcome_unknown() ->
         deployment_config={},
     )
 
-    import pytest
-
     with pytest.raises(ProviderInvocationOutcomeUnknownError):
         adapter.generate(
             binding=binding,
@@ -305,50 +300,3 @@ def test_reference_terminal_reconciliation_delegates_exact_usage_identity() -> N
             },
         )
     ]
-
-
-def test_budget_block_after_usage_intent_records_definitive_failure_before_send():
-    events = []
-    runtime = _Runtime(events)
-    usage = _UsageRecorder(events)
-    adapter = ConversationMemoryProviderAdapter(
-        runtime=runtime,
-        usage_recorder=usage,
-        limits=ConversationProviderLimits(
-            input_token_cap=2_000,
-            output_token_cap=500,
-            cost_cap_microusd=10_000,
-        ),
-    )
-    binding = _binding()
-    preparation = adapter.prepare(
-        binding=binding,
-        admission_id=uuid.uuid4(),
-        execution_id=uuid.uuid4(),
-        node_invocation_id=uuid.uuid4(),
-        node_data={"model_id": "fixed-model"},
-        deployment_config={},
-    )
-
-    def block_budget(_reference):
-        events.append("budget_blocked")
-        raise WorkflowBudgetBlockedError()
-
-    with pytest.raises(WorkflowBudgetBlockedError):
-        adapter.generate(
-            binding=binding,
-            admission_id=uuid.uuid4(),
-            execution_id=uuid.uuid4(),
-            node_invocation_id=uuid.uuid4(),
-            node_data={
-                "model_id": "fixed-model",
-                "parameters": {"max_tokens": 20},
-            },
-            preparation=preparation,
-            messages=({"role": "user", "content": "question"},),
-            before_provider_start=block_budget,
-        )
-
-    assert events[-2:] == ["budget_blocked", "usage_failed:budget.exceeded"]
-    assert "usage_started" not in events
-    assert "provider_io" not in events

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 from typing import Protocol
 
 from apps.memory.domain.conversation import (
@@ -57,6 +58,12 @@ class ConversationMemoryRepositoryPort(Protocol):
     def save_entry(self, entry: ConversationMemoryEntry) -> None: ...
 
     def add_dispatch_job(self, job: MemoryTurnDispatchJob) -> None: ...
+    def list_due_dispatch_jobs(
+        self,
+        *,
+        now: datetime,
+        limit: int,
+    ) -> tuple[MemoryTurnDispatchJob, ...]: ...
 
     def lock_dispatch_job(
         self,

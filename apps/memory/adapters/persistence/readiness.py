@@ -121,18 +121,6 @@ REQUIRED_MEMORY_SCHEMA: dict[str, frozenset[str]] = {
             "lease_deadline",
         }
     ),
-    "conversation_workflow_execution_events": frozenset(
-        {
-            "id",
-            "organization_id",
-            "admission_id",
-            "execution_id",
-            "session_id",
-            "turn_id",
-            "event_type",
-            "safe_failure_reason",
-        }
-    ),
     "conversation_purge_jobs": frozenset(
         {
             "id",

@@ -54,10 +54,17 @@ memoryPublicConversation:
   runtimeEnabled: false
   runtimeWorkerReady: false
   runtimeWorkerQueue: "conversation-memory-v1"
+  runtimeMinimumWorkerCapability: "memory-runtime-v1"
   purgeWorkerReady: false
   replayBackupErasureMode: "unconfirmed"
   capabilityHmacPrimaryVersion: ""
   replayEncryptionPrimaryVersion: ""
+  contentEncryptionPrimaryVersion: ""
+  runtimeAdmissionHmacPrimaryVersion: ""
+  providerInputTokenCap: ""
+  providerOutputTokenCap: ""
+  providerCostCapMicrousd: ""
+
 
 # Gateway (API Server)
 gateway:
@@ -327,6 +334,9 @@ secrets:
   memoryPublicReplayEncryptionKeys: ""
   memoryPublicAdmissionHmacKey: ""
 
+  memoryContentEncryptionKeys: ""
+  memoryContentDigestHmacKey: ""
+  memoryRuntimeAdmissionHmacKeys: ""
   # Master encryption keys
   masterKey: ""
   encryptionKey: ""

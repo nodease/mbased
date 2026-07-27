@@ -7,6 +7,8 @@ SECURITY_KEYS = (
     "MEMORY_PUBLIC_CAPABILITY_HMAC_KEY",
     "MEMORY_PUBLIC_REPLAY_ENCRYPTION_KEY",
     "MEMORY_PUBLIC_ADMISSION_HMAC_KEY",
+    "MEMORY_CONTENT_ENCRYPTION_KEYS",
+    "MEMORY_CONTENT_DIGEST_HMAC_KEY",
 )
 
 
@@ -27,7 +29,7 @@ def test_public_memory_is_explicitly_disabled_in_standard_deployment_defaults():
     assert "purgeWorkerReady: false" in production_values
 
 
-def test_enabled_helm_and_compose_paths_wire_three_independent_secret_names():
+def test_enabled_helm_and_compose_paths_wire_required_independent_secret_names():
     compose = _read("docker/docker-compose.yml")
     values = _read("infra/helm/moduly/values.yaml")
     secret_template = _read("infra/helm/moduly/templates/secrets.yaml")
@@ -41,11 +43,17 @@ def test_enabled_helm_and_compose_paths_wire_three_independent_secret_names():
         "memoryPublicCapabilityHmacKey",
         "memoryPublicReplayEncryptionKey",
         "memoryPublicAdmissionHmacKey",
+        "memoryContentEncryptionKeys",
+        "memoryContentDigestHmacKey",
     ):
         assert f'{value_name}: ""' in values
         assert f"secrets.{value_name} is required" in secret_template
     assert "MEMORY_PUBLIC_REPLAY_BACKUP_ERASURE_MODE" in compose
     assert "MEMORY_PUBLIC_REPLAY_BACKUP_ERASURE_MODE" in gateway_template
+    assert "MEMORY_RUNTIME_ADMISSION_HMAC_KEYS" in compose
+    assert "MEMORY_RUNTIME_ADMISSION_HMAC_KEYS" in secret_template
+    assert "MEMORY_RUNTIME_ADMISSION_HMAC_KEYS" in gateway_template
+    assert 'memoryRuntimeAdmissionHmacKeys: ""' in values
 
 
 def test_standard_deployment_paths_support_bounded_public_memory_key_rotation():
@@ -105,7 +113,7 @@ def test_conversation_tasks_use_a_versioned_queue_consumed_only_by_capable_worke
     celery_source = _read("apps/shared/celery_app.py")
     task_source = _read("apps/workflow_engine/tasks.py")
     publisher_source = _read(
-        "apps/gateway/adapters/queue/conversation_turn_publisher.py"
+        "apps/memory/adapters/queue/conversation_turn_publisher.py"
     )
     entrypoint = _read("docker/workflow_engine/docker-entrypoint.sh")
     dev_script = _read("scripts/dev.sh")
@@ -129,6 +137,7 @@ def test_standard_deployment_defaults_keep_the_runtime_queue_contract_explicit()
     values = _read("infra/helm/moduly/values.yaml")
     production_values = _read("infra/helm/moduly/values-production.yaml")
     gateway_template = _read("infra/helm/moduly/templates/gateway-deployment.yaml")
+    worker_template = _read("infra/helm/moduly/templates/worker-deployment.yaml")
 
     assert "MEMORY_PUBLIC_RUNTIME_WORKER_QUEUE:-conversation-memory-v1" in compose
     for source in (values, production_values):
@@ -138,3 +147,21 @@ def test_standard_deployment_defaults_keep_the_runtime_queue_contract_explicit()
     assert "MEMORY_PUBLIC_RUNTIME_ENABLED" in gateway_template
     assert "MEMORY_PUBLIC_RUNTIME_WORKER_READY" in gateway_template
     assert "MEMORY_PUBLIC_RUNTIME_WORKER_QUEUE" in gateway_template
+    for environment_name in (
+        "MEMORY_RUNTIME_MINIMUM_WORKER_CAPABILITY",
+        "MEMORY_CONTENT_ENCRYPTION_KEYS",
+        "MEMORY_CONTENT_ENCRYPTION_PRIMARY_VERSION",
+        "MEMORY_CONTENT_DIGEST_HMAC_KEY",
+        "MEMORY_RUNTIME_PROVIDER_INPUT_TOKEN_CAP",
+        "MEMORY_RUNTIME_PROVIDER_OUTPUT_TOKEN_CAP",
+        "MEMORY_RUNTIME_PROVIDER_COST_CAP_MICROUSD",
+    ):
+        assert environment_name in compose
+        assert environment_name in worker_template
+    for source in (values, production_values):
+        for value_name in (
+            "providerInputTokenCap",
+            "providerOutputTokenCap",
+            "providerCostCapMicrousd",
+        ):
+            assert f'{value_name}: ""' in source

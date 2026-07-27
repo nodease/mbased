@@ -7,8 +7,6 @@ single Unit of Work, and returns raw capabilities only to its caller.
 
 from __future__ import annotations
 
-import base64
-import binascii
 import hashlib
 import hmac
 import json
@@ -17,7 +15,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Protocol
+from typing import Protocol, cast
 
 from apps.memory.application.content import memory_content_aad
 from apps.memory.application.ports import MemoryUnitOfWorkPort
@@ -167,6 +165,24 @@ class PublicTranscriptContentCipherPort(Protocol):
         *,
         associated_data: str,
     ) -> str | None: ...
+
+
+class PublicTranscriptCursorCodecPort(Protocol):
+    def encode_transcript_cursor(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        session_id: uuid.UUID,
+        after_sequence: int,
+    ) -> str: ...
+
+    def decode_transcript_cursor(
+        self,
+        cursor: str,
+        *,
+        organization_id: uuid.UUID,
+        session_id: uuid.UUID,
+    ) -> int: ...
 
 
 class PublicConversationAuditPort(Protocol):
@@ -382,6 +398,7 @@ class _TransactionalPublicUseCase:
         content_cipher: PublicTranscriptContentCipherPort | None = None,
         admission: PublicConversationAdmissionPort | None = None,
         clock: Callable[[], datetime] | None = None,
+        cursor_codec: PublicTranscriptCursorCodecPort | None = None,
     ) -> None:
         self.repository = repository
         self.uow = uow
@@ -390,6 +407,9 @@ class _TransactionalPublicUseCase:
         self.content_cipher = content_cipher
         self.audit = audit
         self.policy = policy
+        self.cursor_codec = cursor_codec or cast(
+            PublicTranscriptCursorCodecPort, secrets
+        )
         self.admission = admission
         self.clock = clock or _utc_now
 
@@ -1402,7 +1422,18 @@ class GetPublicTranscriptUseCase(_TransactionalPublicUseCase):
                 SessionLifecycle.CLOSED,
             }:
                 raise AccessGrantNotUsableError()
-            after_sequence = _decode_transcript_cursor(cursor)
+            try:
+                after_sequence = (
+                    self.cursor_codec.decode_transcript_cursor(
+                        cursor,
+                        organization_id=binding.organization_id,
+                        session_id=session.id,
+                    )
+                    if cursor is not None
+                    else 0
+                )
+            except (TypeError, ValueError):
+                raise AccessGrantNotUsableError() from None
             sources = self.repository.list_public_transcript_turns(
                 organization_id=binding.organization_id,
                 session_id=session.id,
@@ -1414,11 +1445,16 @@ class GetPublicTranscriptUseCase(_TransactionalPublicUseCase):
                 self._project_turn(binding=binding, session=session, source=source)
                 for source in page
             )
-            next_cursor = (
-                _encode_transcript_cursor(page[-1].turn.sequence)
-                if len(sources) > self.PAGE_SIZE and page
-                else None
-            )
+            next_cursor = None
+            if len(sources) > self.PAGE_SIZE and page:
+                try:
+                    next_cursor = self.cursor_codec.encode_transcript_cursor(
+                        organization_id=binding.organization_id,
+                        session_id=session.id,
+                        after_sequence=page[-1].turn.sequence,
+                    )
+                except (TypeError, ValueError) as error:
+                    raise MemoryAdapterUnavailableError() from error
             return PublicTranscriptResult(
                 lifecycle=session.lifecycle,
                 lifecycle_revision=session.lifecycle_revision,
@@ -1806,49 +1842,6 @@ def _close_result_from_snapshot(
         expires_at=snapshot.expires_at,
         replayed=replayed,
     )
-
-
-def _encode_transcript_cursor(after_sequence: int) -> str:
-    if type(after_sequence) is not int or after_sequence < 1:
-        raise MemoryAdapterUnavailableError()
-    payload = json.dumps(
-        {"after": after_sequence, "v": 1},
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("ascii")
-    return base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
-
-
-def _decode_transcript_cursor(cursor: str | None) -> int:
-    if cursor is None:
-        return 0
-    if not isinstance(cursor, str) or not 1 <= len(cursor) <= 256:
-        raise AccessGrantNotUsableError()
-    try:
-        padded = cursor + ("=" * (-len(cursor) % 4))
-        decoded = base64.b64decode(
-            padded.encode("ascii"),
-            altchars=b"-_",
-            validate=True,
-        )
-        payload = json.loads(decoded.decode("ascii"))
-    except (
-        binascii.Error,
-        UnicodeDecodeError,
-        UnicodeEncodeError,
-        json.JSONDecodeError,
-        ValueError,
-    ):
-        raise AccessGrantNotUsableError() from None
-    if (
-        not isinstance(payload, dict)
-        or set(payload) != {"after", "v"}
-        or payload.get("v") != 1
-        or type(payload.get("after")) is not int
-        or payload["after"] < 1
-    ):
-        raise AccessGrantNotUsableError()
-    return payload["after"]
 
 
 __all__ = [

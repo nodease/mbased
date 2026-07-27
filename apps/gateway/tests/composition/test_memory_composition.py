@@ -33,6 +33,11 @@ def _environment() -> dict[str, str]:
         "MEMORY_PUBLIC_CAPABILITY_HMAC_KEY": secrets.token_urlsafe(32),
         "MEMORY_PUBLIC_REPLAY_ENCRYPTION_KEY": Fernet.generate_key().decode("ascii"),
         "MEMORY_PUBLIC_ADMISSION_HMAC_KEY": secrets.token_urlsafe(32),
+        "MEMORY_CONTENT_ENCRYPTION_KEYS": json.dumps(
+            {"content-v1": Fernet.generate_key().decode("ascii")}
+        ),
+        "MEMORY_CONTENT_ENCRYPTION_PRIMARY_VERSION": "content-v1",
+        "MEMORY_CONTENT_DIGEST_HMAC_KEY": secrets.token_urlsafe(32),
     }
 
 
@@ -106,7 +111,7 @@ def test_enabled_public_memory_accepts_capability_complete_schema(monkeypatch):
     )
 
 
-def test_enabled_composition_requires_three_independent_memory_security_keys():
+def test_enabled_composition_requires_lifecycle_content_encryption_keys():
     with pytest.raises(RuntimeError):
         validate_public_conversation_security_configuration(
             {
@@ -130,6 +135,10 @@ def test_enabled_composition_requires_three_independent_memory_security_keys():
         (
             "MEMORY_PUBLIC_REPLAY_ENCRYPTION_KEY",
             "MEMORY_PUBLIC_ADMISSION_HMAC_KEY",
+        ),
+        (
+            "MEMORY_PUBLIC_CAPABILITY_HMAC_KEY",
+            "MEMORY_CONTENT_DIGEST_HMAC_KEY",
         ),
     ),
 )
@@ -212,6 +221,8 @@ def test_composition_wires_one_shared_fail_closed_admission_adapter_per_request(
         redis_client=fake_redis,
     )
 
+    assert application.transcript.content_cipher is not None
+    assert environment.get("MEMORY_PUBLIC_RUNTIME_ENABLED", "false") == "false"
     assert isinstance(application.create.admission, RedisPublicConversationAdmission)
     assert application.create.admission is application.close.admission
     assert application.create.admission is application.reset.admission

@@ -105,7 +105,6 @@ MEMORY_RUNTIME_COLUMNS = {
 }
 MEMORY_RUNTIME_TABLES = {
     "conversation_workflow_execution_admissions",
-    "conversation_workflow_execution_events",
 }
 POST_FOUNDATION_COLUMNS = {
     **MEMORY_RUNTIME_COLUMNS,
@@ -697,9 +696,7 @@ def test_memory_migration_uow_and_concurrent_start_turn_contracts():
                     )
                 )
                 connection.execute(
-                    text(
-                        "DELETE FROM conversation_workflow_execution_admissions"
-                    )
+                    text("DELETE FROM conversation_workflow_execution_admissions")
                 )
 
             _run_alembic(

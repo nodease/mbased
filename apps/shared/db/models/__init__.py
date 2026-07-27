@@ -143,7 +143,6 @@ from apps.shared.db.models.workflow import Workflow
 from apps.shared.db.models.workflow_budget import WorkflowBudget
 from apps.shared.db.models.workflow_conversation_execution import (
     ConversationWorkflowExecutionAdmissionRecord,
-    ConversationWorkflowExecutionEventRecord,
 )
 from apps.shared.db.models.workflow_deployment import WorkflowDeployment
 from apps.shared.db.models.workflow_node_effect_attempt import (
@@ -171,7 +170,6 @@ __all__ = [
     "Connection",
     "ConversationSessionRecord",
     "ConversationWorkflowExecutionAdmissionRecord",
-    "ConversationWorkflowExecutionEventRecord",
     "ConversationAccessGrantRecord",
     "ConversationTurnRecord",
     "ConversationMemoryEntryRecord",

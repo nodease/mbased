@@ -507,3 +507,36 @@ def test_unit_of_work_redacts_sqlalchemy_failure_details():
     assert failure.value.__cause__ is None
     assert "sensitive" not in str(failure.value)
     uow.rollback()
+
+
+def test_due_dispatch_scan_is_bounded_ordered_and_skip_locked():
+    db = MagicMock(spec=Session)
+    db.execute.return_value.scalars.return_value.all.return_value = []
+    repository = SqlAlchemyConversationMemoryRepository(db)
+
+    assert repository.list_due_dispatch_jobs(now=_now(), limit=100) == ()
+
+    statement = db.execute.call_args.args[0]
+    compiled = str(
+        statement.compile(
+            dialect=postgresql.dialect(),
+            compile_kwargs={"literal_binds": True},
+        )
+    )
+    assert "memory_turn_dispatch_jobs.status = 'pending'" in compiled
+    assert "memory_turn_dispatch_jobs.status = 'reconcile_required'" in compiled
+    assert "memory_turn_dispatch_jobs.status = 'terminal'" in compiled
+    assert "memory_turn_dispatch_jobs.status = 'claimed'" in compiled
+    assert "next_attempt_at <=" in compiled
+    assert "claim_deadline_at <=" in compiled
+    assert "ORDER BY coalesce" in compiled
+    assert "LIMIT 100" in compiled
+    assert "FOR UPDATE OF memory_turn_dispatch_jobs SKIP LOCKED" in compiled
+
+
+@pytest.mark.parametrize("limit", (0, 501))
+def test_due_dispatch_scan_rejects_unbounded_limits(limit: int):
+    repository = SqlAlchemyConversationMemoryRepository(MagicMock(spec=Session))
+
+    with pytest.raises(ValueError, match="between 1 and 500"):
+        repository.list_due_dispatch_jobs(now=_now(), limit=limit)

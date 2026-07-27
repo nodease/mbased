@@ -59,7 +59,7 @@ class CeleryConversationTurnPublisher:
         try:
             repository = SqlAlchemyConversationMemoryRepository(session)
             uow = SqlAlchemyMemoryUnitOfWork(session)
-            owner = f"gateway-{uuid.uuid4().hex}"
+            owner = f"memory-dispatcher-{uuid.uuid4().hex}"
             now = self._clock()
             claim = ClaimTurnDispatchUseCase(
                 repository=repository,

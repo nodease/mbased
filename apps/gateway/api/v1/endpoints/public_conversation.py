@@ -33,8 +33,6 @@ from apps.memory.domain.errors import (
     SecretReplayExpiredError,
     SessionNotActiveError,
     StaleLifecycleRevisionError,
-    WorkflowBudgetBlockedError,
-    WorkflowBudgetUnavailableError,
 )
 
 router = APIRouter()
@@ -180,18 +178,6 @@ def _map_public_error(error: Exception) -> HTTPException:
             error.code,
             "The conversation completed-turn limit was reached.",
             status_code=status.HTTP_409_CONFLICT,
-        )
-    if isinstance(error, WorkflowBudgetBlockedError):
-        return _safe_error(
-            error.code,
-            "Workflow monthly budget exceeded.",
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-        )
-    if isinstance(error, WorkflowBudgetUnavailableError):
-        return _safe_error(
-            error.code,
-            "Workflow budget evaluation is temporarily unavailable.",
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         )
     if isinstance(error, PublicConversationFeatureDisabledError):
         return _safe_error(

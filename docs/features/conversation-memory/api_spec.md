@@ -4,7 +4,7 @@ Status: Implemented public lifecycle and initial runtime; advanced follow-up pen
 
 ## Contract Status
 
-이 문서는 [ADR-0030](../../decisions/ADR-0030-memory-bounded-context.md)과 [ADR-0033](../../decisions/ADR-0033-conversation-memory-contract-completion.md)의 목표 API와 runtime application contract를 정의한다. MBA-316은 transport-independent Session/Turn lifecycle과 dispatch command, repository/UnitOfWork의 dormant subset을 구현했고, MBA-317은 Public Chatbot의 session create/close/reset/delete, Access Grant/receipt verifier, bounded encrypted secret replay, transcript projection, purge-status와 Gateway composition을 구현했다. MBA-318은 Public turn admission/dispatch, 제한된 Workflow topology 실행, bounded reference context와 provider fence를 연결한다. 이 public lifecycle/runtime surface는 필요한 Memory table·column이 실제 DB introspection에서 확인된 뒤 `MEMORY_PUBLIC_CONVERSATION_ENABLED=true`, 독립 capability/replay/admission key material, 승인된 `MEMORY_PUBLIC_REPLAY_BACKUP_ERASURE_MODE`와 `MEMORY_PUBLIC_PURGE_WORKER_READY=true`가 함께 설정된 경우에만 startup validation을 통과한다. 준비 상태는 특정 Alembic revision 문자열이나 현재 head와의 일치가 아니라 이 surface가 소비하는 schema capability로 판정한다. 기본 Docker/Helm/Kubernetes 구성은 두 activation flag가 모두 false이고, MBA-320 physical purge worker가 배포되기 전에는 readiness를 true로 설정하지 않는다. 미확인 schema capability, backup contract, worker readiness 또는 누락된 key를 route별 우발적 503으로 늦추지 않고 process activation 단계에서 fail-closed한다.
+이 문서는 [ADR-0030](../../decisions/ADR-0030-memory-bounded-context.md)과 [ADR-0033](../../decisions/ADR-0033-conversation-memory-contract-completion.md)의 목표 API와 runtime application contract를 정의한다. MBA-316은 transport-independent Session/Turn lifecycle과 dispatch command, repository/UnitOfWork의 dormant subset을 구현했고, MBA-317은 Public Chatbot의 session create/close/reset/delete, Access Grant/receipt verifier, bounded encrypted secret replay, transcript projection, purge-status와 Gateway composition을 구현했다. MBA-318은 Public turn admission/dispatch, 제한된 Workflow topology 실행, bounded reference context와 provider fence를 연결한다. 이 public lifecycle/runtime surface는 필요한 Memory table·column이 실제 DB introspection에서 확인된 뒤 `MEMORY_PUBLIC_CONVERSATION_ENABLED=true`, 독립 capability/replay/admission/content-encryption key material, 승인된 `MEMORY_PUBLIC_REPLAY_BACKUP_ERASURE_MODE`와 `MEMORY_PUBLIC_PURGE_WORKER_READY=true`가 함께 설정된 경우에만 startup validation을 통과한다. Runtime Worker activation을 끈 뒤에도 보존 중인 transcript를 읽어야 하므로 content cipher는 lifecycle activation 동안 계속 구성한다. 준비 상태는 특정 Alembic revision 문자열이나 현재 head와의 일치가 아니라 이 surface가 소비하는 schema capability로 판정한다. 기본 Docker/Helm/Kubernetes 구성은 두 activation flag가 모두 false이고, MBA-320 physical purge worker가 배포되기 전에는 readiness를 true로 설정하지 않는다. 미확인 schema capability, backup contract, worker readiness 또는 누락된 key를 route별 우발적 503으로 늦추지 않고 process activation 단계에서 fail-closed한다.
 
 MBA-318은 `POST /api/v1/run-public/{url_slug}`의 root-level `conversation` envelope을 durable turn/dispatch와 Workflow admission으로 연결하고 `202 Accepted`를 반환한다. Public turn status endpoint는 현재 grant, deployment audience와 turn scope를 검증한 뒤 safe state와 승인된 display projection만 반환하며, invalid/missing/wrong-scope capability에는 동일한 resource-hidden 응답을 유지한다. 현재 Chatbot의 `inputs.memory_mode`와 `inputs.conversation_id`는 legacy contract이며 target API에 포함하지 않는다.
 
@@ -255,7 +255,7 @@ Turn status는 `pending_dispatch | queued | running | completed | failed | cance
 }
 ```
 
-- Transcript는 한 page에 terminal Turn을 최대 50개 반환하고 51번째 존재 여부로 opaque `next_cursor`를 발급한다. Cursor는 version과 마지막 sequence만 담은 base64url opaque 값이며 malformed, oversized, unknown-version 값은 resource-hiding으로 거부한다.
+- Transcript는 한 page에 terminal Turn을 최대 50개 반환하고 51번째 존재 여부로 opaque `next_cursor`를 발급한다. Cursor는 version, 마지막 sequence, organization/session binding을 담아 독립 HMAC subkey로 서명하고 key version을 포함한다. 변조·재인코딩, cross-session 재사용, malformed/oversized/unknown-version 값은 resource-hiding으로 거부하며 retained previous key로 발급된 live cursor만 rotation 뒤에도 검증한다.
 - MBA-317의 안전한 빈 projection도 같은 response envelope을 사용해 `conversation.state`, lifecycle/content revision, 실제 접근 `expires_at`, 빈 `turns`와 `next_cursor`를 반환한다. 내부 application DTO 이름이나 legacy `status/entries` shape를 공개 계약으로 노출하지 않는다.
 - Raw prompt, Memory summary, Data Dependency, private source identity와 authorization reason을 반환하지 않는다.
 - Public transcript는 해당 public session에서 생성된 terminal Turn만 stable sequence 순서로 조회하고 completed Turn의 approved user/assistant `display` projection을 entry/turn/session/organization identity와 AAD까지 검증해 반환한다. Model projection이나 decrypt fallback은 금지한다.
@@ -488,8 +488,6 @@ Application/domain error는 FastAPI `HTTPException`에 의존하지 않는다. I
 | `memory.stale_lifecycle_revision` | 409 | Expected lifecycle revision 불일치 |
 | `memory.active_turn_conflict` | 409 | 같은 session에 처리 중인 turn 존재 |
 | `memory.turn_limit_exceeded` | 409 | Public session에 completed Turn 100개가 있어 새 logical Turn을 dispatch/provider 전에 거부 |
-| `budget.exceeded` | 429 | Workflow 월 예산 초과. 새 logical run admission 또는 provider 외부 I/O 전에 차단 |
-| `budget.unavailable` | 503 | 예산 판정이 불명확해 fail-closed. 새 write/provider I/O 없이 retry 가능 |
 | `memory.stale_turn_version` | 409 | Pending turn version 불일치 |
 | `memory.duplicate_request_conflict` | 409 | 같은 request ID에 다른 fingerprint |
 | `memory.secret_replay_expired` | 409 | Secret replay ciphertext 만료. Same key로 새 grant/receipt를 만들지 않음 |

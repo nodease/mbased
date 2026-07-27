@@ -29,11 +29,8 @@ from apps.memory.domain.errors import (
     MemoryAdapterUnavailableError,
     PublicConversationFeatureDisabledError,
     PublicConversationTurnLimitExceededError,
-    WorkflowBudgetBlockedError,
-    WorkflowBudgetUnavailableError,
 )
 from apps.memory.domain.public_access import ConversationAccessGrant
-from apps.shared.domain.workflow_budget import BudgetExecutionDecision
 
 
 def _now() -> datetime:
@@ -227,19 +224,6 @@ class _RotatingFingerprinter:
         return version, marker * 64
 
 
-class _Budget:
-    def __init__(self, status="allowed", on_evaluate=None):
-        self.status = status
-        self.calls = []
-        self.on_evaluate = on_evaluate
-
-    def evaluate(self, **kwargs):
-        self.calls.append(kwargs)
-        if self.on_evaluate is not None:
-            self.on_evaluate()
-        return BudgetExecutionDecision(status=self.status)
-
-
 class _Cipher:
     def __init__(self):
         self.values = []
@@ -261,10 +245,13 @@ class _Cipher:
 
 
 class _Admission:
-    def __init__(self):
+    def __init__(self, on_admit=None):
         self.calls = []
+        self.on_admit = on_admit
 
     def admit(self, **kwargs):
+        if self.on_admit is not None:
+            self.on_admit()
         self.calls.append(kwargs)
 
 
@@ -323,7 +310,6 @@ def _use_case(
     publisher=None,
     max_dispatch_attempts=5,
     fingerprinter=None,
-    budget=None,
 ):
     cipher = _Cipher()
     admission = _Admission()
@@ -335,7 +321,6 @@ def _use_case(
             content_cipher=cipher,
             fingerprinter=fingerprinter or _Fingerprinter(),
             admission=admission,
-            budget=budget or _Budget(),
             dispatch_publisher=publisher,
             minimum_worker_capability="memory-runtime-v1",
             max_dispatch_attempts=max_dispatch_attempts,
@@ -755,73 +740,18 @@ def test_exact_retry_remains_available_at_the_completed_turn_cap() -> None:
     )
 
 
-@pytest.mark.parametrize(
-    ("budget_status", "expected_error"),
-    [
-        ("blocked", WorkflowBudgetBlockedError),
-        ("unavailable", WorkflowBudgetUnavailableError),
-    ],
-)
-def test_budget_denial_fails_closed_before_admission_dispatch_and_content_write(
-    budget_status,
-    expected_error,
-) -> None:
-    repository = _Repository(_binding())
-    budget = _Budget(budget_status)
-    publisher = _Publisher()
-    use_case, cipher, admission = _use_case(
-        repository,
-        publisher=publisher,
-        budget=budget,
-    )
-
-    with pytest.raises(expected_error):
-        use_case.execute(_command())
-
-    assert budget.calls == [
-        {"workflow_id": repository.binding.workflow_id, "now": _now()}
-    ]
-    assert admission.calls == []
-    assert repository.turns == {}
-    assert cipher.values == []
-    assert publisher.calls == []
-
-
-def test_exact_retry_bypasses_predispatch_budget_gate_to_reconcile_active_turn() -> (
-    None
-):
-    repository = _Repository(_binding())
-    budget = _Budget()
-    use_case, _cipher, admission = _use_case(repository, budget=budget)
-    first = use_case.execute(_command())
-    budget.status = "blocked"
-
-    replay = use_case.execute(_command())
-
-    assert replay.replayed is True
-    assert replay.turn_id == first.turn_id
-    assert len(budget.calls) == 1
-    assert admission.calls[-1]["disposition"] is (
-        PublicConversationAdmissionDisposition.EXACT_RETRY
-    )
-
-
 def test_turn_cap_is_rechecked_under_the_locked_start_transaction():
     repository = _Repository(_binding())
-    budget = _Budget(
-        on_evaluate=lambda: setattr(repository, "completed_turn_count", 100)
-    )
     publisher = _Publisher()
     use_case, cipher, admission = _use_case(
         repository,
-        budget=budget,
         publisher=publisher,
     )
 
+    admission.on_admit = lambda: setattr(repository, "completed_turn_count", 100)
     with pytest.raises(PublicConversationTurnLimitExceededError):
         use_case.execute(_command())
 
-    assert len(budget.calls) == 1
     assert len(admission.calls) == 1
     assert repository.turns == {}
     assert cipher.values == []

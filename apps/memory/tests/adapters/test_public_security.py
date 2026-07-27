@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import base64
 import secrets
+import uuid
 
 import pytest
 from cryptography.fernet import Fernet
@@ -278,3 +280,91 @@ def test_runtime_fingerprint_can_replay_with_a_retained_non_primary_key() -> Non
     assert new_digest != old_digest
     with pytest.raises(ValueError, match="fingerprint key"):
         rotated.fingerprint(key_version="admission-retired", **values)
+
+
+def test_transcript_cursor_is_authenticated_and_bound_to_session_scope() -> None:
+    issuer = HmacPublicSecretIssuer(secrets.token_bytes(32))
+    organization_id = uuid.uuid4()
+    session_id = uuid.uuid4()
+    cursor = issuer.encode_transcript_cursor(
+        organization_id=organization_id,
+        session_id=session_id,
+        after_sequence=50,
+    )
+
+    assert (
+        issuer.decode_transcript_cursor(
+            cursor,
+            organization_id=organization_id,
+            session_id=session_id,
+        )
+        == 50
+    )
+
+    payload_segment, signature_segment = cursor.split(".", 1)
+    padded = payload_segment + ("=" * (-len(payload_segment) % 4))
+    payload = json.loads(base64.urlsafe_b64decode(padded).decode("ascii"))
+    payload["a"] = 1
+    tampered_payload = (
+        base64.urlsafe_b64encode(
+            json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("ascii")
+        )
+        .decode("ascii")
+        .rstrip("=")
+    )
+
+    with pytest.raises(ValueError, match="cursor"):
+        issuer.decode_transcript_cursor(
+            f"{tampered_payload}.{signature_segment}",
+            organization_id=organization_id,
+            session_id=session_id,
+        )
+    with pytest.raises(ValueError, match="cursor"):
+        issuer.decode_transcript_cursor(
+            cursor,
+            organization_id=organization_id,
+            session_id=uuid.uuid4(),
+        )
+    with pytest.raises(ValueError, match="cursor"):
+        issuer.decode_transcript_cursor(
+            f"{payload_segment}=.{signature_segment}",
+            organization_id=organization_id,
+            session_id=session_id,
+        )
+    with pytest.raises(ValueError, match="cursor"):
+        issuer.decode_transcript_cursor(
+            f"{payload_segment}.{signature_segment}=",
+            organization_id=organization_id,
+            session_id=session_id,
+        )
+
+
+def test_transcript_cursor_accepts_a_retained_previous_capability_key() -> None:
+    previous_key = secrets.token_bytes(32)
+    organization_id = uuid.uuid4()
+    session_id = uuid.uuid4()
+    original = HmacPublicSecretIssuer(
+        {"capability-v1": previous_key},
+        primary_key_version="capability-v1",
+    )
+    rotated = HmacPublicSecretIssuer(
+        {
+            "capability-v2": secrets.token_bytes(32),
+            "capability-v1": previous_key,
+        },
+        primary_key_version="capability-v2",
+    )
+    cursor = original.encode_transcript_cursor(
+        organization_id=organization_id,
+        session_id=session_id,
+        after_sequence=25,
+    )
+
+    assert (
+        rotated.decode_transcript_cursor(
+            cursor,
+            organization_id=organization_id,
+            session_id=session_id,
+        )
+        == 25
+    )

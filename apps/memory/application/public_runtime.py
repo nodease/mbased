@@ -36,8 +36,6 @@ from apps.memory.domain.errors import (
     MemoryAdapterUnavailableError,
     PublicConversationFeatureDisabledError,
     PublicConversationTurnLimitExceededError,
-    WorkflowBudgetBlockedError,
-    WorkflowBudgetUnavailableError,
 )
 from apps.memory.domain.public_access import AccessGrantState
 
@@ -52,10 +50,6 @@ class RuntimeFingerprintPort(Protocol):
         key_version: str | None = None,
         **kwargs,
     ) -> tuple[str, str]: ...
-
-
-class WorkflowBudgetDecisionPort(Protocol):
-    def evaluate(self, *, workflow_id: uuid.UUID, now: datetime): ...
 
 
 class MemoryContentCipherPort(Protocol):
@@ -137,7 +131,6 @@ class StartPublicConversationTurnUseCase:
         secrets,
         content_cipher: MemoryContentCipherPort,
         fingerprinter: RuntimeFingerprintPort,
-        budget: WorkflowBudgetDecisionPort,
         admission=None,
         dispatch_publisher: TurnDispatchPublisherPort | None = None,
         minimum_worker_capability: str,
@@ -150,7 +143,6 @@ class StartPublicConversationTurnUseCase:
         self.secrets = secrets
         self.content_cipher = content_cipher
         self.fingerprinter = fingerprinter
-        self.budget = budget
         self.admission = admission
         self.dispatch_publisher = dispatch_publisher
         self.minimum_worker_capability = minimum_worker_capability
@@ -161,11 +153,6 @@ class StartPublicConversationTurnUseCase:
         command: StartPublicConversationTurnCommand,
     ) -> StartPublicConversationTurnResult:
         preflight = self._execute(lambda: self._preflight(command))
-        if (
-            preflight.disposition
-            is PublicConversationAdmissionDisposition.LOGICAL_REQUEST
-        ):
-            self._require_budget_allows(preflight.binding, command.now)
         if self.admission is not None:
             self.admission.admit(
                 operation="conversation.run",
@@ -495,24 +482,6 @@ class StartPublicConversationTurnUseCase:
             )
         except (KeyError, ValueError) as exc:
             raise MemoryAdapterUnavailableError() from exc
-
-    def _require_budget_allows(
-        self,
-        binding: PublicDeploymentBinding,
-        now: datetime,
-    ) -> None:
-        try:
-            decision = self.budget.evaluate(
-                workflow_id=binding.workflow_id,
-                now=now,
-            )
-        except Exception as exc:
-            raise WorkflowBudgetUnavailableError() from exc
-        if decision.status == "allowed":
-            return
-        if decision.status == "blocked":
-            raise WorkflowBudgetBlockedError()
-        raise WorkflowBudgetUnavailableError()
 
     def _binding(self, url_slug: str, *, for_update: bool) -> PublicDeploymentBinding:
         resolver = (

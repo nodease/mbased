@@ -8,7 +8,7 @@ from apps.memory.application.ports import (
     ConversationMemoryRepositoryPort,
     MemoryUnitOfWorkPort,
 )
-from apps.memory.domain.conversation import DispatchStatus
+from apps.memory.domain.conversation import DispatchStatus, MemoryTurnDispatchJob
 from apps.memory.domain.errors import DispatchStateConflictError
 
 
@@ -143,6 +143,20 @@ class _TransactionalDispatchUseCase:
         if job is None:
             raise DispatchStateConflictError()
         return job
+
+
+class ListDueTurnDispatchJobsUseCase(_TransactionalDispatchUseCase):
+    def execute(
+        self,
+        *,
+        now: datetime,
+        limit: int,
+    ) -> tuple[MemoryTurnDispatchJob, ...]:
+        if not 1 <= limit <= 500:
+            raise ValueError("dispatch reconciliation limit must be between 1 and 500")
+        return self._execute(
+            lambda: self.repository.list_due_dispatch_jobs(now=now, limit=limit)
+        )
 
 
 class ClaimTurnDispatchUseCase(_TransactionalDispatchUseCase):

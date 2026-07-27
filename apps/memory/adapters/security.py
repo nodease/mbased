@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import hmac
 import json
 import re
 import secrets
+import uuid
 from collections import OrderedDict
 from collections.abc import Mapping
 
@@ -108,6 +111,98 @@ class HmacPublicSecretIssuer:
 
     def purge_receipt_verifiers(self, raw_value: str) -> tuple[tuple[str, str], ...]:
         return self._verifiers_for(raw_value, prefix="cpr", purpose="purge_receipt")
+
+    def encode_transcript_cursor(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        session_id: uuid.UUID,
+        after_sequence: int,
+    ) -> str:
+        if (
+            not isinstance(organization_id, uuid.UUID)
+            or not isinstance(session_id, uuid.UUID)
+            or type(after_sequence) is not int
+            or after_sequence < 1
+        ):
+            raise ValueError("transcript cursor scope is invalid")
+        payload = json.dumps(
+            {
+                "a": after_sequence,
+                "k": self._key_version,
+                "o": organization_id.hex,
+                "s": session_id.hex,
+                "v": 1,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("ascii")
+        signature = self._transcript_cursor_signature(
+            self._verifier_keys[self._key_version],
+            payload,
+        )
+        return f"{_urlsafe_encode(payload)}.{_urlsafe_encode(signature)}"
+
+    def decode_transcript_cursor(
+        self,
+        cursor: str,
+        *,
+        organization_id: uuid.UUID,
+        session_id: uuid.UUID,
+    ) -> int:
+        if (
+            not isinstance(cursor, str)
+            or not 1 <= len(cursor) <= 384
+            or not isinstance(organization_id, uuid.UUID)
+            or not isinstance(session_id, uuid.UUID)
+            or cursor.count(".") != 1
+        ):
+            raise ValueError("transcript cursor is invalid")
+        payload_segment, signature_segment = cursor.split(".", 1)
+        try:
+            payload_bytes = _urlsafe_decode(payload_segment)
+            signature = _urlsafe_decode(signature_segment)
+            payload = json.loads(payload_bytes.decode("ascii"))
+        except (
+            binascii.Error,
+            UnicodeDecodeError,
+            UnicodeEncodeError,
+            json.JSONDecodeError,
+            ValueError,
+        ) as error:
+            raise ValueError("transcript cursor is invalid") from error
+        if (
+            not isinstance(payload, dict)
+            or set(payload) != {"a", "k", "o", "s", "v"}
+            or payload.get("v") != 1
+            or type(payload.get("a")) is not int
+            or payload["a"] < 1
+            or not isinstance(payload.get("k"), str)
+            or payload.get("o") != organization_id.hex
+            or payload.get("s") != session_id.hex
+            or len(signature) != hashlib.sha256().digest_size
+        ):
+            raise ValueError("transcript cursor is invalid")
+        key = self._verifier_keys.get(payload["k"])
+        if key is None or not hmac.compare_digest(
+            signature,
+            self._transcript_cursor_signature(key, payload_bytes),
+        ):
+            raise ValueError("transcript cursor is invalid")
+        return payload["a"]
+
+    @staticmethod
+    def _transcript_cursor_signature(key: bytes, payload: bytes) -> bytes:
+        derived_key = hmac.new(
+            key,
+            b"memory-public-transcript-cursor-key-v1",
+            hashlib.sha256,
+        ).digest()
+        return hmac.new(
+            derived_key,
+            b"memory-public-transcript-cursor-v1\x00" + payload,
+            hashlib.sha256,
+        ).digest()
 
     def _issue(self, *, prefix: str, purpose: str) -> IssuedSecret:
         raw_value = f"{prefix}_v1_{secrets.token_urlsafe(32)}"
@@ -510,6 +605,24 @@ class HmacMemoryRuntimeFingerprinter:
 
     def configuration_key_materials(self) -> tuple[bytes, ...]:
         return tuple(self._keys.values())
+
+
+def _urlsafe_encode(value: bytes) -> str:
+    return base64.urlsafe_b64encode(value).decode("ascii").rstrip("=")
+
+
+def _urlsafe_decode(value: str) -> bytes:
+    if not isinstance(value, str) or re.fullmatch(r"[A-Za-z0-9_-]+", value) is None:
+        raise ValueError("URL-safe value is invalid")
+    padded = value + ("=" * (-len(value) % 4))
+    decoded = base64.b64decode(
+        padded.encode("ascii"),
+        altchars=b"-_",
+        validate=True,
+    )
+    if _urlsafe_encode(decoded) != value:
+        raise ValueError("URL-safe value is not canonical")
+    return decoded
 
 
 def _validated_hmac_keyring(

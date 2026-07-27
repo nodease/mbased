@@ -123,7 +123,6 @@ Workflow와 Chatbot의 여러 turn에서 필요한 대화 맥락을 독립 Memor
 - MEM-REQ-057: Memory summary usage는 main node usage와 구분되는 `purpose=memory_summary` 또는 동등한 typed purpose로 귀속해야 한다.
 - MEM-REQ-058: Node Memory read/summary failure policy와 required conversation turn write failure policy를 분리해야 한다.
 - MEM-REQ-059: Summary generation lease는 재획득마다 증가하는 fencing generation을 가지며 current generation과 source revision이 일치하는 owner만 summary를 commit할 수 있어야 한다. Stale owner가 이미 수행한 provider attempt의 actual usage는 summary 채택 여부와 분리해 attempt idempotency key로 정확히 한 번 reconcile해야 한다.
-- MEM-REQ-059A: Public main-generation은 새 logical request의 admission 전에 Workflow 월 예산을 확인하고, usage intent를 만든 뒤 provider 외부 I/O 직전 current 예산을 다시 확인해야 한다. 초과는 provider 미호출 terminal failure로 닫고, 예산 판정 unavailable은 fail-open하지 않으며 retryable 상태로 남겨야 한다. Exact turn retry는 admission 전 예산 검사로 기존 turn 복구를 막지 않지만 provider 직전 검사를 우회할 수 없다.
 
 ### Transcript, Retention And Privacy
 
@@ -160,7 +159,7 @@ Workflow와 Chatbot의 여러 turn에서 필요한 대화 맥락을 독립 Memor
 - MEM-REQ-083: Provider adapter는 outbound call 직전에 `provider_started`를 durable하게 기록해야 하며 marker commit이 실패하면 provider를 호출하지 않아야 한다. Claim 후 start 전 crash는 claim expiry 뒤 새 lease/attempt로 재승인할 수 있어야 한다.
 - MEM-REQ-083A: Memory context-attempt marker는 lease lifecycle marker이고 ADR-0069 usage ledger가 canonical send authority여야 한다. Raw context claim과 full-request 검증 뒤 usage intent, final binding 재검증, Memory marker, usage `provider_started`, provider I/O 순서를 지켜야 한다. Memory-marker-only + exact usage intent는 current owner의 same-attempt continuation만 허용하고, usage started/outcome-unknown/terminal 상태는 provider replay를 허용하지 않아야 한다.
 - MEM-REQ-084: `provider_started` 이후 outcome unknown은 provider를 자동 재호출하지 않고 usage/result reconciliation 또는 safe node failure로 닫아야 한다.
-- MEM-REQ-084A: Context attempt, Memory Turn/checkpoint, Workflow admission과 execution journal의 commit 사이 crash는 deterministic identity와 current admission fence로 bounded reconciliation해야 한다. Close, grant revoke 또는 active deployment 변경 뒤에는 active 실행 권한을 복원하지 않고 reference-only cleanup만 허용하며, ADR-0069 usage state와 provisional checkpoint를 분류해 provider replay, definitive outcome 오분류와 orphan row를 만들지 않아야 한다.
+- MEM-REQ-084A: Context attempt, Memory Turn/checkpoint와 Workflow admission의 commit 사이 crash는 deterministic identity와 current admission fence로 bounded reconciliation해야 한다. Close, grant revoke 또는 active deployment 변경 뒤에는 active 실행 권한을 복원하지 않고 reference-only cleanup만 허용하며, ADR-0069 usage state와 provisional checkpoint를 분류해 provider replay, definitive outcome 오분류와 orphan row를 만들지 않아야 한다.
 - MEM-REQ-085: Summary model 가격을 산정할 수 없거나 estimate가 invalid/unknown-zero이면 reservation을 거부하고 provider를 호출하지 않아야 한다. Memory adapter가 임의 가격 또는 0원 fallback을 만들지 않아야 한다.
 
 ### Cross-Domain Capability, Version And Purge Contracts
