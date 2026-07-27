@@ -34,15 +34,7 @@ class PublicConversationCorsBoundaryMiddleware:
             await self.app(scope, receive, send)
             return
 
-        root_conversation_transport = (
-            is_public_run_root and _has_public_conversation_transport_headers(scope)
-        )
-        if root_conversation_transport:
-            mark_public_conversation_transport_boundary(scope)
-
-        if (
-            is_conversation_path or root_conversation_transport
-        ) and scope["method"] == "OPTIONS":
+        if is_conversation_path and scope["method"] == "OPTIONS":
             await send(
                 {
                     "type": "http.response.start",
@@ -98,20 +90,6 @@ def _is_public_conversation_path(path: str) -> bool:
         "conversations/",
         "conversation",
     } or suffix.startswith("conversation/")
-
-
-def _has_public_conversation_transport_headers(scope: Scope) -> bool:
-    headers = {name.lower(): value for name, value in scope.get("headers", [])}
-    authorization = headers.get(b"authorization", b"").lstrip().lower()
-    if authorization.startswith(b"conversation "):
-        return True
-    if b"idempotency-key" in headers:
-        return True
-    requested_headers = headers.get(b"access-control-request-headers", b"")
-    return any(
-        part.strip().lower() in {b"authorization", b"idempotency-key"}
-        for part in requested_headers.split(b",")
-    )
 
 
 def _public_response_headers(

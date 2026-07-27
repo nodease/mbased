@@ -62,14 +62,6 @@ class EntryNotFoundError(MemoryDomainError):
     code = "memory.entry_not_found"
 
 
-class MemoryContextConflictError(MemoryDomainError):
-    code = "memory.context_conflict"
-
-
-class MemoryContextUnavailableError(MemoryDomainError):
-    code = "memory.context_unavailable"
-
-
 class AccessGrantNotUsableError(MemoryDomainError):
     """A public grant must be rendered as a resource-hidden failure."""
 
@@ -94,7 +86,3 @@ class PublicConversationRateLimitedError(MemoryDomainError):
     def __init__(self, retry_after_seconds: int = 1) -> None:
         self.retry_after_seconds = max(1, min(3600, int(retry_after_seconds)))
         super().__init__()
-
-
-class PublicConversationTurnLimitExceededError(MemoryDomainError):
-    code = "memory.turn_limit_exceeded"

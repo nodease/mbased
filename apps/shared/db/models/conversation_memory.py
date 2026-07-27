@@ -454,16 +454,6 @@ class ConversationTurnRecord(_TimestampMixin, Base):
         nullable=False,
     )
     request_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
-    request_fingerprint_key_version: Mapped[str | None] = mapped_column(
-        String(64),
-        nullable=True,
-    )
-    access_grant_id: Mapped[uuid.UUID | None] = mapped_column(
-        PGUUID(as_uuid=True),
-        ForeignKey("conversation_access_grants.id", ondelete="SET NULL"),
-        nullable=True,
-        index=True,
-    )
     status: Mapped[str] = mapped_column(
         String(24),
         nullable=False,
@@ -556,11 +546,6 @@ class ConversationMemoryEntryRecord(_TimestampMixin, Base):
             name="ck_mem_entries_revision",
         ),
         CheckConstraint(
-            "dependency_proof_version IS NULL "
-            "OR length(dependency_proof_version) BETWEEN 1 AND 64",
-            name="ck_mem_entries_dependency_proof_version",
-        ),
-        CheckConstraint(
             _PROTECTED_PROJECTION_ENVELOPE_CHECK,
             name="ck_mem_entries_content_envelope",
         ),
@@ -637,10 +622,6 @@ class ConversationMemoryEntryRecord(_TimestampMixin, Base):
     )
     content_revision: Mapped[int | None] = mapped_column(Integer, nullable=True)
     idempotency_key_hash: Mapped[str] = mapped_column(String(64), nullable=False)
-    dependency_proof_version: Mapped[str | None] = mapped_column(
-        String(64),
-        nullable=True,
-    )
     sensitivity: Mapped[str] = mapped_column(
         String(32),
         nullable=False,

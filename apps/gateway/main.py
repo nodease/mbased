@@ -50,9 +50,6 @@ from apps.gateway.application.resource_permissions.mutation import (
 from apps.gateway.composition.authentication import (
     validate_login_security_configuration,
 )
-from apps.gateway.composition.memory import (
-    validate_public_conversation_runtime_configuration,
-)
 from apps.gateway.core.http_security import (
     parse_credentialed_cors_origins,
     resolve_session_signing_secret,
@@ -74,7 +71,6 @@ from apps.shared.audit.context import (
 )
 
 validate_login_security_configuration()
-validate_public_conversation_runtime_configuration()
 
 app = FastAPI(title="Moduly Gateway API", lifespan=lifespan)
 

@@ -86,24 +86,10 @@ connectorTest:
 # and an approved replay backup-erasure contract are provisioned.
 memoryPublicConversation:
   enabled: false
-  runtimeEnabled: false
-  runtimeWorkerReady: false
-  runtimeWorkerQueue: "conversation-memory-v1"
-  runtimeMinimumWorkerCapability: "memory-runtime-v1"
-  deploymentRateLimit: 120
-  organizationRateLimit: 600
-  networkRateLimit: 60
-  grantRateLimit: 20
   purgeWorkerReady: false
   replayBackupErasureMode: "unconfirmed"
   capabilityHmacPrimaryVersion: ""
   replayEncryptionPrimaryVersion: ""
-  contentEncryptionPrimaryVersion: ""
-  runtimeAdmissionHmacPrimaryVersion: ""
-  providerInputTokenCap: ""
-  providerOutputTokenCap: ""
-  providerCostCapMicrousd: ""
-
 
 # =============================================================================
 # Application Services
@@ -416,9 +402,6 @@ secrets:
   memoryPublicCapabilityHmacKeys: ""
   memoryPublicReplayEncryptionKey: ""
   memoryPublicReplayEncryptionKeys: ""
-  memoryContentEncryptionKeys: ""
-  memoryContentDigestHmacKey: ""
-  memoryRuntimeAdmissionHmacKeys: ""
   memoryPublicAdmissionHmacKey: ""
 
   # Master encryption key (generate with: openssl rand -base64 32)

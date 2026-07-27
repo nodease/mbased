@@ -9,10 +9,6 @@ from functools import lru_cache
 import redis
 from sqlalchemy.orm import Session
 
-from apps.memory.adapters.queue.conversation_turn_publisher import (
-    CeleryConversationTurnPublisher,
-)
-
 from apps.memory.adapters.admission import (
     PublicConversationAdmissionPolicy,
     RedisPublicConversationAdmission,
@@ -26,9 +22,7 @@ from apps.memory.adapters.persistence.repository import (
     SqlAlchemyMemoryUnitOfWork,
 )
 from apps.memory.adapters.security import (
-    FernetMemoryContentCipher,
     FernetSecretReplayCipher,
-    HmacMemoryRuntimeFingerprinter,
     HmacPublicSecretIssuer,
 )
 from apps.memory.application.public_lifecycle import (
@@ -40,14 +34,7 @@ from apps.memory.application.public_lifecycle import (
     PublicConversationPolicy,
     ResetPublicConversationUseCase,
 )
-from apps.memory.application.public_runtime import (
-    GetPublicTurnStatusUseCase,
-    StartPublicConversationTurnUseCase,
-)
 from apps.memory.domain.errors import PublicConversationFeatureDisabledError
-from apps.shared.celery_app import celery_app
-from apps.shared.db.session import SessionLocal
-from apps.shared.domain.conversation_memory_task import CONVERSATION_TURN_TASK_QUEUE
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,12 +45,6 @@ class PublicConversationApplication:
     delete: DeletePublicConversationUseCase
     transcript: GetPublicTranscriptUseCase
     purge_status: GetPublicPurgeStatusUseCase
-
-
-@dataclass(frozen=True, slots=True)
-class PublicConversationRuntimeApplication:
-    start_turn: StartPublicConversationTurnUseCase
-    turn_status: GetPublicTurnStatusUseCase
 
 
 def build_public_conversation_application(
@@ -82,7 +63,6 @@ def build_public_conversation_application(
     uow = SqlAlchemyMemoryUnitOfWork(db)
     secrets = HmacPublicSecretIssuer.from_environment(values)
     replay_cipher = FernetSecretReplayCipher.from_environment(values)
-    content_cipher = FernetMemoryContentCipher.from_environment(values)
     admission_key = _admission_key(values)
     admission = RedisPublicConversationAdmission(
         redis_client if redis_client is not None else _redis_client(values),
@@ -102,7 +82,6 @@ def build_public_conversation_application(
         "uow": uow,
         "secrets": secrets,
         "replay_cipher": replay_cipher,
-        "content_cipher": content_cipher,
         "audit": audit,
         "policy": policy,
         "admission": admission,
@@ -114,131 +93,6 @@ def build_public_conversation_application(
         delete=DeletePublicConversationUseCase(**kwargs),
         transcript=GetPublicTranscriptUseCase(**kwargs),
         purge_status=GetPublicPurgeStatusUseCase(**kwargs),
-    )
-
-
-def build_public_conversation_runtime_application(
-    db: Session,
-    *,
-    environ: Mapping[str, str] | None = None,
-    redis_client=None,
-) -> PublicConversationRuntimeApplication:
-    values = environ if environ is not None else os.environ
-    validate_public_conversation_runtime_configuration(values)
-    if not public_conversation_runtime_enabled_from_environment(values):
-        raise PublicConversationFeatureDisabledError()
-    repository = SqlAlchemyConversationMemoryRepository(db)
-    uow = SqlAlchemyMemoryUnitOfWork(db)
-    secrets = HmacPublicSecretIssuer.from_environment(values)
-    content_cipher = FernetMemoryContentCipher.from_environment(values)
-    fingerprinter = HmacMemoryRuntimeFingerprinter.from_environment(values)
-    policy = public_conversation_policy_from_environment(values)
-    admission = RedisPublicConversationAdmission(
-        redis_client if redis_client is not None else _redis_client(values),
-        hmac_key=_admission_key(values),
-        policy=public_conversation_admission_policy_from_environment(values),
-        key_namespace=values.get(
-            "MEMORY_PUBLIC_ADMISSION_KEY_NAMESPACE",
-            "nodease-memory-public",
-        ),
-        request_deduplication_ttl_seconds=int(
-            policy.idempotency_retention.total_seconds()
-        ),
-    )
-    return PublicConversationRuntimeApplication(
-        start_turn=StartPublicConversationTurnUseCase(
-            repository=repository,
-            uow=uow,
-            secrets=secrets,
-            content_cipher=content_cipher,
-            fingerprinter=fingerprinter,
-            admission=admission,
-            dispatch_publisher=CeleryConversationTurnPublisher(
-                celery_app=celery_app,
-                session_factory=SessionLocal,
-            ),
-            minimum_worker_capability=values.get(
-                "MEMORY_RUNTIME_MINIMUM_WORKER_CAPABILITY",
-                "memory-runtime-v1",
-            ),
-            max_dispatch_attempts=_integer(
-                values,
-                "MEMORY_RUNTIME_MAX_DISPATCH_ATTEMPTS",
-                5,
-                1,
-                20,
-            ),
-        ),
-        turn_status=GetPublicTurnStatusUseCase(
-            repository=repository,
-            uow=uow,
-            secrets=secrets,
-            content_cipher=content_cipher,
-        ),
-    )
-
-
-def public_conversation_runtime_required(url_slug: str) -> bool:
-    """Return whether a deployment is bound to the versioned Memory runtime."""
-    with SessionLocal() as db:
-        return SqlAlchemyConversationMemoryRepository(
-            db
-        ).public_deployment_requires_conversation_runtime(
-            url_slug,
-        )
-
-
-def start_public_conversation_turn(command):
-    """Construct and execute a public turn in one thread-owned DB session."""
-    with SessionLocal() as db:
-        return build_public_conversation_runtime_application(db).start_turn.execute(
-            command
-        )
-
-
-def public_conversation_runtime_enabled_from_environment(
-    environ: Mapping[str, str],
-) -> bool:
-    value = environ.get("MEMORY_PUBLIC_RUNTIME_ENABLED", "false").strip().lower()
-    if value in {"true", "1"}:
-        return True
-    if value in {"false", "0"}:
-        return False
-    raise RuntimeError("MEMORY_PUBLIC_RUNTIME_ENABLED must be true or false")
-
-
-def validate_public_conversation_runtime_configuration(
-    environ: Mapping[str, str] | None = None,
-) -> None:
-    values = environ if environ is not None else os.environ
-    validate_public_conversation_security_configuration(values)
-    if not public_conversation_runtime_enabled_from_environment(values):
-        return
-    if not public_conversation_enabled_from_environment(values):
-        raise RuntimeError("public Conversation lifecycle must be enabled first")
-    if values.get("MEMORY_PUBLIC_RUNTIME_WORKER_READY", "").strip().lower() not in {
-        "true",
-        "1",
-    }:
-        raise RuntimeError(
-            "MEMORY_PUBLIC_RUNTIME_WORKER_READY must be true before activation"
-        )
-    if values.get("MEMORY_PUBLIC_RUNTIME_WORKER_QUEUE", "").strip() != (
-        CONVERSATION_TURN_TASK_QUEUE
-    ):
-        raise RuntimeError(
-            "MEMORY_PUBLIC_RUNTIME_WORKER_QUEUE must name the versioned capable queue"
-        )
-    secrets = HmacPublicSecretIssuer.from_environment(values)
-    replay_cipher = FernetSecretReplayCipher.from_environment(values)
-    content_cipher = FernetMemoryContentCipher.from_environment(values)
-    fingerprinter = HmacMemoryRuntimeFingerprinter.from_environment(values)
-    _require_distinct_public_security_keys(
-        *secrets.configuration_key_materials(),
-        *replay_cipher.configuration_key_materials(),
-        *content_cipher.configuration_key_materials(),
-        *fingerprinter.configuration_key_materials(),
-        _admission_key(values),
     )
 
 
@@ -260,12 +114,10 @@ def validate_public_conversation_security_configuration(
     secrets = HmacPublicSecretIssuer.from_environment(values)
     replay_cipher = FernetSecretReplayCipher.from_environment(values)
     admission_key = _admission_key(values)
-    content_cipher = FernetMemoryContentCipher.from_environment(values)
     _require_distinct_public_security_keys(
         *secrets.configuration_key_materials(),
         *replay_cipher.configuration_key_materials(),
         admission_key,
-        *content_cipher.configuration_key_materials(),
     )
     _require_public_purge_worker_ready(values)
 
@@ -374,14 +226,14 @@ def public_conversation_admission_policy_from_environment(
         deployment_rate_limit=_integer(
             environ,
             "MEMORY_PUBLIC_DEPLOYMENT_RATE_LIMIT",
-            120,
+            60,
             1,
             100_000,
         ),
         organization_rate_limit=_integer(
             environ,
             "MEMORY_PUBLIC_ORGANIZATION_RATE_LIMIT",
-            600,
+            240,
             1,
             100_000,
         ),
@@ -395,7 +247,7 @@ def public_conversation_admission_policy_from_environment(
         grant_rate_limit=_integer(
             environ,
             "MEMORY_PUBLIC_GRANT_RATE_LIMIT",
-            20,
+            30,
             1,
             100_000,
         ),
@@ -544,12 +396,9 @@ def _seconds(
 __all__ = [
     "PublicConversationApplication",
     "build_public_conversation_application",
-    "build_public_conversation_runtime_application",
     "public_conversation_enabled_from_environment",
-    "public_conversation_runtime_enabled_from_environment",
     "public_conversation_admission_policy_from_environment",
     "public_conversation_policy_from_environment",
     "require_public_conversation_schema_ready",
     "validate_public_conversation_security_configuration",
-    "validate_public_conversation_runtime_configuration",
 ]

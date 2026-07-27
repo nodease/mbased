@@ -82,9 +82,6 @@ Frontend 공통 그래프 검증은 catalog v2의 incoming/outgoing 금지 정�
 - Credential revoke/permission decision revision 또는 verified relation/provider-routing revision 변경 뒤 stale capability는 새 claim/reservation/attempt/provider call에 사용할 수 없다. 이 fingerprint는 중앙 egress authorization을 대체하지 않는다.
 - Public Access Grant, credential/billing principal과 app owner는 execution subject 또는 audit actor로 승격되지 않는다.
 - Preflight 뒤 Worker pool capability가 바뀌어도 runtime guard가 incompatible task를 거부한다.
-- Public conversation task argument/result와 WorkflowRun/WorkflowNodeRun observer는 opaque safe correlation과 content-free payload만 보존한다. Raw current input, Access Grant ID/token, Memory context와 provider/final output은 broker, result backend, pub/sub와 observer row에 나타나지 않는다.
-- Gateway와 Workflow runtime은 같은 initial conversation graph validator를 사용한다. Exact root `Start -> LLM -> Answer`, single text mapping, fixed model과 bounded parameter allowlist 밖의 topology, routing/fallback/tool/Knowledge/RAG/structured output/nested graph는 admission/provider I/O 전에 거부된다.
-- Duplicate dispatch는 하나의 admission과 generation-fenced lease로 수렴한다. Stale generation은 input read, context claim, provider effect, assistant checkpoint와 Memory completion을 진행하지 못한다.
 
 ## Mail Credential Reference Tests
 

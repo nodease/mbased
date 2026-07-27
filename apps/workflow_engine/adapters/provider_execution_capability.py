@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from decimal import Decimal, InvalidOperation
 from threading import Lock
 from typing import Any, Callable, Mapping
@@ -43,8 +43,6 @@ from apps.workflow_engine.application.provider_execution import (
     ProviderExecutionIdentityContext,
     ProviderExecutionPlan,
     ProviderExecutionPreflight,
-    ProviderExecutionPreparation,
-    ProviderExecutionPreparationRequest,
     ProviderExecutionPricingSnapshot,
     ProviderExecutionPrincipal,
     ProviderExecutionPrincipalKind,
@@ -71,12 +69,6 @@ class _CapabilityPlanState:
     issue_command: ProviderExecutionCapabilityIssueCommand
     configured_model_id: str
     resolve_guard: _SingleUseResolveGuard
-    preparation_lock: Lock = field(default_factory=Lock, compare=False, repr=False)
-    preparation: ProviderExecutionPreparation | None = field(
-        default=None,
-        compare=False,
-        repr=False,
-    )
 
 
 def provider_visible_request_bounds(
@@ -234,52 +226,6 @@ class CapabilityProviderExecutionAdapter:
             ),
         )
 
-    def prepare(
-        self,
-        request: ProviderExecutionPreparationRequest,
-    ) -> ProviderExecutionPreparation:
-        state = request.plan.state
-        if (
-            not isinstance(state, _CapabilityPlanState)
-            or request.model_id != state.configured_model_id
-        ):
-            raise ProviderExecutionConfigurationError()
-        with state.preparation_lock:
-            if state.preparation is not None:
-                return state.preparation
-            db = self._new_isolated_session(request.shared_session)
-            try:
-                try:
-                    capability = self._capability_service.issue_capability(
-                        db,
-                        command=state.issue_command,
-                    )
-                    preparation = ProviderExecutionPreparation(
-                        capability_id=uuid.UUID(str(capability.id)),
-                        capability_revision=int(capability.revision),
-                        provider_attempt_id=(
-                            state.issue_command.binding.provider_attempt_id
-                        ),
-                        expires_at=capability.expires_at,
-                    )
-                    if capability.binding != state.issue_command.binding:
-                        raise ProviderExecutionConfigurationError()
-                    db.commit()
-                except ProviderExecutionPolicyError as exc:
-                    raise LLMCredentialNotAvailableError(
-                        f"provider_capability_{exc.code}",
-                        "Provider execution capability is not available.",
-                        organization_id=(
-                            state.issue_command.binding.organization_id
-                        ),
-                    ) from exc
-                except (AttributeError, TypeError, ValueError) as exc:
-                    raise ProviderExecutionConfigurationError() from exc
-            finally:
-                db.close()
-            object.__setattr__(state, "preparation", preparation)
-            return preparation
-
     def resolve(
         self,
         request: ProviderExecutionRequest,
@@ -299,29 +245,20 @@ class CapabilityProviderExecutionAdapter:
         db = self._new_isolated_session(request.shared_session)
         try:
             try:
-                with state.preparation_lock:
-                    preparation = state.preparation
-                if preparation is None:
-                    capability = self._capability_service.issue_capability(
-                        db,
-                        command=issue_command,
-                    )
-                    capability_id = capability.id
-                    capability_revision = capability.revision
-                else:
-                    capability_id = preparation.capability_id
-                    capability_revision = preparation.capability_revision
+                capability = self._capability_service.issue_capability(
+                    db,
+                    command=issue_command,
+                )
                 lease = self._capability_service.admit_capability(
                     db,
                     command=ProviderExecutionCapabilityAdmissionCommand(
-                        capability_id=capability_id,
-                        capability_revision=capability_revision,
+                        capability_id=capability.id,
+                        capability_revision=capability.revision,
                         binding=issue_command.binding,
                         requested_input_tokens=input_tokens,
                         requested_output_tokens=output_tokens,
                     ),
                 )
-                capability = lease.capability
             except ProviderExecutionPolicyError as exc:
                 raise LLMCredentialNotAvailableError(
                     f"provider_capability_{exc.code}",

@@ -22,7 +22,6 @@ _SAFE_VERSION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$")
 _SAFE_CHANNEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 MAX_MEMORY_CONTENT_BYTES = 16_384
 MAX_PURGE_RECEIPT_LIFETIME = timedelta(days=8)
-CONVERSATION_SOURCE_FREE_PROOF_VERSION = "conversation-source-free-v1"
 
 
 class AudienceKind(StrEnum):
@@ -275,31 +274,6 @@ class ConversationSession:
         if content_changed:
             self.content_revision += 1
 
-    def release_terminal_turn(
-        self,
-        *,
-        turn_id: uuid.UUID,
-        expected_lifecycle_revision: int,
-        now: datetime,
-    ) -> None:
-        """Release a terminally failed dispatch without reviving session access."""
-        self._require_revision(expected_lifecycle_revision)
-        if self.active_turn_id is None:
-            return
-        if self.active_turn_id != turn_id:
-            raise ActiveTurnConflictError()
-        self.active_turn_id = None
-        self.updated_at = now
-
-    def require_active(
-        self,
-        *,
-        expected_lifecycle_revision: int,
-        now: datetime,
-    ) -> None:
-        self._require_revision(expected_lifecycle_revision)
-        self._require_active(now=now)
-
     def close(
         self,
         *,
@@ -376,8 +350,6 @@ class ConversationTurn:
     updated_at: datetime
     started_at: datetime | None
     completed_at: datetime | None
-    access_grant_id: uuid.UUID | None = None
-    request_fingerprint_key_version: str | None = None
 
     @classmethod
     def start(
@@ -391,19 +363,12 @@ class ConversationTurn:
         request_identity: RequestIdentity,
         user_entry_id: uuid.UUID,
         dispatch_id: uuid.UUID,
-        access_grant_id: uuid.UUID | None = None,
-        request_fingerprint_key_version: str | None = None,
         now: datetime,
     ) -> "ConversationTurn":
         if sequence < 1:
             raise ValueError("sequence must be positive")
         if started_lifecycle_revision < 1:
             raise ValueError("started_lifecycle_revision must be positive")
-        if request_fingerprint_key_version is not None:
-            _require_safe_version(
-                request_fingerprint_key_version,
-                "request_fingerprint_key_version",
-            )
         return cls(
             id=turn_id,
             organization_id=organization_id,
@@ -423,8 +388,6 @@ class ConversationTurn:
             updated_at=now,
             started_at=None,
             completed_at=None,
-            access_grant_id=access_grant_id,
-            request_fingerprint_key_version=request_fingerprint_key_version,
         )
 
     @property
@@ -460,27 +423,6 @@ class ConversationTurn:
         self.execution_id = execution_id
         self.latest_attempt_id = attempt_id
         self.started_at = now
-
-    def handoff_running_attempt(
-        self,
-        *,
-        expected_version: int,
-        execution_id: uuid.UUID,
-        attempt_id: uuid.UUID,
-        now: datetime,
-    ) -> None:
-        if (
-            self.execution_id != execution_id
-            or self.latest_attempt_id == attempt_id
-        ):
-            raise StaleTurnVersionError()
-        self._transition(
-            expected_version=expected_version,
-            allowed={TurnStatus.RUNNING},
-            target=TurnStatus.RUNNING,
-            now=now,
-        )
-        self.latest_attempt_id = attempt_id
 
     def complete(
         self,
@@ -573,16 +515,8 @@ class ConversationMemoryEntry:
     idempotency_key_hash: str
     created_at: datetime
     updated_at: datetime
-    dependency_proof_version: str | None = None
     invalidated_at: datetime | None = None
     expires_at: datetime | None = None
-
-    def __post_init__(self) -> None:
-        if self.dependency_proof_version is not None:
-            _require_safe_version(
-                self.dependency_proof_version,
-                "dependency_proof_version",
-            )
 
     @classmethod
     def provisional_user(
@@ -615,7 +549,6 @@ class ConversationMemoryEntry:
             idempotency_key_hash=idempotency_key_hash,
             created_at=now,
             updated_at=now,
-            dependency_proof_version=CONVERSATION_SOURCE_FREE_PROOF_VERSION,
         )
 
     @classmethod
@@ -652,41 +585,6 @@ class ConversationMemoryEntry:
             idempotency_key_hash=idempotency_key_hash,
             created_at=now,
             updated_at=now,
-            dependency_proof_version=CONVERSATION_SOURCE_FREE_PROOF_VERSION,
-        )
-
-    @classmethod
-    def provisional_assistant(
-        cls,
-        *,
-        entry_id: uuid.UUID,
-        organization_id: uuid.UUID,
-        session_id: uuid.UUID,
-        turn_id: uuid.UUID,
-        sequence: int,
-        channel: str,
-        content: ProtectedEntryContent,
-        idempotency_key_hash: str,
-        now: datetime,
-    ) -> "ConversationMemoryEntry":
-        _require_channel(channel)
-        _require_sha256(idempotency_key_hash, "idempotency_key_hash")
-        return cls(
-            id=entry_id,
-            organization_id=organization_id,
-            session_id=session_id,
-            turn_id=turn_id,
-            sequence=sequence,
-            entry_type=EntryType.ASSISTANT_TURN,
-            lifecycle=EntryLifecycle.PROVISIONAL,
-            channel=channel,
-            producer_node_id=None,
-            content=content,
-            content_revision=None,
-            idempotency_key_hash=idempotency_key_hash,
-            created_at=now,
-            updated_at=now,
-            dependency_proof_version=CONVERSATION_SOURCE_FREE_PROOF_VERSION,
         )
 
     def approve(self, *, content_revision: int, now: datetime) -> None:
@@ -827,34 +725,6 @@ class MemoryTurnDispatchJob:
         self.status = DispatchStatus.RECONCILE_REQUIRED
         self.next_attempt_at = retry_at
 
-    def record_publish_failure(
-        self,
-        *,
-        owner: str,
-        claim_generation: int,
-        safe_reason_code: str,
-        now: datetime,
-    ) -> None:
-        """Release the current owner after a definitive pre-send failure."""
-        _require_safe_version(safe_reason_code, "safe_reason_code")
-        if (
-            self.status is DispatchStatus.ACKNOWLEDGED
-            and self.claim_generation == claim_generation
-        ):
-            return
-        self._require_claim(owner=owner, claim_generation=claim_generation)
-        self.claim_owner = None
-        self.claim_deadline_at = None
-        self.safe_failure_reason = safe_reason_code
-        self.updated_at = now
-        if self.attempt_count >= self.max_attempts:
-            self.status = DispatchStatus.TERMINAL
-            self.next_attempt_at = None
-            self.terminal_at = now
-            return
-        self.status = DispatchStatus.RECONCILE_REQUIRED
-        self.next_attempt_at = now
-
     def mark_published(
         self,
         *,
@@ -863,12 +733,6 @@ class MemoryTurnDispatchJob:
         broker_message_id: str,
         now: datetime,
     ) -> None:
-        if (
-            self.status is DispatchStatus.ACKNOWLEDGED
-            and self.claim_generation == claim_generation
-            and self.broker_message_id == broker_message_id
-        ):
-            return
         self._require_claim(owner=owner, claim_generation=claim_generation)
         if not broker_message_id or len(broker_message_id) > 255:
             raise ValueError("broker_message_id is invalid")
@@ -879,49 +743,6 @@ class MemoryTurnDispatchJob:
         self.next_attempt_at = None
         self.published_at = now
         self.updated_at = now
-
-    def acknowledge(
-        self,
-        *,
-        claim_generation: int,
-        broker_message_id: str,
-        workflow_admission_reference: str,
-        now: datetime,
-    ) -> bool:
-        if (
-            not broker_message_id
-            or len(broker_message_id) > 255
-            or not workflow_admission_reference
-            or len(workflow_admission_reference) > 128
-        ):
-            raise ValueError("dispatch acknowledgement reference is invalid")
-        if self.status is DispatchStatus.ACKNOWLEDGED:
-            if (
-                self.claim_generation == claim_generation
-                and self.broker_message_id == broker_message_id
-                and self.workflow_admission_reference
-                == workflow_admission_reference
-            ):
-                return True
-            raise DispatchStateConflictError()
-        if (
-            self.status not in {DispatchStatus.CLAIMED, DispatchStatus.PUBLISHED}
-            or self.claim_generation != claim_generation
-            or (
-                self.broker_message_id is not None
-                and self.broker_message_id != broker_message_id
-            )
-        ):
-            raise DispatchStateConflictError()
-        self.status = DispatchStatus.ACKNOWLEDGED
-        self.broker_message_id = broker_message_id
-        self.workflow_admission_reference = workflow_admission_reference
-        self.claim_owner = None
-        self.claim_deadline_at = None
-        self.next_attempt_at = None
-        self.acknowledged_at = now
-        self.updated_at = now
-        return False
 
     def _require_claim(self, *, owner: str, claim_generation: int) -> None:
         if (

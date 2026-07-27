@@ -1,19 +1,6 @@
 import inspect
-from pathlib import Path
 
 from apps.gateway import lifespan as lifespan_module
-
-
-def test_gateway_validates_public_runtime_before_creating_the_app():
-    main_source = (
-        Path(lifespan_module.__file__).with_name("main.py").read_text(
-            encoding="utf-8"
-        )
-    )
-
-    assert main_source.index(
-        "validate_public_conversation_runtime_configuration()"
-    ) < main_source.index("app = FastAPI(")
 
 
 def test_gateway_lifespan_does_not_apply_orm_or_enum_schema_ddl():

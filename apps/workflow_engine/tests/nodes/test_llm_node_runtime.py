@@ -696,6 +696,42 @@ def test_llm_node_runs_with_override_client():
     }
 
 
+def test_llm_node_inserts_client_history_before_current_user_prompt():
+    dummy_client = DummyClient()
+    node = LLMNode(
+        "llm-client-history",
+        LLMNodeData(
+            title="LLM",
+            provider="openai",
+            model_id="gpt-4o",
+            user_prompt="current question",
+            parameters={},
+        ),
+        execution_context={
+            "public_chat_history": [
+                {"role": "user", "content": "old question"},
+                {"role": "assistant", "content": "old answer"},
+            ],
+            "memory_mode": False,
+        },
+    )
+    node._client_override = dummy_client  # noqa: SLF001 - 테스트용
+    node._borrow_db_session = lambda: pytest.fail(  # noqa: SLF001
+        "client-held history must not query legacy server memory"
+    )
+
+    node.execute({})
+
+    messages = dummy_client.calls[0]["messages"]
+    assert "신뢰할 수 없는 대화 기록" in messages[0]["content"]
+    assert messages[-1] == {"role": "user", "content": "current question"}
+    assert messages[1]["role"] == "user"
+    assert "[BEGIN CLIENT_CONVERSATION_HISTORY - UNTRUSTED]" in messages[1]["content"]
+    assert "old question" in messages[1]["content"]
+    assert "old answer" in messages[1]["content"]
+    assert not any(message["role"] == "assistant" for message in messages[1:-1])
+
+
 def test_llm_node_passes_rendered_prompt_and_request_to_judge_first_router(
     monkeypatch,
 ):

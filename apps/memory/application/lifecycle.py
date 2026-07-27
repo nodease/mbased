@@ -6,10 +6,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal
 
-from apps.memory.application.context import (
-    ContextAttemptState,
-    MemoryContextProviderAttempt,
-)
 from apps.memory.application.ports import (
     ConversationMemoryRepositoryPort,
     MemoryUnitOfWorkPort,
@@ -78,8 +74,6 @@ class StartTurnCommand:
     minimum_worker_capability: str
     max_dispatch_attempts: int
     now: datetime
-    access_grant_id: uuid.UUID | None = None
-    request_fingerprint_key_version: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,52 +112,6 @@ class CompleteTurnResult:
     lifecycle: SessionLifecycle
     content_revision: int
     turn_version: int
-
-
-@dataclass(frozen=True, slots=True)
-class CheckpointAssistantResultCommand:
-    organization_id: uuid.UUID
-    session_id: uuid.UUID
-    turn_id: uuid.UUID
-    expected_lifecycle_revision: int
-    expected_turn_version: int
-    execution_id: uuid.UUID
-    attempt_id: uuid.UUID
-    assistant_entry_id: uuid.UUID
-    assistant_content: ProtectedEntryContent
-    now: datetime
-
-
-@dataclass(frozen=True, slots=True)
-class CheckpointAssistantResult:
-    assistant_entry_id: uuid.UUID
-    content_digest: str
-    replayed: bool
-
-
-@dataclass(frozen=True, slots=True)
-class RecoverAssistantCheckpointCommand:
-    organization_id: uuid.UUID
-    session_id: uuid.UUID
-    turn_id: uuid.UUID
-    execution_id: uuid.UUID
-    attempt_id: uuid.UUID
-    provider_attempt_id: uuid.UUID
-    assistant_entry_id: uuid.UUID
-    now: datetime
-
-
-@dataclass(frozen=True, slots=True)
-class RecoverAssistantCheckpointResult:
-    assistant_entry_id: uuid.UUID
-    assistant_content: ProtectedEntryContent
-    content_digest: str
-    expected_lifecycle_revision: int
-    expected_turn_version: int
-    context_attempt_id: uuid.UUID
-    context_attempt_version: int
-    context_attempt_outcome: str
-    usage_reference: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -298,10 +246,6 @@ class StartTurnUseCase(_TransactionalUseCase):
                 request_identity=request_identity,
                 user_entry_id=command.user_entry_id,
                 dispatch_id=command.dispatch_id,
-                access_grant_id=command.access_grant_id,
-                request_fingerprint_key_version=(
-                    command.request_fingerprint_key_version
-                ),
                 now=command.now,
             )
             entry = ConversationMemoryEntry.provisional_user(
@@ -338,208 +282,6 @@ class StartTurnUseCase(_TransactionalUseCase):
                 turn_version=turn.version,
                 lifecycle_revision=session.lifecycle_revision,
                 replayed=False,
-            )
-
-        return self._execute(operation)
-
-
-class CheckpointAssistantResultUseCase(_TransactionalUseCase):
-    """Persist provider output before terminalization so retries never resend."""
-
-    def execute(
-        self,
-        command: CheckpointAssistantResultCommand,
-    ) -> CheckpointAssistantResult:
-        def operation() -> CheckpointAssistantResult:
-            session = self.repository.lock_session(
-                organization_id=command.organization_id,
-                session_id=command.session_id,
-            )
-            if session is None:
-                raise SessionNotFoundError()
-            session.require_active(
-                expected_lifecycle_revision=command.expected_lifecycle_revision,
-                now=command.now,
-            )
-            turn = self.repository.lock_turn(
-                organization_id=command.organization_id,
-                session_id=command.session_id,
-                turn_id=command.turn_id,
-            )
-            if turn is None:
-                raise SessionNotFoundError()
-            if (
-                turn.status is not TurnStatus.RUNNING
-                or turn.version != command.expected_turn_version
-                or turn.execution_id != command.execution_id
-                or turn.latest_attempt_id != command.attempt_id
-            ):
-                raise StaleTurnVersionError()
-            user_entry = self.repository.get_entry(
-                organization_id=command.organization_id,
-                session_id=command.session_id,
-                entry_id=turn.user_entry_id,
-            )
-            if user_entry is None:
-                raise EntryNotFoundError()
-            existing = self.repository.get_entry(
-                organization_id=command.organization_id,
-                session_id=command.session_id,
-                entry_id=command.assistant_entry_id,
-            )
-            if existing is not None:
-                if (
-                    existing.turn_id != turn.id
-                    or existing.entry_type is not EntryType.ASSISTANT_TURN
-                    or existing.lifecycle is not EntryLifecycle.PROVISIONAL
-                    or not _same_protected_content_identity(
-                        existing.content,
-                        command.assistant_content,
-                    )
-                ):
-                    raise StaleTurnVersionError()
-                return CheckpointAssistantResult(
-                    assistant_entry_id=existing.id,
-                    content_digest=_entry_content_identity_digest(existing.content),
-                    replayed=True,
-                )
-            entry = ConversationMemoryEntry.provisional_assistant(
-                entry_id=command.assistant_entry_id,
-                organization_id=command.organization_id,
-                session_id=command.session_id,
-                turn_id=turn.id,
-                sequence=turn.sequence * 2,
-                channel=user_entry.channel,
-                content=command.assistant_content,
-                idempotency_key_hash=_assistant_entry_key(turn.id),
-                now=command.now,
-            )
-            self.repository.add_entry(entry)
-            return CheckpointAssistantResult(
-                assistant_entry_id=entry.id,
-                content_digest=_entry_content_identity_digest(entry.content),
-                replayed=False,
-            )
-
-        return self._execute(operation)
-
-
-class RecoverAssistantCheckpointUseCase(_TransactionalUseCase):
-    """Return a bound protected checkpoint without revealing assistant text."""
-
-    def execute(
-        self,
-        command: RecoverAssistantCheckpointCommand,
-    ) -> RecoverAssistantCheckpointResult | None:
-        def operation() -> RecoverAssistantCheckpointResult | None:
-            session = self.repository.lock_session(
-                organization_id=command.organization_id,
-                session_id=command.session_id,
-            )
-            turn = self.repository.lock_turn(
-                organization_id=command.organization_id,
-                session_id=command.session_id,
-                turn_id=command.turn_id,
-            )
-            if session is None or turn is None:
-                raise SessionNotFoundError()
-            expected_attempt_id = uuid.uuid5(
-                command.execution_id,
-                "conversation-execution-attempt-v1",
-            )
-            expected_entry_id = uuid.uuid5(
-                command.execution_id,
-                "conversation-assistant-checkpoint-v1",
-            )
-            if (
-                command.attempt_id != expected_attempt_id
-                or command.assistant_entry_id != expected_entry_id
-            ):
-                raise StaleTurnVersionError()
-
-            entry = self.repository.get_entry(
-                organization_id=command.organization_id,
-                session_id=command.session_id,
-                entry_id=command.assistant_entry_id,
-            )
-            if entry is None:
-                first_delivery = (
-                    turn.status
-                    in {
-                        TurnStatus.PENDING_DISPATCH,
-                        TurnStatus.QUEUED,
-                    }
-                    and turn.execution_id is None
-                    and turn.latest_attempt_id is None
-                )
-                same_running_attempt = (
-                    turn.status is TurnStatus.RUNNING
-                    and turn.execution_id == command.execution_id
-                    and turn.latest_attempt_id == command.attempt_id
-                )
-                if first_delivery or same_running_attempt:
-                    return None
-                raise StaleTurnVersionError()
-            if (
-                turn.execution_id != command.execution_id
-                or turn.latest_attempt_id != command.attempt_id
-            ):
-                raise StaleTurnVersionError()
-
-            if turn.status is TurnStatus.RUNNING:
-                session.require_active(
-                    expected_lifecycle_revision=session.lifecycle_revision,
-                    now=command.now,
-                )
-                expected_turn_version = turn.version
-                required_entry_lifecycle = EntryLifecycle.PROVISIONAL
-            elif (
-                turn.status is TurnStatus.COMPLETED
-                and turn.assistant_entry_id == command.assistant_entry_id
-                and turn.version > 1
-            ):
-                expected_turn_version = turn.version - 1
-                required_entry_lifecycle = EntryLifecycle.APPROVED
-            else:
-                raise StaleTurnVersionError()
-
-            if (
-                entry.turn_id != turn.id
-                or entry.entry_type is not EntryType.ASSISTANT_TURN
-                or entry.lifecycle is not required_entry_lifecycle
-                or entry.content is None
-            ):
-                raise StaleTurnVersionError()
-
-            context_attempt: MemoryContextProviderAttempt | None = (
-                self.repository.lock_context_attempt(command.provider_attempt_id)
-            )
-            if (
-                context_attempt is None
-                or context_attempt.id != command.provider_attempt_id
-                or context_attempt.organization_id != command.organization_id
-                or context_attempt.session_id != command.session_id
-                or context_attempt.turn_id != command.turn_id
-                or context_attempt.status
-                not in {
-                    ContextAttemptState.PROVIDER_STARTED,
-                    ContextAttemptState.SUCCEEDED,
-                    ContextAttemptState.OUTCOME_UNKNOWN,
-                }
-                or context_attempt.usage_reference is None
-            ):
-                raise StaleTurnVersionError()
-
-            return RecoverAssistantCheckpointResult(
-                assistant_entry_id=entry.id,
-                assistant_content=entry.content,
-                content_digest=_entry_content_identity_digest(entry.content),
-                expected_lifecycle_revision=session.lifecycle_revision,
-                expected_turn_version=expected_turn_version,
-                context_attempt_id=context_attempt.id,
-                context_attempt_version=context_attempt.version,
-                context_attempt_outcome=context_attempt.status.value,
-                usage_reference=context_attempt.usage_reference,
             )
 
         return self._execute(operation)
@@ -602,69 +344,23 @@ class CompleteTurnUseCase(_TransactionalUseCase):
                     content_revision=session.content_revision,
                     now=command.now,
                 )
-                assistant_entry = self.repository.get_entry(
+                assistant_entry = ConversationMemoryEntry.approved_assistant(
+                    entry_id=command.assistant_entry_id,
                     organization_id=command.organization_id,
                     session_id=command.session_id,
-                    entry_id=command.assistant_entry_id,
+                    turn_id=turn.id,
+                    sequence=turn.sequence * 2,
+                    channel=user_entry.channel,
+                    content=command.assistant_content,
+                    content_revision=session.content_revision,
+                    idempotency_key_hash=_assistant_entry_key(turn.id),
+                    now=command.now,
                 )
-                if assistant_entry is None:
-                    # Compatibility for existing internal callers.  The public
-                    # runtime always checkpoints before reaching this branch.
-                    assistant_entry = ConversationMemoryEntry.approved_assistant(
-                        entry_id=command.assistant_entry_id,
-                        organization_id=command.organization_id,
-                        session_id=command.session_id,
-                        turn_id=turn.id,
-                        sequence=turn.sequence * 2,
-                        channel=user_entry.channel,
-                        content=command.assistant_content,
-                        content_revision=session.content_revision,
-                        idempotency_key_hash=_assistant_entry_key(turn.id),
-                        now=command.now,
-                    )
-                    self.repository.add_entry(assistant_entry)
-                else:
-                    if (
-                        assistant_entry.turn_id != turn.id
-                        or assistant_entry.entry_type is not EntryType.ASSISTANT_TURN
-                        or assistant_entry.lifecycle is not EntryLifecycle.PROVISIONAL
-                        or not _same_protected_content_identity(
-                            assistant_entry.content,
-                            command.assistant_content,
-                        )
-                    ):
-                        raise StaleTurnVersionError()
-                    assistant_entry.approve(
-                        content_revision=session.content_revision,
-                        now=command.now,
-                    )
-                    self.repository.save_entry(assistant_entry)
+                self.repository.add_entry(assistant_entry)
             else:
-                assistant_entry = None
-                if command.assistant_entry_id is not None:
-                    if command.assistant_content is None:
-                        raise ValueError(
-                            "assistant checkpoint identity requires protected content"
-                        )
-                    assistant_entry = self.repository.get_entry(
-                        organization_id=command.organization_id,
-                        session_id=command.session_id,
-                        entry_id=command.assistant_entry_id,
-                    )
-                    if (
-                        assistant_entry is None
-                        or assistant_entry.turn_id != turn.id
-                        or assistant_entry.entry_type is not EntryType.ASSISTANT_TURN
-                        or assistant_entry.lifecycle is not EntryLifecycle.PROVISIONAL
-                        or not _same_protected_content_identity(
-                            assistant_entry.content,
-                            command.assistant_content,
-                        )
-                    ):
-                        raise StaleTurnVersionError()
-                elif command.assistant_content is not None:
+                if command.assistant_entry_id is not None or command.assistant_content:
                     raise ValueError(
-                        "assistant checkpoint content requires an entry identity"
+                        "non-completed turn cannot persist assistant content"
                     )
                 if not command.safe_failure_reason:
                     raise ValueError("terminal failure requires safe reason")
@@ -687,9 +383,6 @@ class CompleteTurnUseCase(_TransactionalUseCase):
                     now=command.now,
                 )
                 user_entry.reject(now=command.now)
-                if assistant_entry is not None:
-                    assistant_entry.reject(now=command.now)
-                    self.repository.save_entry(assistant_entry)
 
             self.repository.save_turn(turn)
             self.repository.save_session(session)
@@ -797,21 +490,6 @@ def _protected_projection_identity(
         projection.content_digest,
         projection.plaintext_byte_length,
     )
-
-
-def _entry_content_identity_digest(
-    content: ProtectedEntryContent | None,
-) -> str:
-    if content is None:
-        raise ValueError("protected entry content is required")
-    payload = "|".join(
-        "-" if value is None else ":".join(map(str, value))
-        for value in (
-            _protected_projection_identity(content.display),
-            _protected_projection_identity(content.model),
-        )
-    )
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 class CloseSessionUseCase(_TransactionalUseCase):

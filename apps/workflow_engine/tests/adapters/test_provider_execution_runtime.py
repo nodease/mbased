@@ -21,7 +21,6 @@ from apps.workflow_engine.application.provider_execution import (
     ProviderExecutionAuditActorKind,
     ProviderExecutionConfigurationError,
     ProviderExecutionPreflight,
-    ProviderExecutionPreparationRequest,
     ProviderExecutionRequest,
 )
 from apps.workflow_engine.domain.execution import NodeExecutionControl
@@ -116,10 +115,9 @@ def test_capability_runtime_readmits_final_json_schema_request_before_provider_i
     model_db_id = uuid.uuid4()
     credential_id = uuid.uuid4()
     provider_id = uuid.uuid4()
-    preparation_session = _Session()
     initial_session = _Session()
     final_session = _Session()
-    sessions = iter((preparation_session, initial_session, final_session))
+    sessions = iter((initial_session, final_session))
     captured: dict = {}
     pricing_revision = "d" * 64
 
@@ -198,13 +196,6 @@ def test_capability_runtime_readmits_final_json_schema_request_before_provider_i
             ),
         )
     )
-    preparation = runtime.prepare(
-        ProviderExecutionPreparationRequest(
-            plan=plan,
-            model_id="gpt-safe",
-            shared_session=object(),
-        )
-    )
 
     lease = runtime.resolve(
         ProviderExecutionRequest(
@@ -246,11 +237,6 @@ def test_capability_runtime_readmits_final_json_schema_request_before_provider_i
         output_token_cap=100,
     )
 
-    assert preparation.capability_id == capability_id
-    assert preparation.capability_revision == 3
-    assert preparation.provider_attempt_id == captured["issue"].binding.provider_attempt_id
-    assert preparation_session.commits == 1
-    assert preparation_session.closes == 1
     assert initial_session.commits == 1
     assert initial_session.closes == 1
     assert final_session.commits == 1

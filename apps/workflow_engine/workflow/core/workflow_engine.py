@@ -338,6 +338,8 @@ class WorkflowEngine:
 
         # 로깅 관련 초기화
         self.logger = WorkflowLogger(db)
+        if self.execution_context.get("suppress_content_persistence"):
+            self.logger.suppress_content_persistence()
         self.parent_run_id = parent_run_id
         self.start_node_id = entry_node_id
         self.is_subworkflow = is_subworkflow

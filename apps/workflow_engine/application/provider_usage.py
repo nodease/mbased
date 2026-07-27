@@ -42,9 +42,6 @@ class ProviderUsageAttempt(Protocol):
     @property
     def durable(self) -> bool: ...
 
-    @property
-    def operation_reference(self) -> str | None: ...
-
     def mark_provider_started(self) -> None: ...
 
     def record_success(self, *, usage: Mapping[str, Any], latency_ms: int) -> float: ...
@@ -58,22 +55,6 @@ class ProviderUsageRecorder(Protocol):
     def begin(self, request: ProviderUsageIntent) -> ProviderUsageAttempt: ...
 
     def record(self, request: ProviderUsageRecord) -> float: ...
-
-    def resume_checkpoint(
-        self,
-        *,
-        organization_id: uuid.UUID,
-        provider_attempt_id: uuid.UUID,
-        operation_reference: str,
-    ) -> None: ...
-
-    def reconcile_reference_terminal(
-        self,
-        *,
-        organization_id: uuid.UUID,
-        provider_attempt_id: uuid.UUID,
-        operation_reference: str | None,
-    ) -> str: ...
 
 
 __all__ = [

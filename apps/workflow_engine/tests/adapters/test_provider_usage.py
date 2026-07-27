@@ -6,11 +6,6 @@ from decimal import Decimal
 
 import pytest
 
-from apps.shared.domain.provider_usage_ledger import (
-    ProviderUsageLedgerError,
-    ProviderUsageOperation,
-    ProviderUsageState,
-)
 from apps.workflow_engine.adapters.provider_usage import (
     PostgresProviderUsageRecorder,
 )
@@ -28,6 +23,10 @@ from apps.workflow_engine.application.provider_usage import (
     ProviderUsageIntent,
     ProviderUsageRecord,
     ProviderUsageRuntimeError,
+)
+from apps.shared.domain.provider_usage_ledger import (
+    ProviderUsageLedgerError,
+    ProviderUsageOperation,
 )
 from apps.workflow_engine.services import llm_service as workflow_llm_service
 from apps.workflow_engine.services.llm_service import LLMService
@@ -164,24 +163,6 @@ def test_capability_usage_uses_admission_pricing_snapshot(monkeypatch):
     assert captured["usage"]["organization_id"] == organization_id
     assert captured["usage"]["credential_id"] == credential_id
     assert session.closes == 1
-
-
-def test_durable_usage_attempt_exposes_only_safe_operation_reference():
-    service = _LedgerService()
-    attribution = _capability_attribution(
-        organization_id=uuid.uuid4(),
-        model_db_id=uuid.uuid4(),
-        credential_id=uuid.uuid4(),
-        principal_id=uuid.uuid4(),
-    )
-    recorder = PostgresProviderUsageRecorder(
-        session_factory=_Session,
-        ledger_service=service,
-    )
-
-    attempt = recorder.begin(_intent_for(attribution))
-
-    assert uuid.UUID(attempt.operation_reference) == service.operation.id
 
 
 def test_legacy_usage_recorder_preserves_catalog_fallback(monkeypatch):
@@ -639,162 +620,3 @@ def test_existing_started_operation_blocks_provider_replay() -> None:
         recorder.begin(_intent_for(attribution))
 
     assert exc_info.value.code == "provider_usage.replay_blocked"
-
-
-def test_checkpoint_recovery_classifies_started_usage_without_provider_replay() -> None:
-    organization_id = uuid.uuid4()
-    provider_attempt_id = uuid.uuid4()
-    operation_id = uuid.uuid4()
-    record = type(
-        "Operation",
-        (),
-        {
-            "id": operation_id,
-            "organization_id": organization_id,
-            "provider_attempt_id": provider_attempt_id,
-            "purpose": "main_generation",
-            "state": ProviderUsageState.PROVIDER_STARTED.value,
-            "state_version": 2,
-        },
-    )()
-
-    class _Query:
-        def filter(self, *_criteria):
-            return self
-
-        def one_or_none(self):
-            return record
-
-    class _RecoverySession(_Session):
-        def query(self, _model):
-            return _Query()
-
-    class _RecoveryLedger:
-        def __init__(self):
-            self.calls = []
-
-        def mark_outcome_unknown(self, _db, **kwargs):
-            self.calls.append(kwargs)
-
-    ledger = _RecoveryLedger()
-    recorder = PostgresProviderUsageRecorder(
-        session_factory=_RecoverySession,
-        ledger_service=ledger,  # type: ignore[arg-type]
-    )
-
-    recorder.resume_checkpoint(
-        organization_id=organization_id,
-        provider_attempt_id=provider_attempt_id,
-        operation_reference=str(operation_id),
-    )
-
-    assert ledger.calls == [
-        {
-            "operation_id": operation_id,
-            "expected_state_version": 2,
-            "reason_code": "terminal_record_failed",
-        }
-    ]
-
-
-def test_reference_reconciliation_preserves_unsent_intent_fact() -> None:
-    organization_id = uuid.uuid4()
-    provider_attempt_id = uuid.uuid4()
-    operation_id = uuid.uuid4()
-    record = type(
-        "Operation",
-        (),
-        {
-            "id": operation_id,
-            "organization_id": organization_id,
-            "provider_attempt_id": provider_attempt_id,
-            "purpose": ProviderExecutionPurpose.MAIN_GENERATION.value,
-            "state": ProviderUsageState.INTENT.value,
-            "state_version": 1,
-        },
-    )()
-
-    class _Query:
-        def filter(self, *_criteria):
-            return self
-
-        def one_or_none(self):
-            return record
-
-    class _RecoverySession(_Session):
-        def query(self, _model):
-            return _Query()
-
-    class _RecoveryLedger:
-        def mark_outcome_unknown(self, *_args, **_kwargs):
-            pytest.fail("INTENT must remain the canonical pre-send fact")
-
-    recorder = PostgresProviderUsageRecorder(
-        session_factory=_RecoverySession,
-        ledger_service=_RecoveryLedger(),  # type: ignore[arg-type]
-    )
-
-    outcome = recorder.reconcile_reference_terminal(
-        organization_id=organization_id,
-        provider_attempt_id=provider_attempt_id,
-        operation_reference=str(operation_id),
-    )
-
-    assert outcome == "not_started"
-
-
-def test_reference_reconciliation_classifies_started_usage_with_allowed_reason() -> None:
-    organization_id = uuid.uuid4()
-    provider_attempt_id = uuid.uuid4()
-    operation_id = uuid.uuid4()
-    record = type(
-        "Operation",
-        (),
-        {
-            "id": operation_id,
-            "organization_id": organization_id,
-            "provider_attempt_id": provider_attempt_id,
-            "purpose": ProviderExecutionPurpose.MAIN_GENERATION.value,
-            "state": ProviderUsageState.PROVIDER_STARTED.value,
-            "state_version": 2,
-        },
-    )()
-
-    class _Query:
-        def filter(self, *_criteria):
-            return self
-
-        def one_or_none(self):
-            return record
-
-    class _RecoverySession(_Session):
-        def query(self, _model):
-            return _Query()
-
-    class _RecoveryLedger:
-        def __init__(self) -> None:
-            self.calls = []
-
-        def mark_outcome_unknown(self, _db, **kwargs):
-            self.calls.append(kwargs)
-
-    ledger = _RecoveryLedger()
-    recorder = PostgresProviderUsageRecorder(
-        session_factory=_RecoverySession,
-        ledger_service=ledger,  # type: ignore[arg-type]
-    )
-
-    outcome = recorder.reconcile_reference_terminal(
-        organization_id=organization_id,
-        provider_attempt_id=provider_attempt_id,
-        operation_reference=str(operation_id),
-    )
-
-    assert outcome == "outcome_unknown"
-    assert ledger.calls == [
-        {
-            "operation_id": operation_id,
-            "expected_state_version": 2,
-            "reason_code": "stale_provider_started",
-        }
-    ]

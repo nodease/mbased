@@ -77,57 +77,6 @@ def test_public_deployment_read_is_non_locking_and_ignores_embed_policy():
     assert "FOR UPDATE" not in str(statement.compile(dialect=postgresql.dialect()))
 
 
-def test_memory_runtime_intent_is_detected_before_contract_validation():
-    organization_id = uuid.uuid4()
-    app = App(
-        id=uuid.uuid4(),
-        organization_id=organization_id,
-        workflow_id=uuid.uuid4(),
-        active_deployment_id=uuid.uuid4(),
-        url_slug="public-chatbot",
-        auth_secret="",
-        name="Public Chatbot",
-        created_by=uuid.uuid4(),
-    )
-    workflow = Workflow(
-        id=app.workflow_id,
-        organization_id=organization_id,
-        app_id=app.id,
-        created_by=uuid.uuid4(),
-    )
-    deployment = WorkflowDeployment(
-        id=app.active_deployment_id,
-        app_id=app.id,
-        version=3,
-        type=DeploymentType.CHATBOT,
-        graph_snapshot={
-            "nodes": [
-                {
-                    "id": "llm",
-                    "type": "llmNode",
-                    "data": {"memory": {"enabled": "true"}},
-                }
-            ],
-            "edges": [],
-        },
-        config={},
-        created_by=uuid.uuid4(),
-        is_active=True,
-    )
-    db = MagicMock(spec=Session)
-    db.execute.return_value.one_or_none.return_value = (app, workflow, deployment)
-    repository = SqlAlchemyConversationMemoryRepository(db)
-
-    assert (
-        repository.public_deployment_requires_conversation_runtime(
-            "public-chatbot"
-        )
-        is True
-    )
-    statement = db.execute.call_args.args[0]
-    assert "FOR UPDATE" not in str(statement.compile(dialect=postgresql.dialect()))
-
-
 def test_public_deployment_mutation_lock_is_explicit():
     organization_id = uuid.uuid4()
     app = App(

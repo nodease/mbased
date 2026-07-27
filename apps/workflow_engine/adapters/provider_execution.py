@@ -8,8 +8,6 @@ from apps.workflow_engine.application.provider_execution import (
     ProviderExecutionConfigurationError,
     ProviderExecutionPlan,
     ProviderExecutionPreflight,
-    ProviderExecutionPreparation,
-    ProviderExecutionPreparationRequest,
     ProviderExecutionRequest,
     ProviderExecutionRuntime,
     ProviderInvocationLease,
@@ -64,18 +62,6 @@ class ProviderExecutionRuntimeRouter:
         if not isinstance(state, _RoutedPlanState):
             raise ProviderExecutionConfigurationError()
         return state.strategy.resolve(replace(request, plan=state.strategy_plan))
-
-    def prepare(
-        self,
-        request: ProviderExecutionPreparationRequest,
-    ) -> ProviderExecutionPreparation:
-        state = request.plan.state
-        if not isinstance(state, _RoutedPlanState):
-            raise ProviderExecutionConfigurationError()
-        prepare = getattr(state.strategy, "prepare", None)
-        if not callable(prepare):
-            raise ProviderExecutionConfigurationError()
-        return prepare(replace(request, plan=state.strategy_plan))
 
 
 __all__ = ["ProviderExecutionRuntimeRouter"]

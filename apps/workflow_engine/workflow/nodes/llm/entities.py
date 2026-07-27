@@ -42,33 +42,10 @@ EvidenceSufficiencyPolicy = Literal["minimum_evidence", "strict_citation"]
 RAGFailurePolicy = Literal["safe_no_result", "fail_node"]
 SourceTierPolicy = Literal["tie_break", "off"]
 QueryRewriteMode = Literal["off", "template", "llm_assisted"]
-MemoryReadSource = Literal["conversation_turns", "selected_nodes"]
-MemoryWriteMode = Literal["none", "node_output"]
-MemoryStrategy = Literal["window", "window_then_summary"]
-MemoryFailurePolicy = Literal["continue_without_memory", "fail_node"]
 MAX_RAG_RETRIEVAL_KBS = MAX_RUNTIME_DIRECT_KB_REFERENCES
 MAX_RAG_COLLECTIONS = MAX_RUNTIME_COLLECTION_REFERENCES
 MAX_RAG_CHUNKS_PER_KB = 8
 MAX_RAG_QUERY_REWRITE_TEMPLATE_LENGTH = 512
-
-
-class LLMMemoryConfiguration(BaseModel):
-    """Persisted node policy; runtime support is validated separately."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    enabled: bool = False
-    channel: str = Field(default="conversation", min_length=1, max_length=128)
-    readSource: MemoryReadSource = "conversation_turns"
-    writeMode: MemoryWriteMode = "none"
-    selectedNodeIds: List[str] = Field(default_factory=list, max_length=64)
-    maxTurns: int = Field(default=5, ge=1, le=20)
-    maxContextTokens: int = Field(default=1200, ge=1, le=8192)
-    strategy: MemoryStrategy = "window"
-    summaryModelPolicy: Literal["inherit_node", "organization_default"] = (
-        "inherit_node"
-    )
-    failurePolicy: MemoryFailurePolicy = "fail_node"
 
 
 class LLMNodeData(BaseNodeData):
@@ -111,7 +88,6 @@ class LLMNodeData(BaseNodeData):
         default=None,
         description="LLM 출력 형식 설정 (text/json 및 JSON schema)",
     )
-    memory: Optional[LLMMemoryConfiguration] = None
 
     # LLM node RAG 옵션은 실행 시점 execution subject 기준으로 다시 검증한다.
     knowledgeBases: List[KnowledgeBaseRef] = Field(

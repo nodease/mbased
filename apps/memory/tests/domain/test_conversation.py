@@ -151,38 +151,6 @@ def test_session_claim_and_release_reject_idle_or_absolute_expiry_boundary():
     assert absolute_expired.content_revision == 0
 
 
-def test_terminal_dispatch_recovery_releases_an_expired_active_turn() -> None:
-    session = _session()
-    turn_id = uuid.uuid4()
-    session.claim_turn(
-        turn_id=turn_id,
-        expected_lifecycle_revision=1,
-        now=_now(),
-    )
-    session.absolute_expires_at = _now()
-
-    session.release_terminal_turn(
-        turn_id=turn_id,
-        expected_lifecycle_revision=1,
-        now=_now(),
-    )
-
-    assert session.active_turn_id is None
-    assert session.content_revision == 0
-    conflicting = _session()
-    conflicting.claim_turn(
-        turn_id=uuid.uuid4(),
-        expected_lifecycle_revision=1,
-        now=_now(),
-    )
-    with pytest.raises(ActiveTurnConflictError):
-        conflicting.release_terminal_turn(
-            turn_id=turn_id,
-            expected_lifecycle_revision=1,
-            now=_now(),
-        )
-
-
 def test_purge_receipt_rejects_more_than_eight_days_from_issue_time():
     common = {
         "organization_id": uuid.uuid4(),
@@ -439,18 +407,11 @@ def test_terminal_turn_states_are_absorbing_for_every_late_transition(
         )
 
     terminal_version = turn.version
-    assert turn.execution_id is not None
     late_transitions = (
         lambda: turn.mark_queued(expected_version=terminal_version, now=_now()),
         lambda: turn.mark_running(
             expected_version=terminal_version,
             execution_id=uuid.uuid4(),
-            attempt_id=uuid.uuid4(),
-            now=_now(),
-        ),
-        lambda: turn.handoff_running_attempt(
-            expected_version=terminal_version,
-            execution_id=turn.execution_id,
             attempt_id=uuid.uuid4(),
             now=_now(),
         ),

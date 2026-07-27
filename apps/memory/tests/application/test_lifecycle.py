@@ -7,13 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from apps.memory.application.context import (
-    ContextAttemptState,
-    MemoryContextProviderAttempt,
-)
 from apps.memory.application.lifecycle import (
-    CheckpointAssistantResultCommand,
-    CheckpointAssistantResultUseCase,
     CloseSessionCommand,
     CloseSessionUseCase,
     CompleteTurnCommand,
@@ -22,8 +16,6 @@ from apps.memory.application.lifecycle import (
     CreateSessionUseCase,
     RequestDeleteCommand,
     RequestDeleteUseCase,
-    RecoverAssistantCheckpointCommand,
-    RecoverAssistantCheckpointUseCase,
     StartTurnCommand,
     StartTurnUseCase,
 )
@@ -83,7 +75,6 @@ class _Repository:
         self.entries: dict[uuid.UUID, ConversationMemoryEntry] = {}
         self.dispatch_jobs: dict[uuid.UUID, MemoryTurnDispatchJob] = {}
         self.purge_jobs: dict[uuid.UUID, object] = {}
-        self.context_attempts: dict[uuid.UUID, MemoryContextProviderAttempt] = {}
         self.fail_on_dispatch = False
 
     def add_session(self, session: ConversationSession) -> None:
@@ -168,12 +159,6 @@ class _Repository:
     def add_purge_job(self, job) -> None:
         self.purge_jobs[job.id] = job
 
-    def lock_context_attempt(
-        self,
-        attempt_id: uuid.UUID,
-    ) -> MemoryContextProviderAttempt | None:
-        return self.context_attempts.get(attempt_id)
-
 
 class _UnitOfWork:
     def __init__(self, repository: _Repository) -> None:
@@ -190,7 +175,6 @@ class _UnitOfWork:
                 self.repository.entries,
                 self.repository.dispatch_jobs,
                 self.repository.purge_jobs,
-                self.repository.context_attempts,
             )
         )
 
@@ -207,7 +191,6 @@ class _UnitOfWork:
                 self.repository.entries,
                 self.repository.dispatch_jobs,
                 self.repository.purge_jobs,
-                self.repository.context_attempts,
             ) = self._snapshot
         self._snapshot = None
 
@@ -250,8 +233,6 @@ def _start_command(session: ConversationSession) -> StartTurnCommand:
         minimum_worker_capability="memory-runtime-v1",
         max_dispatch_attempts=5,
         now=_now(),
-        access_grant_id=uuid.uuid4(),
-        request_fingerprint_key_version="admission-v1",
     )
 
 
@@ -268,11 +249,6 @@ def test_create_and_start_turn_commit_session_turn_entry_and_dispatch_together()
     assert result.dispatch_id == command.dispatch_id
     assert repo.sessions[session.id].active_turn_id == command.turn_id
     assert repo.turns[command.turn_id].user_entry_id == command.user_entry_id
-    assert repo.turns[command.turn_id].access_grant_id == command.access_grant_id
-    assert (
-        repo.turns[command.turn_id].request_fingerprint_key_version
-        == "admission-v1"
-    )
     assert repo.entries[command.user_entry_id].lifecycle.value == "provisional"
     assert repo.dispatch_jobs[command.dispatch_id].turn_id == command.turn_id
     assert uow.commit_count == 2
@@ -385,275 +361,6 @@ def test_complete_turn_atomically_approves_user_and_assistant_entries():
     assert repo.entries[start.user_entry_id].lifecycle.value == "approved"
     assert repo.entries[assistant_entry_id].lifecycle.value == "approved"
     assert repo.turns[turn.id].assistant_entry_id == assistant_entry_id
-
-
-def test_checkpoint_then_complete_promotes_same_assistant_entry_without_reexecution():
-    repo = _Repository()
-    uow = _UnitOfWork(repo)
-    session = _create_session(repo, uow)
-    start = _start_command(session)
-    StartTurnUseCase(repository=repo, uow=uow).execute(start)
-    turn = repo.turns[start.turn_id]
-    execution_id = uuid.uuid4()
-    attempt_id = uuid.uuid4()
-    turn.mark_queued(expected_version=1, now=_now())
-    turn.mark_running(
-        expected_version=2,
-        execution_id=execution_id,
-        attempt_id=attempt_id,
-        now=_now(),
-    )
-    assistant_entry_id = uuid.uuid4()
-    assistant_content = _protected(b"assistant")
-    checkpoint = CheckpointAssistantResultCommand(
-        organization_id=session.organization_id,
-        session_id=session.id,
-        turn_id=turn.id,
-        expected_lifecycle_revision=1,
-        expected_turn_version=3,
-        execution_id=execution_id,
-        attempt_id=attempt_id,
-        assistant_entry_id=assistant_entry_id,
-        assistant_content=assistant_content,
-        now=_now(),
-    )
-    checkpoint_use_case = CheckpointAssistantResultUseCase(
-        repository=repo,
-        uow=uow,
-    )
-
-    first = checkpoint_use_case.execute(checkpoint)
-    replay = checkpoint_use_case.execute(checkpoint)
-    result = CompleteTurnUseCase(repository=repo, uow=uow).execute(
-        CompleteTurnCommand(
-            organization_id=session.organization_id,
-            session_id=session.id,
-            turn_id=turn.id,
-            expected_lifecycle_revision=1,
-            expected_turn_version=3,
-            outcome="completed",
-            assistant_entry_id=assistant_entry_id,
-            assistant_content=assistant_content,
-            safe_failure_reason=None,
-            now=_now(),
-        )
-    )
-
-    assert first.replayed is False
-    assert replay.replayed is True
-    assert replay.content_digest == first.content_digest
-    assert result.content_revision == 1
-    assert len(repo.entries) == 2
-    assert repo.entries[assistant_entry_id].lifecycle.value == "approved"
-
-
-def test_checkpoint_recovery_probe_returns_none_only_for_expected_absence() -> None:
-    repo = _Repository()
-    uow = _UnitOfWork(repo)
-    session = _create_session(repo, uow)
-    start = _start_command(session)
-    StartTurnUseCase(repository=repo, uow=uow).execute(start)
-    turn = repo.turns[start.turn_id]
-    execution_id = uuid.uuid4()
-    command = RecoverAssistantCheckpointCommand(
-        organization_id=session.organization_id,
-        session_id=session.id,
-        turn_id=turn.id,
-        execution_id=execution_id,
-        attempt_id=uuid.uuid5(
-            execution_id,
-            "conversation-execution-attempt-v1",
-        ),
-        provider_attempt_id=uuid.uuid4(),
-        assistant_entry_id=uuid.uuid5(
-            execution_id,
-            "conversation-assistant-checkpoint-v1",
-        ),
-        now=_now(),
-    )
-    use_case = RecoverAssistantCheckpointUseCase(repository=repo, uow=uow)
-
-    assert use_case.execute(command) is None
-    turn.mark_queued(expected_version=turn.version, now=_now())
-    assert use_case.execute(command) is None
-
-    with pytest.raises(StaleTurnVersionError):
-        use_case.execute(replace(command, assistant_entry_id=uuid.uuid4()))
-
-
-def test_recover_checkpoint_binds_current_execution_and_provider_attempt() -> None:
-    repo = _Repository()
-    uow = _UnitOfWork(repo)
-    session = _create_session(repo, uow)
-    start = _start_command(session)
-    StartTurnUseCase(repository=repo, uow=uow).execute(start)
-    turn = repo.turns[start.turn_id]
-    execution_id = uuid.uuid4()
-    attempt_id = uuid.uuid5(execution_id, "conversation-execution-attempt-v1")
-    provider_attempt_id = uuid.uuid4()
-    assistant_entry_id = uuid.uuid5(
-        execution_id,
-        "conversation-assistant-checkpoint-v1",
-    )
-    turn.mark_queued(expected_version=1, now=_now())
-    turn.mark_running(
-        expected_version=2,
-        execution_id=execution_id,
-        attempt_id=attempt_id,
-        now=_now(),
-    )
-    assistant_content = _protected(b"assistant")
-    CheckpointAssistantResultUseCase(repository=repo, uow=uow).execute(
-        CheckpointAssistantResultCommand(
-            organization_id=session.organization_id,
-            session_id=session.id,
-            turn_id=turn.id,
-            expected_lifecycle_revision=session.lifecycle_revision,
-            expected_turn_version=turn.version,
-            execution_id=execution_id,
-            attempt_id=attempt_id,
-            assistant_entry_id=assistant_entry_id,
-            assistant_content=assistant_content,
-            now=_now(),
-        )
-    )
-    repo.context_attempts[provider_attempt_id] = MemoryContextProviderAttempt(
-        id=provider_attempt_id,
-        organization_id=session.organization_id,
-        session_id=session.id,
-        turn_id=turn.id,
-        lease_id=uuid.uuid4(),
-        plan_id=uuid.uuid4(),
-        node_invocation_id=uuid.uuid4(),
-        provider_capability_reference="capability-1",
-        provider_capability_revision="1",
-        status=ContextAttemptState.PROVIDER_STARTED,
-        version=2,
-        claim_generation=1,
-        claim_deadline_at=_now() + timedelta(seconds=30),
-        provider_started_at=_now(),
-        usage_reference="usage-operation-1",
-    )
-    command = RecoverAssistantCheckpointCommand(
-        organization_id=session.organization_id,
-        session_id=session.id,
-        turn_id=turn.id,
-        execution_id=execution_id,
-        attempt_id=attempt_id,
-        provider_attempt_id=provider_attempt_id,
-        assistant_entry_id=assistant_entry_id,
-        now=_now(),
-    )
-
-    result = RecoverAssistantCheckpointUseCase(
-        repository=repo,
-        uow=uow,
-    ).execute(command)
-
-    assert result.assistant_entry_id == assistant_entry_id
-    assert result.assistant_content == assistant_content
-    assert len(result.content_digest) == 64
-    assert result.expected_lifecycle_revision == session.lifecycle_revision
-    assert result.expected_turn_version == turn.version
-    assert result.context_attempt_id == provider_attempt_id
-    assert result.context_attempt_version == 2
-    assert result.context_attempt_outcome == "provider_started"
-    assert result.usage_reference == "usage-operation-1"
-
-    context_attempt = repo.context_attempts[provider_attempt_id]
-    context_attempt.finish(
-        expected_version=result.context_attempt_version,
-        outcome=ContextAttemptState.SUCCEEDED,
-        safe_failure_reason=None,
-        now=_now(),
-    )
-    completed = CompleteTurnUseCase(repository=repo, uow=uow).execute(
-        CompleteTurnCommand(
-            organization_id=session.organization_id,
-            session_id=session.id,
-            turn_id=turn.id,
-            expected_lifecycle_revision=result.expected_lifecycle_revision,
-            expected_turn_version=result.expected_turn_version,
-            outcome="completed",
-            assistant_entry_id=result.assistant_entry_id,
-            assistant_content=result.assistant_content,
-            safe_failure_reason=None,
-            now=_now(),
-        )
-    )
-    terminal_recovery = RecoverAssistantCheckpointUseCase(
-        repository=repo,
-        uow=uow,
-    ).execute(command)
-
-    assert terminal_recovery.assistant_content == assistant_content
-    assert terminal_recovery.expected_turn_version == completed.turn_version - 1
-    assert terminal_recovery.context_attempt_version == 3
-    assert terminal_recovery.context_attempt_outcome == "succeeded"
-
-    for conflict in (
-        replace(command, attempt_id=uuid.uuid4()),
-        replace(command, provider_attempt_id=uuid.uuid4()),
-        replace(command, assistant_entry_id=uuid.uuid4()),
-    ):
-        with pytest.raises(StaleTurnVersionError):
-            RecoverAssistantCheckpointUseCase(
-                repository=repo,
-                uow=uow,
-            ).execute(conflict)
-
-
-def test_failed_completion_rejects_existing_assistant_checkpoint_atomically():
-    repo = _Repository()
-    uow = _UnitOfWork(repo)
-    session = _create_session(repo, uow)
-    start = _start_command(session)
-    StartTurnUseCase(repository=repo, uow=uow).execute(start)
-    turn = repo.turns[start.turn_id]
-    execution_id = uuid.uuid4()
-    attempt_id = uuid.uuid4()
-    turn.mark_queued(expected_version=1, now=_now())
-    turn.mark_running(
-        expected_version=2,
-        execution_id=execution_id,
-        attempt_id=attempt_id,
-        now=_now(),
-    )
-    assistant_entry_id = uuid.uuid4()
-    assistant_content = _protected(b"assistant")
-    CheckpointAssistantResultUseCase(repository=repo, uow=uow).execute(
-        CheckpointAssistantResultCommand(
-            organization_id=session.organization_id,
-            session_id=session.id,
-            turn_id=turn.id,
-            expected_lifecycle_revision=1,
-            expected_turn_version=3,
-            execution_id=execution_id,
-            attempt_id=attempt_id,
-            assistant_entry_id=assistant_entry_id,
-            assistant_content=assistant_content,
-            now=_now(),
-        )
-    )
-
-    CompleteTurnUseCase(repository=repo, uow=uow).execute(
-        CompleteTurnCommand(
-            organization_id=session.organization_id,
-            session_id=session.id,
-            turn_id=turn.id,
-            expected_lifecycle_revision=1,
-            expected_turn_version=3,
-            outcome="failed",
-            assistant_entry_id=assistant_entry_id,
-            assistant_content=assistant_content,
-            safe_failure_reason="memory.provider_outcome_unknown",
-            now=_now(),
-        )
-    )
-
-    assert repo.entries[start.user_entry_id].lifecycle.value == "rejected"
-    assert repo.entries[assistant_entry_id].lifecycle.value == "rejected"
-    assert repo.sessions[session.id].active_turn_id is None
 
 
 def test_complete_turn_replays_same_terminal_result_and_rejects_identity_conflict():

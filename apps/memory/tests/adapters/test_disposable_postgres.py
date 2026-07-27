@@ -12,7 +12,7 @@ from pathlib import Path
 from threading import Barrier
 
 import pytest
-from sqlalchemy import create_engine, func, inspect, select, text
+from sqlalchemy import create_engine, func, select, text
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session
 
@@ -78,7 +78,6 @@ RUN_ENV = "NODEASE_RUN_DISPOSABLE_DB_TEST"
 DB_PREFIX = "mbased_memory"
 PARENT_REVISION = "aa0b1c2d3e4f"
 MEMORY_MERGE_REVISION = "ac2d3e4f5061"
-MEMORY_RUNTIME_REVISION = "b18c9d0e1f23"
 PUBLIC_CONVERSATION_PARENT_REVISION = "f4a5b6c7d8e9"
 PUBLIC_CONVERSATION_REPLAY_REVISION = "ac1d2e3f4a50"
 PUBLIC_CONVERSATION_SCOPE_REVISION = "ad2e3f4a5b61"
@@ -96,18 +95,7 @@ PUBLIC_CONVERSATION_AUTHORIZATION_SCOPE_COLUMNS = {
     "authorization_verifier_key_version",
     "authorization_verifier_hash",
 }
-MEMORY_RUNTIME_COLUMNS = {
-    "conversation_turns": {
-        "request_fingerprint_key_version",
-        "access_grant_id",
-    },
-    "conversation_memory_entries": {"dependency_proof_version"},
-}
-MEMORY_RUNTIME_TABLES = {
-    "conversation_workflow_execution_admissions",
-}
 POST_FOUNDATION_COLUMNS = {
-    **MEMORY_RUNTIME_COLUMNS,
     "conversation_purge_jobs": {
         "deployment_id",
         "deployment_version",
@@ -122,7 +110,7 @@ POST_FOUNDATION_COLUMNS = {
 FOUNDATION_MEMORY_SCHEMA = {
     table_name: columns - POST_FOUNDATION_COLUMNS.get(table_name, set())
     for table_name, columns in REQUIRED_MEMORY_SCHEMA.items()
-    if table_name not in {"conversation_secret_replays", *MEMORY_RUNTIME_TABLES}
+    if table_name != "conversation_secret_replays"
 }
 
 
@@ -445,9 +433,9 @@ def test_memory_migration_uow_and_concurrent_start_turn_contracts():
                 database=database,
                 config=config,
             )
-            # Memory foundation과 그 parent에서 분기한 runtime revision만 검증한다.
-            # 최신 mainline head까지 올린 뒤 rollback하면 의도적으로 비가역인
-            # unrelated migration 때문에 이 계약과 무관하게 실패할 수 있다.
+            # 이 테스트는 Memory foundation의 upgrade/downgrade 계약만 검증한다.
+            # 이후 revision까지 올린 뒤 rollback하면, 의도적으로 비가역인 후속
+            # migration 때문에 Memory rollback과 무관하게 실패한다.
             _assert_legacy_execution_survives(engine, ids)
             with Session(engine) as db:
                 assert (
@@ -456,33 +444,6 @@ def test_memory_migration_uow_and_concurrent_start_turn_contracts():
                         required_schema=FOUNDATION_MEMORY_SCHEMA,
                     ).ready
                     is True
-                )
-
-            _run_alembic(
-                MEMORY_RUNTIME_REVISION,
-                operation="upgrade",
-                database=database,
-                config=config,
-            )
-            with Session(engine) as db:
-                schema_inspector = inspect(db.get_bind())
-                turn_columns = {
-                    str(column["name"])
-                    for column in schema_inspector.get_columns("conversation_turns")
-                }
-                entry_columns = {
-                    str(column["name"])
-                    for column in schema_inspector.get_columns(
-                        "conversation_memory_entries"
-                    )
-                }
-                assert {
-                    "request_fingerprint_key_version",
-                    "access_grant_id",
-                } <= turn_columns
-                assert "dependency_proof_version" in entry_columns
-                assert schema_inspector.has_table(
-                    "conversation_workflow_execution_admissions"
                 )
 
             binding_session_id = uuid.uuid4()
@@ -675,30 +636,6 @@ def test_memory_migration_uow_and_concurrent_start_turn_contracts():
                     == 0
                 )
 
-            _assert_alembic_fails(
-                MEMORY_MERGE_REVISION,
-                operation="downgrade",
-                database=database,
-                config=config,
-            )
-            with engine.begin() as connection:
-                connection.execute(
-                    text(
-                        "UPDATE conversation_memory_entries "
-                        "SET dependency_proof_version = NULL"
-                    )
-                )
-                connection.execute(
-                    text(
-                        "UPDATE conversation_turns "
-                        "SET request_fingerprint_key_version = NULL, "
-                        "access_grant_id = NULL"
-                    )
-                )
-                connection.execute(
-                    text("DELETE FROM conversation_workflow_execution_admissions")
-                )
-
             _run_alembic(
                 PARENT_REVISION,
                 operation="downgrade",
@@ -783,18 +720,7 @@ def test_memory_migration_uow_and_concurrent_start_turn_contracts():
                 config=config,
             )
             with Session(engine) as db:
-                readiness = check_memory_schema_readiness(db)
-                assert readiness.ready is False
-                assert {
-                    table_name: set(columns)
-                    for table_name, columns in readiness.missing_columns.items()
-                } == {
-                    **MEMORY_RUNTIME_COLUMNS,
-                    **{
-                        table_name: set(REQUIRED_MEMORY_SCHEMA[table_name])
-                        for table_name in MEMORY_RUNTIME_TABLES
-                    },
-                }
+                assert check_memory_schema_readiness(db).ready is True
                 repository = SqlAlchemyConversationMemoryRepository(db)
                 replacement_now = datetime.now(timezone.utc)
                 expired_now = replacement_now - timedelta(days=2)

@@ -141,9 +141,6 @@ from apps.shared.db.models.user_app_creation_permission import (
 )
 from apps.shared.db.models.workflow import Workflow
 from apps.shared.db.models.workflow_budget import WorkflowBudget
-from apps.shared.db.models.workflow_conversation_execution import (
-    ConversationWorkflowExecutionAdmissionRecord,
-)
 from apps.shared.db.models.workflow_deployment import WorkflowDeployment
 from apps.shared.db.models.workflow_node_effect_attempt import (
     WorkflowNodeEffectAttempt,
@@ -169,7 +166,6 @@ __all__ = [
     "AgentBuilderSession",
     "Connection",
     "ConversationSessionRecord",
-    "ConversationWorkflowExecutionAdmissionRecord",
     "ConversationAccessGrantRecord",
     "ConversationTurnRecord",
     "ConversationMemoryEntryRecord",

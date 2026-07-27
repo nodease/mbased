@@ -62,10 +62,10 @@ return {1, '0'}
 @dataclass(frozen=True, slots=True)
 class PublicConversationAdmissionPolicy:
     window_seconds: int = 60
-    deployment_rate_limit: int = 120
-    organization_rate_limit: int = 600
+    deployment_rate_limit: int = 60
+    organization_rate_limit: int = 240
     network_rate_limit: int = 60
-    grant_rate_limit: int = 20
+    grant_rate_limit: int = 30
     create_window_seconds: int = 600
     create_deployment_rate_limit: int = 200
     create_organization_rate_limit: int = 1_000

@@ -28,9 +28,6 @@ from apps.shared.db.models.conversation_memory import (
     MemorySummaryGenerationJobRecord,
     MemoryTurnDispatchJobRecord,
 )
-from apps.shared.db.models.workflow_conversation_execution import (
-    ConversationWorkflowExecutionAdmissionRecord,
-)
 
 ROOT = Path(__file__).resolve().parents[4]
 
@@ -492,7 +489,8 @@ def test_public_idempotency_result_snapshot_migration_is_additive_and_reversible
     ):
         assert f'sa.Column("{column}"' in source
         assert (
-            f'op.drop_column("conversation_idempotency_records", "{column}")' in source
+            f'op.drop_column("conversation_idempotency_records", "{column}")'
+            in source
         )
     assert "access_token" not in source
     assert "purge_receipt" not in source
@@ -500,9 +498,13 @@ def test_public_idempotency_result_snapshot_migration_is_additive_and_reversible
 
 def test_public_replay_authorization_scope_migration_is_additive_and_reversible():
     migrations = list(
-        (ROOT / "apps" / "shared" / "alembic" / "versions").glob(
-            "*_add_public_replay_authorization_scope.py"
-        )
+        (
+            ROOT
+            / "apps"
+            / "shared"
+            / "alembic"
+            / "versions"
+        ).glob("*_add_public_replay_authorization_scope.py")
     )
 
     assert len(migrations) == 1
@@ -568,25 +570,10 @@ def test_schema_readiness_requires_public_idempotency_result_snapshot_columns():
         "result_previous_lifecycle_revision",
     }
 
-    assert (
-        snapshot_columns <= REQUIRED_MEMORY_SCHEMA["conversation_idempotency_records"]
-    )
+    assert snapshot_columns <= REQUIRED_MEMORY_SCHEMA[
+        "conversation_idempotency_records"
+    ]
     assert snapshot_columns.isdisjoint(REQUIRED_MEMORY_SCHEMA["conversation_turns"])
-
-
-def test_schema_readiness_requires_runtime_admission_fence():
-    assert {
-        "id",
-        "organization_id",
-        "dispatch_id",
-        "session_id",
-        "turn_id",
-        "execution_id",
-        "state",
-        "version",
-        "lease_generation",
-        "lease_deadline",
-    } <= REQUIRED_MEMORY_SCHEMA["conversation_workflow_execution_admissions"]
 
 
 def test_schema_readiness_requires_stable_public_replay_scope_columns():
@@ -597,30 +584,11 @@ def test_schema_readiness_requires_stable_public_replay_scope_columns():
         "authorization_verifier_hash",
     } <= REQUIRED_MEMORY_SCHEMA["conversation_idempotency_records"]
 
-    schema = {name: set(columns) for name, columns in REQUIRED_MEMORY_SCHEMA.items()}
+    schema = {
+        name: set(columns) for name, columns in REQUIRED_MEMORY_SCHEMA.items()
+    }
     schema["conversation_purge_jobs"].remove("app_id")
     result = check_memory_schema_readiness_with_inspector(_Inspector(schema))
 
     assert result.ready is False
     assert result.missing_columns == {"conversation_purge_jobs": ["app_id"]}
-
-
-def test_workflow_admission_retention_is_bounded_without_blocking_deployment_delete():
-    table = ConversationWorkflowExecutionAdmissionRecord.__table__
-    state_fields = str(
-        _check_constraint(
-            ConversationWorkflowExecutionAdmissionRecord,
-            "ck_conv_workflow_admission_state_fields",
-        ).sqltext
-    )
-
-    assert "retention_expires_at" in table.c
-    assert table.c.deployment_id.foreign_keys == set()
-    assert "retention_expires_at > terminal_at" in state_fields
-    assert "retention_expires_at IS NULL" in state_fields
-    assert "ix_conv_workflow_admission_retention" in {
-        index.name for index in table.indexes
-    }
-    assert "retention_expires_at" in REQUIRED_MEMORY_SCHEMA[
-        "conversation_workflow_execution_admissions"
-    ]

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import re
-import uuid
 from datetime import datetime, timezone
 from typing import Annotated
 
@@ -12,10 +11,7 @@ from sqlalchemy.orm import Session
 
 from apps.gateway.api.deps import get_db, require_json_content_type
 from apps.gateway.composition.authentication import login_network_resolver
-from apps.gateway.composition.memory import (
-    build_public_conversation_application,
-    build_public_conversation_runtime_application,
-)
+from apps.gateway.composition.memory import build_public_conversation_application
 from apps.memory.application.public_lifecycle import (
     CreatePublicConversationCommand,
     LifecycleCommand,
@@ -23,12 +19,10 @@ from apps.memory.application.public_lifecycle import (
 )
 from apps.memory.domain.errors import (
     AccessGrantNotUsableError,
-    ActiveTurnConflictError,
     DuplicateRequestConflictError,
     MemoryAdapterUnavailableError,
     PublicConversationFeatureDisabledError,
     PublicConversationRateLimitedError,
-    PublicConversationTurnLimitExceededError,
     PurgeReceiptNotUsableError,
     SecretReplayExpiredError,
     SessionNotActiveError,
@@ -108,9 +102,7 @@ def _purge_receipt(authorization: str | None) -> str:
     return receipt
 
 
-def _set_public_headers(
-    response: Response, *, lifecycle_revision: int | None = None
-) -> None:
+def _set_public_headers(response: Response, *, lifecycle_revision: int | None = None) -> None:
     response.headers["Cache-Control"] = "no-store"
     response.headers["Referrer-Policy"] = "no-referrer"
     if lifecycle_revision is not None:
@@ -151,12 +143,6 @@ def _map_public_error(error: Exception) -> HTTPException:
             "The Idempotency-Key was already used for a different request.",
             status_code=status.HTTP_409_CONFLICT,
         )
-    if isinstance(error, ActiveTurnConflictError):
-        return _safe_error(
-            "memory.active_turn_conflict",
-            "A conversation turn is already in progress.",
-            status_code=status.HTTP_409_CONFLICT,
-        )
     if isinstance(error, StaleLifecycleRevisionError):
         return _safe_error(
             "memory.stale_lifecycle_revision",
@@ -172,12 +158,6 @@ def _map_public_error(error: Exception) -> HTTPException:
                 "Cache-Control": "no-store",
                 "Referrer-Policy": "no-referrer",
             },
-        )
-    if isinstance(error, PublicConversationTurnLimitExceededError):
-        return _safe_error(
-            error.code,
-            "The conversation completed-turn limit was reached.",
-            status_code=status.HTTP_409_CONFLICT,
         )
     if isinstance(error, PublicConversationFeatureDisabledError):
         return _safe_error(
@@ -198,17 +178,6 @@ def _application(db: Session):
     try:
         return build_public_conversation_application(db)
     except (RuntimeError, ValueError) as error:
-        raise _map_public_error(error) from None
-
-
-def _runtime_application(db: Session):
-    try:
-        return build_public_conversation_runtime_application(db)
-    except (
-        PublicConversationFeatureDisabledError,
-        RuntimeError,
-        ValueError,
-    ) as error:
         raise _map_public_error(error) from None
 
 
@@ -370,7 +339,6 @@ def get_public_transcript(
     url_slug: str,
     response: Response,
     authorization: Annotated[str | None, Header()] = None,
-    cursor: str | None = None,
     db: Session = Depends(get_db),
 ):
     application = _application(db)
@@ -378,7 +346,6 @@ def get_public_transcript(
         result = application.transcript.execute(
             url_slug=url_slug,
             access_token=_conversation_token(authorization),
-            cursor=cursor,
             now=_now(),
         )
     except Exception as error:
@@ -391,27 +358,8 @@ def get_public_transcript(
             "content_revision": result.content_revision,
             "expires_at": result.expires_at,
         },
-        "turns": [
-            {
-                "turn_id": str(turn.turn_id),
-                "sequence": turn.sequence,
-                "state": turn.state.value,
-                "user": (
-                    {"content": turn.user_content}
-                    if turn.user_content is not None
-                    else None
-                ),
-                "assistant": (
-                    {"content": turn.assistant_content}
-                    if turn.assistant_content is not None
-                    else None
-                ),
-                "created_at": turn.created_at,
-                "safe_failure_reason": turn.safe_failure_reason,
-            }
-            for turn in result.turns
-        ],
-        "next_cursor": result.next_cursor,
+        "turns": list(result.turns),
+        "next_cursor": None,
     }
 
 
@@ -419,32 +367,21 @@ def get_public_transcript(
 def get_public_turn_status(
     url_slug: str,
     turn_id: str,
-    response: Response,
     authorization: Annotated[str | None, Header()] = None,
     db: Session = Depends(get_db),
 ):
-    application = _runtime_application(db)
+    # MBA-317 deliberately does not publish a turn/dispatch/runtime path.  The
+    # grant is still validated so this remains a resource-hidden response.
+    application = _application(db)
     try:
-        result = application.turn_status.execute(
+        application.transcript.execute(
             url_slug=url_slug,
-            turn_id=uuid.UUID(turn_id),
             access_token=_conversation_token(authorization),
             now=_now(),
         )
-    except (AttributeError, ValueError):
-        raise _hidden_error() from None
     except Exception as error:
         raise _map_public_error(error) from None
-    _set_public_headers(response, lifecycle_revision=result.lifecycle_revision)
-    return {
-        "turn": {
-            "id": str(result.turn_id),
-            "sequence": result.turn_sequence,
-            "status": result.turn_state.value,
-            "display": result.display,
-            "failure_reason": result.safe_failure_reason,
-        }
-    }
+    raise _hidden_error()
 
 
 @router.get("/run-public/{url_slug}/conversation/purge-status")

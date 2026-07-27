@@ -39,8 +39,6 @@ class ProviderClientInvocationLease:
         self._invoked = False
         self._invalidated = False
         self._json_schema_applied = False
-        self._finalized = False
-        self._binding_revalidated = False
 
     @property
     def attribution(self) -> ProviderExecutionAttribution | None:
@@ -76,49 +74,9 @@ class ProviderClientInvocationLease:
                 self._invalidated = True
                 raise
             self._attribution = attribution
-            self._finalized = True
         self._parameters = final_parameters
         self._json_schema_applied = True
         return True
-
-    def finalize_request(self) -> ProviderExecutionAttribution | None:
-        """Freshly revalidate the sealed request before durable send intent."""
-
-        if self._invoked or self._invalidated or self._finalized:
-            raise ProviderExecutionConfigurationError()
-        if self._request_revalidator is not None:
-            try:
-                self._attribution = self._request_revalidator(
-                    messages=deepcopy(self._messages),
-                    parameters=deepcopy(self._parameters),
-                )
-            except Exception:
-                self._invalidated = True
-                raise
-        self._finalized = True
-        return self._attribution
-
-    def revalidate_current_binding(self) -> ProviderExecutionAttribution | None:
-        """Re-admit current capability state after durable usage intent."""
-
-        if (
-            self._invoked
-            or self._invalidated
-            or not self._finalized
-            or self._binding_revalidated
-        ):
-            raise ProviderExecutionConfigurationError()
-        if self._request_revalidator is not None:
-            try:
-                self._attribution = self._request_revalidator(
-                    messages=deepcopy(self._messages),
-                    parameters=deepcopy(self._parameters),
-                )
-            except Exception:
-                self._invalidated = True
-                raise
-        self._binding_revalidated = True
-        return self._attribution
 
     def invoke(self) -> Mapping[str, Any]:
         if self._invoked or self._invalidated:

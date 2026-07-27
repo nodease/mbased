@@ -39,9 +39,6 @@ from apps.shared.domain.deployment_runtime_policy import (
     is_deployment_type_allowed_for_surface,
     is_deployment_type_allowed_for_trigger,
 )
-from apps.shared.domain.conversation_memory_runtime import (
-    conversation_memory_runtime_requested,
-)
 from apps.shared.domain.external_effect_error import (
     safe_external_effect_error_payload,
 )
@@ -936,6 +933,7 @@ class DeploymentService:
         user_inputs: Dict[str, Any],
         trigger_mode: str,
         runtime_policy: DeploymentRuntimePolicy,
+        client_conversation_history: tuple[dict[str, str], ...] | None = None,
         auth_token: Optional[str] = None,
         require_auth: bool = True,  # 인증 필요 여부 (기본값: 필요)
     ) -> Dict[str, Any]:
@@ -1004,6 +1002,7 @@ class DeploymentService:
             trigger_mode=trigger_mode,
             actor_user_id=None,
             execution_subject_user_id=None,
+            client_conversation_history=client_conversation_history,
         )
 
     @staticmethod
@@ -1118,23 +1117,41 @@ class DeploymentService:
         actor_user_id: uuid.UUID | str | None,
         execution_subject_user_id: uuid.UUID | str | None,
         client_conversation_id: Optional[str] = None,
+        client_conversation_history: tuple[dict[str, str], ...] | None = None,
         separate_conversation_control: bool = False,
         request_id: Optional[str] = None,
         correlation_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        if conversation_memory_runtime_requested(
-            deployment.graph_snapshot,
-            deployment.config,
+        public_client_history_mode = client_conversation_history is not None
+        if public_client_history_mode and (
+            deployment.type is not DeploymentType.CHATBOT
+            or trigger_mode != "app"
+            or execution_subject_user_id is not None
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Client-held conversation history is only supported for "
+                    "public chatbot deployments"
+                ),
+            )
+        if (
+            deployment.type is DeploymentType.CHATBOT
+            and trigger_mode == "app"
+            and execution_subject_user_id is None
+            and not public_client_history_mode
         ):
             raise HTTPException(
                 status_code=422,
                 detail={
-                    "code": "memory.conversation_required",
+                    "code": "conversation.history_required",
                     "message": (
-                        "A conversation envelope is required for this deployment."
+                        "Public chatbot requests require a conversation "
+                        "history envelope."
                     ),
                 },
             )
+
         # 예산 초과 차단 — 아래 dispatch try 블록 밖이어야 429가
         # "Engine Execution failed" 500으로 감싸이지 않는다 (BGT-REQ-030~031).
         WorkflowBudgetService.ensure_workflow_budget_allows_execution(
@@ -1163,6 +1180,19 @@ class DeploymentService:
             # 로깅을 위한 컨텍스트 주입
             # memory_mode 추가 (챗봇 기억 모드 지원)
             dispatch_inputs = dict(user_inputs or {})
+            if public_client_history_mode and (
+                _LEGACY_MEMORY_MODE_INPUT in dispatch_inputs
+                or _LEGACY_CONVERSATION_INPUT in dispatch_inputs
+            ):
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "code": "conversation.legacy_control_forbidden",
+                        "message": (
+                            "Legacy public conversation controls are not supported."
+                        ),
+                    },
+                )
             declared_inputs = DeploymentService._declared_input_names(deployment)
             legacy_memory_is_business_input = (
                 separate_conversation_control
@@ -1185,7 +1215,7 @@ class DeploymentService:
 
             memory_mode_enabled = (
                 False
-                if legacy_memory_is_business_input
+                if public_client_history_mode or legacy_memory_is_business_input
                 else dispatch_inputs.pop(_LEGACY_MEMORY_MODE_INPUT, False)
             )
             if isinstance(memory_mode_enabled, str):
@@ -1193,7 +1223,9 @@ class DeploymentService:
 
             # 방문자별 대화 격리용 conversation_id (챗봇 멀티턴 기억).
             # memory_mode와 동일하게 dispatch 전에 pop하여 워크플로우 입력 오염을 막는다.
-            conversation_id = client_conversation_id
+            conversation_id = (
+                None if public_client_history_mode else client_conversation_id
+            )
             if conversation_id is None and not legacy_conversation_is_business_input:
                 conversation_id = dispatch_inputs.pop(
                     _LEGACY_CONVERSATION_INPUT,
@@ -1211,7 +1243,10 @@ class DeploymentService:
                     )
 
             # 챗봇 배포는 기억모드가 항상 켜져 있어야 한다 (클라이언트 값과 무관하게 서버가 강제).
-            if deployment.type in _CHATBOT_DEPLOYMENT_TYPES:
+            if (
+                deployment.type in _CHATBOT_DEPLOYMENT_TYPES
+                and not public_client_history_mode
+            ):
                 memory_mode_enabled = True
 
             execution_context = {
@@ -1227,6 +1262,11 @@ class DeploymentService:
                 "memory_mode": memory_mode_enabled,  # 기억 모드 추가
                 "conversation_id": conversation_id,  # 방문자별 대화 격리 키
             }
+            if public_client_history_mode:
+                execution_context["public_chat_history"] = [
+                    dict(message) for message in client_conversation_history
+                ]
+                execution_context["suppress_content_persistence"] = True
             if request_id:
                 execution_context["request_id"] = request_id
             if correlation_id:
@@ -1256,6 +1296,20 @@ class DeploymentService:
                 result = AsyncResult(task_id, app=celery_app)
                 start_time = time.time()
 
+                def forget_public_result() -> None:
+                    if not public_client_history_mode:
+                        return
+                    forget = getattr(result, "forget", None)
+                    if not callable(forget):
+                        return
+                    try:
+                        forget()
+                    except Exception as error:
+                        logger.warning(
+                            "Public workflow result cleanup failed: error_type=%s",
+                            type(error).__name__,
+                        )
+
                 while not result.ready():
                     elapsed = time.time() - start_time
                     if elapsed > timeout:
@@ -1265,8 +1319,12 @@ class DeploymentService:
                     await asyncio.sleep(0.5)  # 비동기 대기 (이벤트 루프 블로킹 방지)
 
                 if result.failed():
-                    raise result.result  # 예외 다시 발생
-                return result.result
+                    failure = result.result
+                    forget_public_result()
+                    raise failure
+                payload = result.result
+                forget_public_result()
+                return payload
 
             result = await wait_for_celery_result(task.id, timeout=600)
 

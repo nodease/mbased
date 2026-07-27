@@ -65,7 +65,7 @@ exec celery -A apps.workflow_engine.main worker \
     --pool=gevent \
     --concurrency=100 \
     --loglevel=info \
-    --queues=workflow,conversation-memory-v1 \
+    --queues=workflow \
     --max-tasks-per-child=1000
 
 

@@ -35,8 +35,6 @@ REQUIRED_MEMORY_SCHEMA: dict[str, frozenset[str]] = {
             "version",
             "request_idempotency_hash",
             "request_fingerprint",
-            "request_fingerprint_key_version",
-            "access_grant_id",
             "status",
         }
     ),
@@ -56,7 +54,6 @@ REQUIRED_MEMORY_SCHEMA: dict[str, frozenset[str]] = {
             "model_format_version",
             "model_content_digest",
             "model_plaintext_byte_length",
-            "dependency_proof_version",
         }
     ),
     "conversation_memory_summaries": frozenset(
@@ -106,21 +103,6 @@ REQUIRED_MEMORY_SCHEMA: dict[str, frozenset[str]] = {
     ),
     "memory_context_provider_attempts": frozenset(
         {"id", "lease_id", "status", "version", "provider_started_at"}
-    ),
-    "conversation_workflow_execution_admissions": frozenset(
-        {
-            "id",
-            "organization_id",
-            "dispatch_id",
-            "session_id",
-            "turn_id",
-            "execution_id",
-            "state",
-            "version",
-            "lease_generation",
-            "lease_deadline",
-            "retention_expires_at",
-        }
     ),
     "conversation_purge_jobs": frozenset(
         {
