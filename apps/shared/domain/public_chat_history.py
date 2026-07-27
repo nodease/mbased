@@ -43,6 +43,10 @@ def normalize_public_chat_history(
             or len(content) > MAX_PUBLIC_CHAT_MESSAGE_CHARS
         ):
             raise PublicChatHistoryError("conversation.content_invalid")
+        try:
+            content.encode("utf-8")
+        except UnicodeEncodeError:
+            raise PublicChatHistoryError("conversation.content_invalid") from None
         normalized.append({"role": role, "content": content})
 
     if len(normalized) % 2 != 0:
@@ -51,11 +55,14 @@ def normalize_public_chat_history(
         if message["role"] != _ALLOWED_ROLES[index % 2]:
             raise PublicChatHistoryError("conversation.history_order_invalid")
 
-    encoded = json.dumps(
-        normalized,
-        ensure_ascii=False,
-        separators=(",", ":"),
-    ).encode("utf-8")
+    try:
+        encoded = json.dumps(
+            normalized,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8")
+    except UnicodeEncodeError:
+        raise PublicChatHistoryError("conversation.content_invalid") from None
     if len(encoded) > MAX_PUBLIC_CHAT_ENVELOPE_BYTES:
         raise PublicChatHistoryError("conversation.history_too_large")
     return tuple(normalized)

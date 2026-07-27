@@ -1,20 +1,18 @@
 # Chatbot Deployment Test Cases
 
 Status: Draft
-Verified Against: `origin/dev @ 32fb602f`
 
 ## Unit Tests
 
-아래 기존 `memory_mode`/`conversation_id`/execution-log 테스트는 Legacy Current Implementation 회귀다. Target migration 테스트는 [Conversation Memory test cases](../conversation-memory/test_cases.md)를 따르며, migration 완료 전까지 두 suite를 상태 표기 없이 섞지 않는다.
+Public Chatbot은 bounded client-held history 계약을 검증한다. `memory_mode`/`conversation_id`/execution-log 테스트는 authenticated legacy compatibility에만 한정하고 Public current contract와 섞지 않는다. Durable internal target 테스트는 [Conversation Memory test cases](../conversation-memory/test_cases.md)를 따른다.
 
 ### Gateway — `apps/gateway/tests/services/test_chatbot_deployment_run.py`
 
-- 챗봇 배포는 클라이언트가 `memory_mode`를 안 보내도 `execution_context.memory_mode`를 True로 강제하고, `conversation_id`를 그대로 전달한다.
-- 챗봇 배포는 클라이언트가 `memory_mode: false`를 보내도 True로 덮어쓴다.
-- 비챗봇 배포(webapp 등)는 기억모드를 강제하지 않는다(기본 False)지만 `conversation_id`는 전달한다.
-- `conversation_id`가 없으면 `execution_context.conversation_id`는 None.
-- `conversation_id`/`memory_mode`는 dispatch되는 워크플로우 `inputs`에서 제거된다.
-- 공개 실행(`/run-public`)은 `execution_subject`를 주입하지 않고 workflow owner 권한으로 private RAG를 fallback하지 않는다.
+- 공개 Chatbot `/run-public/{slug}/chat`은 bounded `conversation.history`를 업무 inputs와 분리해 dispatch하고 `memory_mode=false`, `conversation_id=null`을 유지한다.
+- 공개 Chatbot은 history 누락, malformed envelope, 잘못된 role/order/extra field, 21 turn, oversized input과 isolated Unicode surrogate를 provider dispatch 전에 content-free `422 conversation.*`로 거부한다.
+- 공개 Chatbot은 legacy `inputs.memory_mode`/`inputs.conversation_id`를 거부하고 server-side execution-log memory를 다시 활성화하지 않는다.
+- 비-Chatbot 공개 root 실행(webapp/widget 등)은 client history를 전달하지 않고 기존 CORS/실행 계약을 유지한다.
+- 공개 실행은 `execution_subject`를 주입하지 않고 workflow owner 권한으로 private RAG를 fallback하지 않는다.
 - 인증 내부 실행(`/deployments/{deployment_id}/run`)은 `execution_context.execution_subject`에 로그인 사용자를 주입하고 예산 actor도 로그인 사용자로 기록한다.
 - `internal_chatbot` 인증 실행은 로그인 사용자를 `execution_subject`로 전달하고, 챗봇 `memory_mode`를 강제하며, top-level `conversation.client_id`를 deployment와 사용자 기준 `auth:v1` namespace로 처리한다.
 - 인증 내부 실행은 typed conversation control을 업무 `inputs`와 분리하고 선언된 `conversation_id`/`memory_mode` workflow 변수를 그대로 dispatch한다.
@@ -25,16 +23,17 @@ Verified Against: `origin/dev @ 32fb602f`
 - 실행 화면용 run-info는 `auth_secret`, `graph_snapshot`을 반환하지 않고 입력/출력 schema와 표시 metadata만 반환한다.
 - 엔진 실패 예외 문자열에 secret-like 값이 있어도 배포 실행 응답 detail에는 원문을 노출하지 않는다.
 
-### Workflow Engine — `apps/workflow_engine/tests/nodes/test_llm_memory_conversation_scope.py`
+### Workflow Engine — Public history and authenticated legacy compatibility
 
-- `conversation_id`가 있으면 `_build_memory_summary`의 `WorkflowRun` 조회 필터에 `conversation_id`가 포함되고 `user_id`는 제외된다.
-- `conversation_id`가 없으면 `user_id`가 포함되고 `conversation_id`는 제외된다.
-- `memory_mode`가 꺼져 있으면 `WorkflowRun` 조회 자체를 하지 않는다.
+- Public history는 system message 뒤, 현재 user prompt 앞에 untrusted block으로 삽입되고 legacy `WorkflowRun` memory 조회를 하지 않는다.
+- Gateway가 허용한 4,000자 초과 message도 generic structured-value cutoff로 잘리지 않으며 prompt-injection/secret-like 정제는 유지한다.
+- authenticated legacy `conversation_id`가 있으면 `_build_memory_summary`의 기존 격리 query를 유지하고, `memory_mode`가 꺼져 있으면 조회하지 않는다.
 
-### Log System — `apps/log_system/tests/test_create_run_log_conversation_id.py`
+### Workflow Logging
 
-- `create_run_log`가 `data.conversation_id`를 `WorkflowRun.conversation_id`로 저장한다.
-- `conversation_id`가 없으면 None으로 저장한다.
+- Public content suppression은 input/history/prompt/completion, credential ID와 nested routing input을 저장하지 않는다.
+- Public content suppression에서도 provider/model, token count, latency와 routing/fallback outcome 같은 allowlisted scalar metadata는 유지한다.
+- authenticated legacy compatibility의 `conversation_id` 저장 테스트는 Public contract와 분리한다.
 
 ### Client — deployment UI and authentication return
 
@@ -42,6 +41,7 @@ Verified Against: `origin/dev @ 32fb602f`
 - `useDeployment`의 공개 챗봇 결과는 `${origin}/embed/chat/{url_slug}`만 만들고, 내부 챗봇 결과는 `${origin}/modules/{workflow_id}/run?deploymentId={deployment_id}` 인증 링크만 만든다.
 - `SuccessStep`은 선택한 챗봇 유형에 맞는 공개 링크 또는 사내 인증 링크만 표시하고 두 보안 경계를 한 배포 결과에서 섞지 않는다. 내부 챗봇에는 public REST API endpoint/secret/test panel을 표시하지 않는다.
 - 공개 챗봇 공유 링크 설명은 private Knowledge 접근을 암시하지 않는다.
+- 공개 챗봇 페이지는 성공한 최신 20개 turn만 `/run-public/{slug}/chat`의 `conversation.history`로 보내고 conversation ID나 원문을 browser storage에 저장하지 않는다.
 - 내부 실행 페이지는 `internal_chatbot`을 실행할 때 업무 `inputs`와 별도의 non-empty canonical `conversation.client_id`를 전송하고 client-controlled `memory_mode`를 보내지 않는다.
 - 내부 챗봇 실행 페이지는 사용자 선택기 없이 대화 내용을 위에, 질문 입력창과 전송 버튼을 아래에 표시한다.
 - 내부 챗봇 실행 페이지 우상단은 현재 로그인 사용자 이름과 사용자 권한 적용 상태를 함께 표시한다. 사용자 정보 조회 실패 시 이름은 생략하되 실행 화면과 권한 상태 표시는 유지한다.
@@ -68,14 +68,14 @@ Verified Against: `origin/dev @ 32fb602f`
 - Preflight는 Knowledge passed/warning/blocked와 별개로 valid canonical `normalized_browser_access_policy`를 반환하고 malformed policy는 inactive preview에서도 422다.
 - Browser policy revision은 source graph/config/input/output/description을 보존하고 새 inactive version을 만들며 source/current draft/active pointer를 변경하지 않는다. Active revision은 기존 preflight와 single-active transaction을 사용한다.
 - Public browser policy projection은 active app ownership/type을 검증하고 safe field만 반환한다. Null/malformed/unknown policy는 disabled, inactive/wrong type/cross-app pointer는 safe 404다.
-- Public info/run response는 endpoint-level wildcard ACAO를 추가하지 않는다. No Origin과 unlisted/null Origin에 CORS grant가 없고 configured first-party origin만 global CORS 계약을 따른다.
+- Public Chatbot `/run-public/{slug}/chat`의 성공, OPTIONS, malformed JSON, wrong content type와 validation error는 configured Origin에도 CORS grant가 없고 no-store/no-referrer를 유지한다. 비-Chatbot 공용 root는 configured first-party global CORS 계약을 유지한다.
 
 ## E2E Tests
 
 - `startNode → llmNode → answerNode` 워크플로우를 "공개 챗봇 배포"로 배포하고 `${origin}/embed/chat/{slug}` 공유 링크 확인.
 - 챗봇 링크에서 2~3턴 대화 → N턴 응답이 N-1턴 맥락을 반영(기억 동작).
-- 다른 브라우저/시크릿(새 `conversation_id`)에서 열어 첫 대화 맥락이 새지 않음(방문자 격리).
-- 대화 중 새로고침 후에도 서버 기억으로 맥락 유지(같은 `conversation_id`).
+- 다른 브라우저/시크릿에서 열면 공유된 React state가 없어 첫 대화 맥락이 새지 않는다.
+- 대화 중 새로고침하면 과거 history가 자동 복구되지 않고 빈 대화로 시작한다.
 
 ## Permission Tests
 
@@ -101,14 +101,14 @@ Verified Against: `origin/dev @ 32fb602f`
 ## Target Runtime Boundary Tests
 
 - Public route에 valid login cookie가 있어도 execution principal은 anonymous public audience이며 private KB/Memory를 사용하지 않는다.
-- Public Access Grant로 authenticated internal route를 호출하거나 내부 Chatbot 이용 권한을 얻을 수 없다.
+- Public history payload로 authenticated internal route를 호출하거나 내부 Chatbot 이용 권한을 얻을 수 없다.
 - Authenticated internal Chatbot은 별도 access permission, current KB permission/source ACL, CSRF와 exact Origin을 모두 요구한다. Workflow `execute`만 있는 사용자는 허용되지 않는다.
 - Public/internal Chatbot은 시각 message/input component를 재사용하지만 API adapter, credential storage와 session namespace가 섞이지 않는다.
 - 별도 internal deployment/access mode가 없는 public Chatbot 성공 화면은 generic run link를 Target 내부 Chatbot으로 표시하지 않는다.
 - Public activation은 private KB 후보를 차단하고, future internal activation 결과가 public preflight audience를 완화하지 않는다.
-- Missing/null/unlisted Origin, wildcard, client audience/config와 environment fallback은 public browser session 생성 전에 거부된다.
+- Missing/null/unlisted Origin, wildcard, client audience/config와 environment fallback은 public iframe embedding bootstrap 전에 거부된다.
 - Session은 deployment version/snapshot과 mapping/Memory policy version에 고정되고 active deployment 교체 후 자동 rebind하지 않는다.
-- Public request/grant lifecycle audit actor는 `actor_id=null`, `actor_type='public'`, 비동기 purge completion은 `actor_type='system'`이며 app owner, credential/billing principal과 Access Grant reference가 actor로 기록되지 않는다.
+- Public request audit actor는 `actor_id=null`, `actor_type='public'`이며 app owner와 credential/billing principal이 actor로 기록되지 않는다. Public history 원문은 audit에 저장하지 않는다.
 
 ## Browser Embedding Security Tests
 
@@ -134,7 +134,7 @@ Verified Against: `origin/dev @ 32fb602f`
 
 ## Edge Cases
 
-- 시작 노드에 `conversation_id`/`memory_mode`와 동일 이름의 입력 변수가 있으면 해당 값이 pop되어 삼켜진다.
-- 공개 페이지의 `localStorage` 접근 불가 시 세션 한정 임시 `conversation_id`로 폴백한다. 내부 페이지는 원래부터 page-session UUID를 사용한다.
+- Public 요청에 legacy `conversation_id`/`memory_mode` control을 넣으면 업무 input으로 pop하지 않고 fixed `422`로 거부한다.
+- 공개 페이지는 localStorage/sessionStorage 사용 가능 여부와 무관하게 conversation ID 또는 history 원문을 저장하지 않는다. 내부 페이지의 page-session UUID는 별도 authenticated control이다.
 - 인증 workflow가 `conversation_id` 또는 `memory_mode`라는 입력 변수를 선언해도 typed control과 혼동하지 않고 업무 값이 보존된다.
 - 다른 organization을 active context로 선택한 사용자가 내부 링크를 열면 run-info는 `404`를 반환하며 클라이언트는 링크만으로 organization을 자동 전환하지 않는다.

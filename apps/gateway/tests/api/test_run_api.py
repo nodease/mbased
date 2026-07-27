@@ -1,5 +1,5 @@
 import pytest
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from apps.gateway.api.v1.endpoints import run as run_endpoint
@@ -121,7 +121,7 @@ def test_public_run_forwards_bounded_client_history_without_capability_token(
     )
 
     response = TestClient(app).post(
-        "/api/v1/run-public/public-chatbot",
+        "/api/v1/run-public/public-chatbot/chat",
         json={
             "inputs": {"question": "new question"},
             "conversation": {
@@ -176,7 +176,7 @@ def test_public_run_rejects_invalid_client_history_without_echoing_content(
     )
 
     response = TestClient(app).post(
-        "/run-public/public-chatbot",
+        "/run-public/public-chatbot/chat",
         json={
             "inputs": {"question": "current-secret-marker"},
             "conversation": {"history": history},
@@ -192,16 +192,13 @@ def test_public_run_rejects_invalid_client_history_without_echoing_content(
 def test_public_chatbot_missing_history_keeps_no_store_transport_boundary(
     monkeypatch,
 ):
-    async def reject_missing_history(**_kwargs):
-        raise HTTPException(
-            status_code=422,
-            detail={"code": "conversation.history_required"},
-        )
+    async def unexpected_run(**_kwargs):
+        pytest.fail("missing history must be rejected before deployment execution")
 
     monkeypatch.setattr(
         run_endpoint.DeploymentService,
         "run_deployment",
-        reject_missing_history,
+        unexpected_run,
     )
 
     app = FastAPI()
@@ -213,7 +210,7 @@ def test_public_chatbot_missing_history_keeps_no_store_transport_boundary(
     )
 
     response = TestClient(app).post(
-        "/api/v1/run-public/public-chatbot",
+        "/api/v1/run-public/public-chatbot/chat",
         json={"inputs": {"question": "private-current-question"}},
     )
 
@@ -223,3 +220,40 @@ def test_public_chatbot_missing_history_keeps_no_store_transport_boundary(
     assert response.headers["referrer-policy"] == "no-referrer"
     assert "access-control-allow-origin" not in response.headers
     assert "private-current-question" not in response.text
+
+
+def test_public_chatbot_rejects_isolated_unicode_surrogate_as_safe_422(
+    monkeypatch,
+):
+    async def unexpected_run(**_kwargs):
+        pytest.fail("invalid Unicode must be rejected before deployment execution")
+
+    monkeypatch.setattr(
+        run_endpoint.DeploymentService,
+        "run_deployment",
+        unexpected_run,
+    )
+
+    app = FastAPI()
+    app.add_middleware(PublicConversationCorsBoundaryMiddleware)
+    app.include_router(run_endpoint.router, prefix="/api/v1")
+    app.dependency_overrides[run_endpoint.get_db] = lambda: object()
+    app.dependency_overrides[run_endpoint.get_deployment_runtime_policy] = lambda: (
+        DEFAULT_DEPLOYMENT_RUNTIME_POLICY
+    )
+
+    response = TestClient(app).post(
+        "/api/v1/run-public/public-chatbot/chat",
+        content=(
+            '{"inputs":{"question":"now"},"conversation":{"history":['
+            '{"role":"user","content":"\\ud800"},'
+            '{"role":"assistant","content":"answer"}]}}'
+        ),
+        headers={"Content-Type": "application/json"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "conversation.content_invalid"
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["referrer-policy"] == "no-referrer"
+    assert "access-control-allow-origin" not in response.headers

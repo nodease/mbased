@@ -20,6 +20,30 @@ def test_normalize_public_chat_history_accepts_completed_user_assistant_turns():
     assert normalize_public_chat_history(history) == tuple(history)
 
 
+def test_normalize_public_chat_history_accepts_valid_non_bmp_unicode():
+    history = [
+        {"role": "user", "content": "emoji: \U0001f600"},
+        {"role": "assistant", "content": "accepted"},
+    ]
+
+    assert normalize_public_chat_history(history) == tuple(history)
+
+
+@pytest.mark.parametrize("invalid_scalar", [chr(0xD800), chr(0xDC00)])
+def test_normalize_public_chat_history_rejects_isolated_unicode_surrogates(
+    invalid_scalar,
+):
+    history = [
+        {"role": "user", "content": invalid_scalar},
+        {"role": "assistant", "content": "answer"},
+    ]
+
+    with pytest.raises(PublicChatHistoryError) as exc_info:
+        normalize_public_chat_history(history)
+
+    assert exc_info.value.code == "conversation.content_invalid"
+
+
 @pytest.mark.parametrize(
     ("history", "code"),
     [

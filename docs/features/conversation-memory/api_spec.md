@@ -4,7 +4,7 @@ Status: Implemented Public client-held history; authenticated durable Memory tar
 
 ## Contract Status
 
-Public Chatbot의 현재 계약은 [ADR-0074](../../decisions/ADR-0074-public-chatbot-client-held-history.md)의 client-held history 방식이다. 'POST /api/v1/run-public/{url_slug}' 외 Public Conversation lifecycle route는 등록하지 않는다. 서버 durable Session/Turn/Entry/Transcript API와 아래 internal application contract는 authenticated internal Chatbot 후속 target이다.
+Public Chatbot의 현재 계약은 [ADR-0074](../../decisions/ADR-0074-public-chatbot-client-held-history.md)의 client-held history 방식이다. `POST /api/v1/run-public/{url_slug}/chat` 외 Public Conversation lifecycle route는 등록하지 않는다. 서버 durable Session/Turn/Entry/Transcript API와 아래 internal application contract는 authenticated internal Chatbot 후속 target이다.
 
 현재 Public Client는 'inputs.memory_mode', 'inputs.conversation_id', Conversation bearer capability를 보내지 않는다.
 
@@ -19,7 +19,7 @@ Public Chatbot의 현재 계약은 [ADR-0074](../../decisions/ADR-0074-public-ch
 
 Public history는 인증·인가·resource provenance·credential·billing principal 또는 audit actor가 아니다. 로그인 cookie나 임의 Authorization header가 함께 와도 private Memory 또는 Knowledge 권한으로 승격하지 않는다. Public run은 Conversation bearer token, session cookie, browser-generated conversation ID와 lifecycle idempotency key를 사용하지 않는다.
 
-Public iframe document는 relative same-origin으로 `POST /api/v1/run-public/{url_slug}`를 호출한다. 응답과 validation error는 `Cache-Control: no-store`, `Referrer-Policy: no-referrer`이며 CORS grant를 제공하지 않는다. Client는 대화 원문을 React memory에만 두고 URL, localStorage, sessionStorage, audit, trace와 metric label에 남기지 않는다.
+Public iframe document는 relative same-origin으로 `POST /api/v1/run-public/{url_slug}/chat`을 호출한다. 응답과 endpoint 진입 전 validation error는 `Cache-Control: no-store`, `Referrer-Policy: no-referrer`이며 CORS grant를 제공하지 않는다. Client는 대화 원문을 React memory에만 두고 URL, localStorage, sessionStorage, audit, trace와 metric label에 남기지 않는다.
 
 Authenticated internal Chatbot은 Public route에 optional login을 붙이지 않고 별도 authentication/authorization, CSRF/Origin, storage namespace와 retention 계약으로 구현한다.
 
@@ -29,7 +29,7 @@ Authenticated internal Chatbot은 Public route에 optional login을 붙이지 �
 
 | Method | Path | 목적 | 상태 |
 | --- | --- | --- | --- |
-| POST | `/api/v1/run-public/{url_slug}` | 현재 inputs와 Client가 보낸 bounded history로 Public Chatbot 실행 | 구현 |
+| POST | `/api/v1/run-public/{url_slug}/chat` | 현재 inputs와 Client가 보낸 bounded history로 Public Chatbot 실행 | 구현 |
 
 다음 legacy target route는 등록하지 않으며 '404'다.
 

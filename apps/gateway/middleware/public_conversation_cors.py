@@ -86,6 +86,7 @@ def _is_public_conversation_path(path: str) -> bool:
     if not _slug or not separator:
         return False
     return suffix in {
+        "chat",
         "conversations",
         "conversations/",
         "conversation",

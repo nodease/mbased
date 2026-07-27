@@ -31,7 +31,7 @@ Public 방문자는 인증된 사용자나 조직 subject가 아니다. 서버�
 
 MBA-318 Public Chatbot은 Option C를 사용한다.
 
-1. Public Chatbot Client는 완료된 `user`/`assistant` turn을 `conversation.history`로 매 요청에 보낸다.
+1. Public Chatbot Client는 전용 `POST /api/v1/run-public/{url_slug}/chat` 경로로 완료된 `user`/`assistant` turn을 `conversation.history`에 담아 매 요청에 보낸다.
 2. 서버는 `system`, `developer`, `tool` role, extra field, 빈 content, 미완성·비교대 순서와 20 turn 초과를 거부한다.
 3. 서버는 현재 `inputs`와 history를 다시 계산하고 대화 context가 4,096 token을 넘으면 가장 오래된 완료 turn부터 제거한다. 현재 inputs만으로 상한을 넘으면 provider 호출 전에 거부한다.
 4. Client history는 신뢰할 수 없는 대화 맥락일 뿐이며 인증·인가·system policy·provenance의 근거가 될 수 없다.
@@ -39,9 +39,9 @@ MBA-318 Public Chatbot은 Option C를 사용한다.
 6. Public lifecycle API(create/close/reset/delete/transcript/purge-status)는 등록하지 않는다. 새 대화와 reset은 Client가 local history를 버리는 동작이다.
 7. 브라우저는 history를 React memory에만 유지한다. refresh·tab 종료 시 history는 사라지며 localStorage/sessionStorage에 자동 복구용 원문을 저장하지 않는다.
 8. Workflow/Celery transport는 요청 처리 중 history를 일시 전달할 수 있지만 task 표현을 redaction하고, Public Chatbot WorkflowRun·NodeRun·Trace payload에는 입력·history·prompt·completion 원문을 저장하지 않는다. Result backend 값은 소비 직후 제거하며 장애 시 기존 최대 1시간 TTL을 상한으로 한다.
-9. 인증된 조직 내부 Chatbot의 durable Conversation Memory는 별도 후속 이슈로 구현한다. 기존 durable 구현은 `backup/mba-318-durable-memory-e5ed60fa`에 보존한다.
+9. 인증된 조직 내부 Chatbot의 durable Conversation Memory는 별도 후속 이슈로 구현한다.
 
-이 결정은 ADR-0030과 ADR-0033의 Public Chatbot 영구 session/access-grant 선택을 대체한다. 해당 ADR의 durable Memory domain·인증형 내부 Chatbot 목표는 유지한다. MBA-318 최초 durable public runtime 설계는 백업 브랜치의 역사 기록으로만 보존하며 현재 Public 계약이 아니다.
+이 결정은 ADR-0030과 ADR-0033의 Public Chatbot 영구 session/access-grant 선택을 대체한다. 해당 ADR의 durable Memory domain·인증형 내부 Chatbot 목표는 유지한다.
 
 ## Rationale
 
@@ -49,12 +49,34 @@ MBA-318 Public Chatbot은 Option C를 사용한다.
 - Client가 history를 수정할 수 있다는 사실은 Public 사용자가 자신의 prompt를 수정할 수 있다는 범위 안에 머문다. 서버 권한·정책 판단에 history를 사용하지 않으면 authorization 우회로 이어지지 않는다.
 - 내부 Chatbot은 authenticated subject와 조직 governance가 있으므로 durable Memory의 비용을 정당화한다. Public과 내부 surface를 분리하면 이미 구현한 안전성 코드를 버리지 않으면서 현재 PR 범위를 줄일 수 있다.
 
+## Implementation Decision: Dedicated Public History Route
+
+### Context
+
+기존 `/api/v1/run-public/{url_slug}`는 Public Chatbot뿐 아니라 Web App과 Widget의 단일 실행에도 사용한다. 요청 body를 endpoint에서 읽은 뒤 Conversation 응답으로 표시하는 방식은 malformed JSON, schema validation error와 CORS preflight처럼 endpoint 진입 전에 끝나는 응답을 보호하지 못한다.
+
+### Options Considered
+
+- 공용 root 경로의 모든 응답에서 CORS를 제거: Web App과 Widget의 기존 브라우저 계약을 깨뜨리므로 선택하지 않는다.
+- middleware가 request body 또는 deployment type을 조회: body 재생과 DB 의존성이 transport middleware에 들어가 계층 경계와 실패 처리가 복잡해지므로 선택하지 않는다.
+- Public Chatbot history 요청을 전용 `/chat` suffix로 분리: outer middleware가 path만으로 OPTIONS, parser, validation, router failure를 모두 동일하게 보호할 수 있으므로 선택한다.
+
+### Decision And Rationale
+
+Public Chatbot의 client-held history는 `/api/v1/run-public/{url_slug}/chat`만 사용한다. `PublicConversationCorsBoundaryMiddleware`는 이 경로를 endpoint 실행 전부터 Conversation transport로 소유하고 모든 응답에서 CORS grant를 제거하며 `Cache-Control: no-store`, `Referrer-Policy: no-referrer`를 강제한다. 공용 root `/api/v1/run-public/{url_slug}`는 Web App과 Widget 호환성을 위해 기존 CORS 동작을 유지한다.
+
+### Follow-up Review Notes
+
+- OPTIONS, malformed JSON, 잘못된 content type, schema validation error가 모두 전용 경계에서 안전한 header를 반환하는지 회귀 테스트한다.
+- 공용 root의 비-Chatbot 브라우저 CORS 동작이 유지되는지 별도 회귀 테스트한다.
+
 ## Affected Files
 
 - `docs/PRD.md`, `docs/architecture.md`, `docs/data_model.md`
 - `docs/features/conversation-memory/*`
 - `apps/shared/domain/public_chat_history.py`
 - `apps/gateway/api/v1/endpoints/run.py`
+- `apps/gateway/middleware/public_conversation_cors.py`
 - `apps/gateway/services/deployment_service.py`
 - `apps/gateway/api/api.py`, `apps/gateway/main.py`
 - `apps/workflow_engine/workflow/nodes/llm/llm_node.py`
@@ -72,7 +94,7 @@ MBA-318 Public Chatbot은 Option C를 사용한다.
 
 ## Follow-up Review
 
-- 인증형 내부 Chatbot 후속 이슈에서 `backup/mba-318-durable-memory-e5ed60fa`의 aggregate, persistence, retention/purge, admission/lease/fencing과 테스트를 현재 `dev`에 맞게 선별 재적용한다.
+- 인증형 내부 Chatbot 후속 이슈에서 active durable Memory domain contract를 최신 `dev`와 이 ADR의 Public 경계에 맞게 선별 적용한다.
 - 내부 surface는 authenticated execution subject, organization RBAC, CSRF/Origin, retention/legal policy와 operator transcript authorization을 별도로 검토한다.
 - Public 대화의 refresh 복구 요구가 생기면 raw browser storage를 바로 추가하지 않고 Option B의 encrypted client-held state를 별도 ADR로 검토한다.
 - 운영 검증은 Public WorkflowRun/NodeRun/Trace payload에 원문이 남지 않는지와 Redis result TTL/소비 후 제거를 포함한다.

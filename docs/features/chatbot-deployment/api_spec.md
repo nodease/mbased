@@ -4,7 +4,7 @@ Status: Draft
 
 챗봇 배포는 기존 배포/공개 실행 엔드포인트의 계약을 확장한다. 현재 `internal_chatbot`은 인증 deployment run/run-info endpoint에서 active membership·workflow `execute` 확인과 로그인 사용자의 execution subject 전달을 적용한다. Target private-RAG 내부 Chatbot access grant와 session namespace는 이 current contract 위에 추가되는 후속 기능이며, 동일한 완성 상태로 간주하지 않는다.
 
-공개 route의 `inputs.memory_mode`, client `conversation_id`와 execution-log 조회는 Legacy Current Implementation이다. 인증 내부 route는 업무 `inputs`와 분리한 bounded `conversation.client_id`를 사용하지만 persistence/reader는 여전히 legacy execution-log 기반이다. 목표 session/grant/envelope/API 계약은 [Conversation Memory API spec](../conversation-memory/api_spec.md)을 따른다.
+공개 route는 업무 `inputs`와 분리한 bounded `conversation.history`를 매 요청에 전달하며 `memory_mode`, browser `conversation_id`, server-side transcript와 execution-log memory를 사용하지 않는다. 인증 내부 route는 별도의 bounded `conversation.client_id`를 사용하며 durable session/persistence 계약은 후속 범위다. 세부 계약은 [Conversation Memory API spec](../conversation-memory/api_spec.md)을 따른다.
 
 ## Endpoints
 
@@ -16,7 +16,7 @@ Status: Draft
 | POST | `/api/v1/deployments/{source_deployment_id}/browser-access-revisions` | source snapshot을 복제해 browser policy 새 version 생성 | 로그인 + workflow `deploy` 권한 |
 | GET | `/api/v1/deployments/public/{url_slug}/browser-access` | iframe CSP용 active policy safe projection | 없음, `Cache-Control: no-store` |
 | GET | `/api/v1/deployments/public/{url_slug}/info` | 공개 배포 정보(`type: "chatbot"` 포함) | 없음. Endpoint-level wildcard CORS 없음 |
-| POST | `/api/v1/run-public/{url_slug}` | 챗봇 공개 실행. `inputs.conversation_id`/`inputs.memory_mode` 수용 | 없음. Endpoint-level wildcard CORS 없음 |
+| POST | `/api/v1/run-public/{url_slug}/chat` | bounded client-held history로 챗봇 공개 실행 | 없음. 모든 응답에서 CORS grant 제거, no-store/no-referrer |
 
 ## Request And Response Models
 
@@ -30,7 +30,7 @@ Status: Draft
 
 ## Target Runtime Surface Separation
 
-- `public_chatbot`: Public Conversation Access Grant만 사용하고 login cookie가 있어도 anonymous public-only RAG로 평가한다.
+- `public_chatbot`: Conversation Access Grant나 server session 없이 client-held history만 사용하고 login cookie가 있어도 anonymous public-only RAG로 평가한다.
 - `authenticated_internal_chatbot`: 현재는 cookie authentication, configured credentialed JSON/CORS 경계, active membership, workflow `execute`, current user KB permission으로 실행한다. 현재 구현을 CSRF token/exact-Origin 완료로 표현하지 않는다. Target에서는 별도 내부 Chatbot 이용 권한, CSRF token, exact Origin과 독립 Conversation Session namespace를 추가한다.
 - 두 surface는 시각 Chatbot component만 재사용한다. Public route의 authentication/audience를 조건부 완화하거나 public grant를 execution subject로 승격하지 않는다.
 - Public iframe parent는 [ADR-0043](../../decisions/ADR-0043-deployment-browser-origin-and-embedding-boundary.md)의 deployment-owned versioned `browser_access_policy`와 CSP `frame-ancestors`가 소유한다. Iframe first-party API와 external direct JavaScript CORS는 별도 경계이며 client/environment fallback으로 parent를 허용하지 않는다.
@@ -100,24 +100,30 @@ Gateway는 active pointer, app ownership, active 상태와 `type in {chatbot, wi
 
 Next `/embed/chat/{slug}` response boundary는 projection을 최대 1초 안에 server-to-server로 조회하고 valid enabled policy만 exact `frame-ancestors`로 렌더링한다. 모든 failure는 `'none'`, response는 no-store다. 중첩 frame에서는 모든 ancestor가 목록에 있어야 한다.
 
-### POST /api/v1/run-public/{url_slug} (Legacy Chatbot Memory)
+### POST /api/v1/run-public/{url_slug}/chat (Public Client-held History)
 
 Request body:
 
 ```json
 {
   "inputs": {
-    "<first_input_variable>": "사용자 메시지",
-    "memory_mode": true,
-    "conversation_id": "3f1c… (UUIDv4)"
+    "<first_input_variable>": "현재 사용자 메시지"
+  },
+  "conversation": {
+    "history": [
+      {"role": "user", "content": "이전 질문"},
+      {"role": "assistant", "content": "이전 답변"}
+    ]
   }
 }
 ```
 
-- `memory_mode`, `conversation_id`는 `inputs` 내부 키로 전달된다.
-- 서버(`DeploymentService.run_deployment`)는 dispatch 전에 두 값을 `inputs`에서 pop한다. 따라서 워크플로우 노드에는 전달되지 않는다.
-- 공개 endpoint의 `deployment.type`이 `chatbot`이면 서버가 `memory_mode`를 **항상 True로 강제**한다(클라이언트 값 무시).
-- `conversation_id`는 `execution_context.conversation_id`로 전달되어 (1) 기억 조회 격리 키로 쓰이고 (2) `workflow_runs.conversation_id`에 저장된다.
+- 첫 요청은 `history: []`를 보낸다.
+- history item은 정확히 `role`, `content`만 가지며 완료된 `user` → `assistant` pair 순서여야 한다.
+- Gateway는 최대 20 turn, message당 32,768자, UTF-8, envelope 131,072 bytes와 현재 inputs를 포함한 4,096-token 상한을 provider 전에 검증한다. 상한 초과 시 가장 오래된 완료 turn부터 제거한다.
+- history는 untrusted context로만 사용하고 authorization, system policy와 resource provenance의 근거로 사용하지 않는다.
+- `inputs.memory_mode`, `inputs.conversation_id`와 server-side Public Conversation Session은 허용하지 않는다.
+- 전용 `/chat` 경로의 성공, validation/router failure와 OPTIONS는 모두 CORS grant 없이 `Cache-Control: no-store`, `Referrer-Policy: no-referrer`를 반환한다. 공용 `/run-public/{url_slug}` root의 Web App/Widget CORS 계약은 변경하지 않는다.
 
 Response: 기존 공개 실행과 동일. `{"status": "success", "results": { ... }}`.
 
@@ -164,27 +170,27 @@ Request body:
 - 서버는 `execution_context.execution_subject = {"type": "user", "id": current_user.id}`를 주입한다.
 - LLM node RAG는 이 `execution_subject` 기준으로 Knowledge `use` 권한과 source ACL gate를 다시 평가한다.
 - `conversation.client_id`는 UUID이며 extra field를 허용하지 않는다. Chatbot이 아닌 deployment에 전달하면 `400`으로 거부한다.
-- `deployment.type`이 `chatbot` 또는 `internal_chatbot`이면 서버가 `memory_mode`를 항상 True로 강제하므로 신규 내부 Client는 `memory_mode`를 업무 `inputs`에 보내지 않는다.
+- 현재 `internal_chatbot` 호환 경로는 서버가 internal memory mode를 강제하므로 신규 내부 Client는 `memory_mode`를 업무 `inputs`에 보내지 않는다. 이 호환 동작은 Public `/chat` 경로에 적용하지 않는다.
 - 인증 내부 실행에서 서버는 `deployment_id + execution_subject + client_id`를 domain-separated versioned digest로 바꿔 사용자·배포 간 memory context가 섞이지 않게 한다. raw `client_id`는 dispatch context, 응답, audit와 log에 기록하지 않는다.
 - `inputs`에 workflow schema가 선언한 `conversation_id` 또는 `memory_mode`가 있으면 업무 입력으로 보존한다. typed control과 선언되지 않은 legacy `inputs.conversation_id`를 동시에 보내는 모호한 요청은 `400`으로 거부한다.
-- 기존 인증 caller의 legacy reserved input은 schema collision이 없는 범위에서만 임시 호환하며 string, 최대 255자, control character 금지 조건을 적용한다. 공개 실행은 기존 visitor conversation id 계약을 유지한다.
+- 기존 인증 caller의 legacy reserved input은 schema collision이 없는 범위에서만 임시 호환하며 string, 최대 255자, control character 금지 조건을 적용한다. Public 실행에는 이 호환 계약을 적용하지 않는다.
 - 요청 `Content-Type`의 media type은 정확히 `application/json`이어야 한다(`charset` parameter 허용). 누락, `text/plain`, `application/x-www-form-urlencoded`, `multipart/form-data`는 body/schema 처리나 workflow dispatch 전에 `415`로 거부한다.
 - Browser credentialed JSON 호출은 configured `CORS_ORIGINS`의 명시적 HTTP(S) origin만 preflight를 통과한다. Wildcard credentialed origin은 Gateway 구성 시 거부한다. 이 현행 경계를 별도 CSRF token/exact-Origin 구현 완료로 표현하지 않는다.
 
 Response: `{"status": "success", "results": { ... }}`.
 
-## Legacy Current Implementation Persistence
+## Authenticated Legacy Compatibility Persistence
 
-- `workflow_runs.conversation_id` (`VARCHAR(255)`, nullable, indexed): Legacy 방문자별 대화 격리 키. `correlation_id`와 동일한 경로(`workflow_logger.create_run_log` data dict → `log_system.create_run_log`)로 저장되며 Target Conversation Session source of truth가 아니다.
+- `workflow_runs.conversation_id` (`VARCHAR(255)`, nullable, indexed)는 기존 authenticated compatibility 경로에만 남아 있으며 durable Conversation Session의 source of truth가 아니다. Public `/chat` 요청은 이 필드를 채우지 않는다.
 
 ## Memory Scoping
 
-- `_build_memory_summary`(`apps/workflow_engine/.../llm_node.py`)는 `execution_context.conversation_id`가 있으면 `WorkflowRun`을 `workflow_id + conversation_id + status=SUCCESS`로 조회하고 `user_id` 필터를 사용하지 않는다. 없으면 기존 `workflow_id + user_id` 스코프를 유지한다.
-- 위 규칙은 legacy 전용이다. Target은 server-issued grant 또는 authenticated session scope, dedicated Memory store, node별 policy와 current source authorization을 사용한다.
+- Public `/chat`은 client history를 현재 provider prompt 앞의 untrusted block으로 전달하고 `_build_memory_summary`의 DB 조회를 사용하지 않는다.
+- authenticated legacy 경로의 `_build_memory_summary`는 기존 호환 범위에만 남는다. Durable internal target은 authenticated session scope, dedicated Memory store, node별 policy와 current source authorization을 사용한다.
 
 ## Errors
 
-- 공개 실행과 current generic 인증 실행 모두 404 배포 없음/비활성, 429 예산 초과, 504 타임아웃, 500 엔진 실패를 반환할 수 있다. 엔진 실패 응답 detail은 provider 오류, credential, raw payload를 노출하지 않는 고정된 safe message여야 한다. Generic 인증 실행은 추가로 400 invalid/non-object input, invalid/conflicting conversation control, non-Chatbot conversation control, 401/403 인증·권한 오류와 415 non-JSON media type을 반환할 수 있다. Client는 문서화되지 않은 임의 `detail` string을 그대로 표시하지 않는다. Target authenticated internal Chatbot의 별도 permission/error contract는 해당 기능 구현 문서에서 확정한다.
+- 공개 실행과 current generic 인증 실행 모두 404 배포 없음/비활성, 429 예산 초과, 504 타임아웃, 500 엔진 실패를 반환할 수 있다. Public `/chat`은 missing/malformed/oversized/invalid-Unicode history와 legacy control을 content-free `422 conversation.*`로 거부한다. 엔진 실패 응답 detail은 provider 오류, credential, raw payload를 노출하지 않는 고정된 safe message여야 한다. Generic 인증 실행은 추가로 400 invalid/non-object input, invalid/conflicting conversation control, non-Chatbot conversation control, 401/403 인증·권한 오류와 415 non-JSON media type을 반환할 수 있다. Client는 문서화되지 않은 임의 `detail` string을 그대로 표시하지 않는다. Target authenticated internal Chatbot의 별도 permission/error contract는 해당 기능 구현 문서에서 확정한다.
 
 ## Citation Response Projection
 

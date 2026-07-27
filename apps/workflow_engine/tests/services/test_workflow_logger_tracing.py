@@ -47,7 +47,19 @@ def test_public_client_history_mode_persists_only_content_free_run_and_node_logs
         node_type="llmNode",
         inputs={"history": "private-history"},
         process_data={"prompt": "private-prompt"},
-        trace_metadata={"llm": {"prompt": "private-prompt"}},
+        trace_metadata={
+            "llm": {
+                "prompt": "private-prompt",
+                "credential_id": "private-credential-id",
+                "provider": "openai",
+                "selected_model": "gpt-4o-mini",
+                "fallback_used": True,
+                "prompt_tokens": 12,
+                "completion_tokens": 7,
+                "latency_ms": 31,
+                "decision_factors": {"private": "routing-input"},
+            }
+        },
     )
 
     assert run_id is not None
@@ -58,6 +70,8 @@ def test_public_client_history_mode_persists_only_content_free_run_and_node_logs
         "private-history",
         "private-prompt",
         "private-node-answer",
+        "private-credential-id",
+        "routing-input",
     ):
         assert marker not in serialized
 
@@ -78,6 +92,16 @@ def test_public_client_history_mode_persists_only_content_free_run_and_node_logs
     assert finish_node["inputs"] == {}
     assert finish_node["outputs"] == {}
     assert finish_node["process_data"] == {}
+    assert finish_node["trace_metadata"] == {
+        "llm": {
+            "provider": "openai",
+            "prompt_tokens": 12,
+            "completion_tokens": 7,
+            "latency_ms": 31,
+            "selected_model": "gpt-4o-mini",
+            "fallback_used": True,
+        }
+    }
 
 
 @pytest.mark.parametrize("failure_stage", ["serialize", "publish"])

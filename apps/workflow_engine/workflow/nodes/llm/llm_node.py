@@ -63,6 +63,7 @@ from apps.shared.services.tracing.metadata import TraceMetadataSanitizer
 from apps.shared.utils.prompt_injection_guard import (
     PLATFORM_UNTRUSTED_CONTEXT_GUARDRAIL_PROMPT,
     build_untrusted_context_block,
+    sanitize_untrusted_text,
     stringify_untrusted_value,
 )
 from apps.workflow_engine.adapters.knowledge_runtime_citations import (
@@ -2249,9 +2250,17 @@ class LLMNode(Node[LLMNodeData]):
         except PublicChatHistoryError as error:
             raise NonRetryableWorkflowError(error.code) from None
 
-        history_text = stringify_untrusted_value(
-            list(normalized),
-            key_path="public_chat_history",
+        sanitized_history = [
+            {
+                "role": message["role"],
+                "content": sanitize_untrusted_text(message["content"])[0],
+            }
+            for message in normalized
+        ]
+        history_text = json.dumps(
+            sanitized_history,
+            ensure_ascii=False,
+            separators=(",", ":"),
         )
         history_block = build_untrusted_context_block(
             history_text,

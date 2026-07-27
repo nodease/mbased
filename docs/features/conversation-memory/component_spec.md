@@ -8,7 +8,7 @@ Public Chatbot은 별도 Memory aggregate를 생성하지 않는 client-held his
 
 ```text
 Embed Chat React memory
-  -> POST /run-public/{slug} { inputs, conversation.history }
+  -> POST /run-public/{slug}/chat { inputs, conversation.history }
   -> Gateway shape/turn/token validation
   -> Workflow task (redacted args representation)
   -> LLMNode untrusted user/assistant messages

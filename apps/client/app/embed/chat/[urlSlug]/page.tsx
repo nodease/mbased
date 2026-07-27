@@ -10,7 +10,10 @@ import {
   getDeploymentRunFinalPreview,
   type WorkflowCitation,
 } from '@/app/features/workflow/utils/deploymentRunResult';
-import { buildPublicConversationHistory } from '../publicConversationHistory';
+import {
+  buildPublicConversationHistory,
+  buildPublicConversationRunPath,
+} from '../publicConversationHistory';
 import './embed-reset.css';
 
 interface DeploymentInfo {
@@ -125,7 +128,7 @@ export default function EmbedChatPage() {
         ) ?? {};
 
       // 실제 API 호출
-      const response = await fetch(`/api/v1/run-public/${urlSlug}`, {
+      const response = await fetch(buildPublicConversationRunPath(urlSlug), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

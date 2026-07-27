@@ -1,4 +1,4 @@
-from typing import Annotated
+from typing import Annotated, NoReturn
 
 from fastapi import (
     APIRouter,
@@ -7,7 +7,6 @@ from fastapi import (
     Header,
     HTTPException,
     Request,
-    Response,
     status,
 )
 from sqlalchemy.orm import Session
@@ -71,7 +70,6 @@ async def run_workflow_public(
         Depends(get_deployment_runtime_policy),
     ],
     request_body: dict = Body(...),
-    response: Response = None,
     db: Session = Depends(get_db),
 ):
     """
@@ -80,32 +78,13 @@ async def run_workflow_public(
 
     """
     user_inputs = request_body.get("inputs", {})
-    client_conversation_history = None
-    if "conversation" in request_body:
-        mark_public_conversation_transport_boundary(request.scope)
-        conversation = request_body.get("conversation")
-        try:
-            if not isinstance(conversation, dict) or set(conversation) != {"history"}:
-                raise PublicChatHistoryError("conversation.envelope_invalid")
-            client_conversation_history = bound_public_chat_history(
-                conversation["history"],
-                current_inputs=user_inputs,
-            )
-        except PublicChatHistoryError as error:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-                detail={
-                    "code": error.code,
-                    "message": "The public conversation history is invalid.",
-                },
-            ) from None
     # 웹 앱/임베딩: 공개 접근 (인증 불필요)
     try:
         return await DeploymentService.run_deployment(
             db=db,
             url_slug=url_slug,
             user_inputs=user_inputs,
-            client_conversation_history=client_conversation_history,
+            client_conversation_history=None,
             auth_token=None,
             require_auth=False,  # 인증 불필요
             trigger_mode="app",  # 웹 앱/임베딩 호출
@@ -119,3 +98,51 @@ async def run_workflow_public(
         ):
             mark_public_conversation_transport_boundary(request.scope)
         raise
+
+
+@router.post("/run-public/{url_slug}/chat")
+async def run_public_chatbot(
+    url_slug: str,
+    runtime_policy: Annotated[
+        DeploymentRuntimePolicy,
+        Depends(get_deployment_runtime_policy),
+    ],
+    request_body: dict = Body(...),
+    db: Session = Depends(get_db),
+):
+    """Run a public Chatbot with bounded client-held conversation history."""
+    user_inputs = request_body.get("inputs", {})
+    if "conversation" not in request_body:
+        _raise_public_chat_history_error("conversation.history_required")
+
+    conversation = request_body.get("conversation")
+    try:
+        if not isinstance(conversation, dict) or set(conversation) != {"history"}:
+            raise PublicChatHistoryError("conversation.envelope_invalid")
+        client_conversation_history = bound_public_chat_history(
+            conversation["history"],
+            current_inputs=user_inputs,
+        )
+    except PublicChatHistoryError as error:
+        _raise_public_chat_history_error(error.code)
+
+    return await DeploymentService.run_deployment(
+        db=db,
+        url_slug=url_slug,
+        user_inputs=user_inputs,
+        client_conversation_history=client_conversation_history,
+        auth_token=None,
+        require_auth=False,
+        trigger_mode="app",
+        runtime_policy=runtime_policy,
+    )
+
+
+def _raise_public_chat_history_error(code: str) -> NoReturn:
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        detail={
+            "code": code,
+            "message": "The public conversation history is invalid.",
+        },
+    ) from None

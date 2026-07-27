@@ -1,5 +1,8 @@
 export const MAX_PUBLIC_CHAT_TURNS = 20;
 
+export const buildPublicConversationRunPath = (urlSlug: string): string =>
+  `/api/v1/run-public/${encodeURIComponent(urlSlug)}/chat`;
+
 export interface PublicConversationHistoryMessage {
   role: 'user' | 'assistant';
   content: string;

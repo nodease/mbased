@@ -1,6 +1,17 @@
 import { describe, expect, it } from 'vitest';
 
-import { buildPublicConversationHistory } from './publicConversationHistory';
+import {
+  buildPublicConversationHistory,
+  buildPublicConversationRunPath,
+} from './publicConversationHistory';
+
+describe('buildPublicConversationRunPath', () => {
+  it('uses the dedicated public chat transport path and encodes the slug', () => {
+    expect(buildPublicConversationRunPath('team/chat bot')).toBe(
+      '/api/v1/run-public/team%2Fchat%20bot/chat',
+    );
+  });
+});
 
 describe('buildPublicConversationHistory', () => {
   it('sends only completed user/assistant turns', () => {

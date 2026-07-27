@@ -175,7 +175,7 @@ External parent
 
 Loaded Nodease iframe document
   -> relative /api/v1/deployments/public/{slug}/info
-  -> relative /api/v1/run-public/{slug}
+  -> relative /api/v1/run-public/{slug}/chat
   -> Next rewrite -> Gateway
 ```
 

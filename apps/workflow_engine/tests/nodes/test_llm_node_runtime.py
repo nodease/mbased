@@ -732,6 +732,42 @@ def test_llm_node_inserts_client_history_before_current_user_prompt():
     assert not any(message["role"] == "assistant" for message in messages[1:-1])
 
 
+def test_llm_node_preserves_allowed_long_client_history_without_generic_truncation():
+    dummy_client = DummyClient()
+    long_history = "history-" + ("x" * 5_000)
+    node = LLMNode(
+        "llm-long-client-history",
+        LLMNodeData(
+            title="LLM",
+            provider="openai",
+            model_id="gpt-4o",
+            user_prompt="current question",
+            parameters={},
+        ),
+        execution_context={
+            "public_chat_history": [
+                {"role": "user", "content": long_history},
+                {"role": "assistant", "content": "old answer"},
+            ],
+            "memory_mode": False,
+        },
+    )
+    node._client_override = dummy_client  # noqa: SLF001 - test seam
+    node._borrow_db_session = lambda: pytest.fail(  # noqa: SLF001
+        "client-held history must not query legacy server memory"
+    )
+
+    node.execute({})
+
+    history_block = dummy_client.calls[0]["messages"][1]["content"]
+    assert long_history in history_block
+    assert "[TRUNCATED]" not in history_block
+    assert not any(
+        message["role"] == "assistant"
+        for message in dummy_client.calls[0]["messages"][1:-1]
+    )
+
+
 def test_llm_node_passes_rendered_prompt_and_request_to_judge_first_router(
     monkeypatch,
 ):

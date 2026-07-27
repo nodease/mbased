@@ -338,7 +338,7 @@ Status: Draft
 - MEM-TC-MIG-002: 새 Gateway는 envelope 없는 Public Chatbot을 fail-closed해 legacy server memory로 fallback하지 않는다.
 - MEM-TC-MIG-003: WEBAPP/WIDGET와 authenticated internal legacy run은 영향받지 않는다.
 - MEM-TC-MIG-004: Public lifecycle router 제거 후 기존 dormant table/data는 migration에서 파괴하지 않는다.
-- MEM-TC-MIG-005: durable 구현은 backup branch에 보존되고 current PR tree에는 runtime 연결이 없다.
+- MEM-TC-MIG-005: Public current tree에는 durable Memory runtime 연결이 없고 authenticated internal surface에서만 후속 활성화한다.
 
 ## Performance And Reliability Tests
 

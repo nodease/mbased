@@ -24,6 +24,7 @@ def test_public_conversation_lifecycle_routes_are_not_registered():
     paths = _registered_paths()
 
     assert "/run-public/{url_slug}" in paths
+    assert "/run-public/{url_slug}/chat" in paths
     assert "/run-public/{url_slug}/conversations" not in paths
     assert "/run-public/{url_slug}/conversation/close" not in paths
     assert "/run-public/{url_slug}/conversation/reset" not in paths

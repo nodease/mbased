@@ -39,6 +39,64 @@ from apps.workflow_engine.workflow.errors import NonRetryableWorkflowError
 
 logger = logging.getLogger(__name__)
 
+_PUBLIC_CONTENT_FREE_LLM_METADATA_FIELDS = frozenset(
+    {
+        "provider",
+        "model",
+        "prompt_tokens",
+        "completion_tokens",
+        "total_tokens",
+        "total_cost",
+        "latency_ms",
+        "retry_count",
+        "policy_id",
+        "policy_version",
+        "selected_model",
+        "fallback_model",
+        "fallback_from_model",
+        "fallback_reason_code",
+        "fallback_provider_error_code",
+        "fallback_provider_error_type",
+        "fallback_provider_status_code",
+        "fallback_provider_response_status",
+        "fallback_used",
+        "decision_source",
+        "matched_rule_id",
+        "strategy_id",
+        "reason_code",
+        "judge_called",
+        "finish_reason",
+        "schema_status",
+        "repetition_rate",
+        "customer_facing",
+        "knowledge_enabled",
+        "output_format",
+        "schema_required",
+        "has_file_input",
+        "input_length_bucket",
+        "prompt_length_bucket",
+        "node_task",
+    }
+)
+
+
+def _public_content_free_trace_metadata(
+    node_type: Optional[str],
+    metadata: Dict[str, Any],
+) -> Dict[str, Any]:
+    if node_type != "llmNode":
+        return {}
+    llm_metadata = metadata.get("llm")
+    if not isinstance(llm_metadata, dict):
+        return {}
+    safe_llm_metadata = {
+        key: value
+        for key, value in llm_metadata.items()
+        if key in _PUBLIC_CONTENT_FREE_LLM_METADATA_FIELDS
+        and isinstance(value, (bool, int, float, str))
+    }
+    return {"llm": safe_llm_metadata} if safe_llm_metadata else {}
+
 
 class WorkflowLogger:
     """
@@ -478,7 +536,6 @@ class WorkflowLogger:
 
         if self._content_persistence_suppressed:
             process_data = {}
-            trace_metadata = {}
             trace_payloads = []
         provider_summary = durable_provider_summary(
             node_type=node_type,
@@ -559,6 +616,11 @@ class WorkflowLogger:
         sanitized_metadata = TraceMetadataSanitizer.sanitize_span_metadata(
             node_type, enriched_metadata
         )
+        if self._content_persistence_suppressed:
+            sanitized_metadata = _public_content_free_trace_metadata(
+                node_type,
+                sanitized_metadata,
+            )
         if metadata_only:
             sanitized_metadata["external_effect_output"] = {"sensitive": True}
 
@@ -608,7 +670,6 @@ class WorkflowLogger:
 
         if self._content_persistence_suppressed:
             process_data = {}
-            trace_metadata = {}
         sensitive_output = uses_metadata_only_provider_capture(
             node_type,
             process_data,
@@ -638,6 +699,11 @@ class WorkflowLogger:
         sanitized_metadata = TraceMetadataSanitizer.sanitize_span_metadata(
             node_type, trace_metadata or {}
         )
+        if self._content_persistence_suppressed:
+            sanitized_metadata = _public_content_free_trace_metadata(
+                node_type,
+                sanitized_metadata,
+            )
         if sensitive_output:
             sanitized_metadata["external_effect_output"] = {"sensitive": True}
 
