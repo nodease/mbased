@@ -181,3 +181,44 @@ LLMNode는 Gateway가 검증·bound한 history의 각 content를 정확히 한 �
 - strict 전환 전 active legacy Chatbot 배포를 새 versioned consumer config로 재배포한다.
 - Redis TTL 삭제 시점만 신뢰하지 않는다. 보안 불변조건은 opaque reference의 일회 소비와 Worker absolute deadline 재검증이다.
 - multi-LLM, nested loop location, tokenizer failure, zero-write invalid request, public audit actor, forged broker mapping과 stalled queue를 회귀 테스트한다.
+
+## Implementation Decision: One-time history completion boundaries
+
+### Context
+
+일회성 Redis history를 Worker 진입 즉시 소비하면 canonical deployment 검증이나 preflight 뒤 발생한 일반 오류를 Celery가 재시도할 때 원문을 다시 얻을 수 없다. 반대로 dequeue 시각에만 absolute deadline을 확인하면 대기·검증 시간이 지난 뒤 provider를 호출할 수 있다. 또한 Client의 top-level node 목록과 표시 문자열 기반 history 판정은 nested Loop consumer와 실패 fallback을 정확히 구분하지 못하며, parent context 전체 복사는 같은 ID의 subworkflow LLM에 history를 전달할 수 있다.
+
+### Options Considered
+
+- Redis history를 실행 시작 즉시 소비하고 모든 오류를 재시도: retry task가 이미 삭제된 reference를 읽으므로 선택하지 않는다.
+- Redis lease/ack와 replayable provider idempotency를 이번 범위에 추가: durable protocol과 운영 상태가 커지므로 Public client-held history의 최소 범위에는 선택하지 않는다.
+- 검증을 먼저 끝내고 외부 I/O 직전에 한 번 소비하며, 소비 뒤 오류는 재시도하지 않고 Client 재전송으로 복구: 일회성·무저장 계약을 유지하므로 선택한다.
+- subworkflow에 consumer location을 다시 결박해 history를 위임: child deployment가 독립적으로 선택되지 않았으므로 선택하지 않는다.
+
+### Final Decision
+
+1. Public absolute deadline은 Celery hard limit과 합성해 더 이른 시각을 runtime monotonic deadline으로 사용하고 Knowledge/provider 외부 I/O 직전에 다시 검사한다.
+2. Worker는 canonical deployment, snapshot, runtime configuration과 Knowledge sync를 마친 뒤 history reference를 atomic consume한다. 소비 전 오류는 기존 retry 정책을 사용할 수 있지만 소비 뒤 오류는 Celery retry를 예약하지 않고 내부 `conversation.history_replay_required`로 종료한다. Client가 원래 page-memory history를 포함해 새 요청을 보내는 것이 유일한 replay 경로다.
+3. Client는 top-level과 nested Loop graph의 LLM을 재귀적으로 열거하고 `{container_path,node_id}` 전체를 selection key와 deployment config에 사용한다.
+4. 공개 UI가 표시하는 fallback/error text는 `historyEligible=false`이며 실제 성공·non-empty final preview만 다음 요청 history에 포함한다.
+5. WorkflowNode child context는 public actor, content-persistence suppression과 absolute deadline은 상속하지만 raw history, transient reference와 parent consumer binding은 제거한다.
+
+### Rationale
+
+이 경계는 익명 대화 원문을 저장하지 않으면서도 stale provider 호출, 소진된 reference 재시도, graph identity 혼동과 Client 생성 오류문 재주입을 막는다. Public history는 한 deployment graph의 명시된 canonical consumer 한 곳에서 한 요청 동안만 materialize된다.
+
+### Affected Files
+
+- `apps/workflow_engine/tasks.py`
+- `apps/workflow_engine/workflow/nodes/llm/llm_node.py`
+- `apps/workflow_engine/workflow/nodes/workflow/workflow_node.py`
+- `apps/client/app/features/workflow/components/deployment/*`
+- `apps/client/app/features/workflow/utils/publicChatConversationConsumers.ts`
+- `apps/client/app/embed/chat/*`
+- Conversation Memory와 Chatbot Deployment API/component/test 문서 및 관련 테스트
+
+### Follow-up Review Notes
+
+- Public provider 호출을 서버에서 자동 replay해야 하는 요구가 생기면 일회성 GET+DELETE를 완화하지 말고 별도 lease/ack, idempotency와 expiry protocol을 ADR로 검토한다.
+- 새 nested container type을 지원할 때 Client 순회와 Shared canonical location parser를 같은 계약 테스트로 확장한다.
+- content suppression과 deadline은 child graph에서도 유지되지만 raw public history가 child provider/RAG에 도달하지 않는지 회귀 테스트한다.

@@ -2,6 +2,7 @@ import {
   DeploymentBrowserAccessPolicy,
   InputSchema,
   OutputSchema,
+  PublicChatHistoryContainerPathSegment,
 } from '../../types/Deployment';
 
 export type DeploymentStep = 'input' | 'success' | 'error';
@@ -9,6 +10,8 @@ export type DeploymentStep = 'input' | 'success' | 'error';
 export type DeploymentOptimizationNode = {
   id: string;
   title: string;
+  containerPath: PublicChatHistoryContainerPathSegment[];
+  selectionKey: string;
 };
 
 export interface DeploymentResult {

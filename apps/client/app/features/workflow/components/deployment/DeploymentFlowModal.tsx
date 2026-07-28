@@ -57,8 +57,8 @@ export function DeploymentFlowModal({
   const [embeddingEnabled, setEmbeddingEnabled] = useState(false);
   const [parentOrigins, setParentOrigins] = useState<string[]>(['']);
   const [
-    conversationHistoryConsumerNodeId,
-    setConversationHistoryConsumerNodeId,
+    conversationHistoryConsumerSelection,
+    setConversationHistoryConsumerSelection,
   ] = useState('');
   const [parameterOptimization, setParameterOptimization] =
     useState<DeploymentParameterOptimizationConfig>({
@@ -87,8 +87,8 @@ export function DeploymentFlowModal({
       setDeploymentResult(null);
       setEmbeddingEnabled(false);
       setParentOrigins(['']);
-      setConversationHistoryConsumerNodeId(
-        llmNodes.length === 1 ? llmNodes[0].id : '',
+      setConversationHistoryConsumerSelection(
+        llmNodes.length === 1 ? llmNodes[0].selectionKey : '',
       );
     }
   }, [isOpen, llmNodes]);
@@ -117,15 +117,18 @@ export function DeploymentFlowModal({
     nextBrowserAccessPolicy?: DeploymentBrowserAccessPolicy,
   ) => {
     setIsDeploying(true);
+    const selectedHistoryConsumer = llmNodes.find(
+      (node) => node.selectionKey === conversationHistoryConsumerSelection,
+    );
 
     try {
       const publicConversation: PublicChatConversationConfig | undefined =
-        deploymentType === 'chatbot' && conversationHistoryConsumerNodeId
+        deploymentType === 'chatbot' && selectedHistoryConsumer
           ? {
               contract_version: 'public_chat_conversation.v1',
               history_consumer: {
-                node_id: conversationHistoryConsumerNodeId,
-                container_path: [],
+                node_id: selectedHistoryConsumer.id,
+                container_path: [...selectedHistoryConsumer.containerPath],
               },
             }
           : undefined;
@@ -255,11 +258,11 @@ export function DeploymentFlowModal({
               description={description}
               onDescriptionChange={setDescription}
               llmNodes={llmNodes}
-              conversationHistoryConsumerNodeId={
-                conversationHistoryConsumerNodeId
+              conversationHistoryConsumerSelection={
+                conversationHistoryConsumerSelection
               }
-              onConversationHistoryConsumerNodeIdChange={
-                setConversationHistoryConsumerNodeId
+              onConversationHistoryConsumerSelectionChange={
+                setConversationHistoryConsumerSelection
               }
               embeddingEnabled={embeddingEnabled}
               parentOrigins={parentOrigins}

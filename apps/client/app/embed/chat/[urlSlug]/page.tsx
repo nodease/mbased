@@ -44,6 +44,7 @@ interface Message {
   content: string;
   timestamp: Date;
   citations?: WorkflowCitation[];
+  historyEligible?: boolean;
 }
 
 export default function EmbedChatPage() {
@@ -149,8 +150,10 @@ export default function EmbedChatPage() {
       const data = await response.json();
 
       const preview = getDeploymentRunFinalPreview(deploymentInfo, data);
+      const historyEligible =
+        data.status === 'success' && !preview.isEmpty;
       const assistantContent =
-        data.status === 'success' && !preview.isEmpty
+        historyEligible
           ? preview.text
           : '응답을 처리할 수 없습니다.';
 
@@ -159,7 +162,8 @@ export default function EmbedChatPage() {
         role: 'assistant',
         content: assistantContent,
         timestamp: new Date(),
-        citations: getDeploymentRunCitations(data),
+        citations: historyEligible ? getDeploymentRunCitations(data) : undefined,
+        historyEligible,
       };
       setMessages((prev) => [...prev, assistantMessage]);
     } catch {

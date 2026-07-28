@@ -2,6 +2,7 @@ import json
 import logging
 import math
 import re
+import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
@@ -1427,6 +1428,7 @@ class LLMNode(Node[LLMNodeData]):
             if knowledge_enabled:
                 try:
                     if rag_search_query:
+                        self._enforce_public_external_io_deadline()
                         knowledge_result = self._execute_knowledge_search(
                             query=rag_search_query,
                             db_session=db_session,
@@ -1842,6 +1844,7 @@ class LLMNode(Node[LLMNodeData]):
                 selected_model_id = provider_attribution.model_id
 
             # STEP 4. LLM 호출 ----------------------------------------------------
+            self._enforce_public_external_io_deadline()
             used_model_id = selected_model_id
             provider_usage_attempt = start_provider_usage(provider_attribution)
             try:
@@ -1886,6 +1889,7 @@ class LLMNode(Node[LLMNodeData]):
                     raise
                 apply_provider_json_schema(fallback_lease)
 
+                self._enforce_public_external_io_deadline()
                 try:
                     fallback_usage_attempt = None
                     fallback_usage_attempt = start_provider_usage(
@@ -2309,6 +2313,18 @@ class LLMNode(Node[LLMNodeData]):
                 context[var_name] = source_data
 
         return context
+
+    def _enforce_public_external_io_deadline(self) -> None:
+        if "public_request_deadline_at" not in self.execution_context:
+            return
+        control = getattr(self, "_runtime_control", None)
+        task_deadline = control.task_deadline if control is not None else None
+        if isinstance(task_deadline, bool) or not isinstance(
+            task_deadline, (int, float)
+        ):
+            raise NonRetryableWorkflowError("conversation.request_deadline_invalid")
+        if time.monotonic() >= float(task_deadline):
+            raise NonRetryableWorkflowError("conversation.request_expired")
 
     def _is_public_chat_history_consumer(self) -> bool:
         selected_ref = self.execution_context.get("public_chat_history_consumer_ref")

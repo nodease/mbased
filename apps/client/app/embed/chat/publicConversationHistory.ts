@@ -15,6 +15,7 @@ export interface PublicConversationHistoryMessage {
 
 interface DisplayMessage extends PublicConversationHistoryMessage {
   id: string;
+  historyEligible?: boolean;
 }
 
 export interface PublicConversationRequest {
@@ -54,24 +55,28 @@ export const buildPublicConversationHistory = (
   let pendingUser: PublicConversationHistoryMessage | null = null;
 
   for (const message of messages) {
-    if (
-      message.id === 'welcome' ||
-      message.id.startsWith('error-') ||
-      !message.content.trim()
-    ) {
+    if (message.id === 'welcome' || !message.content.trim()) {
       continue;
     }
     if (message.role === 'user') {
       pendingUser = { role: 'user', content: message.content };
       continue;
     }
-    if (pendingUser) {
-      turns.push([
-        pendingUser,
-        { role: 'assistant', content: message.content },
-      ]);
+    if (
+      message.id.startsWith('error-') ||
+      message.historyEligible !== true
+    ) {
       pendingUser = null;
+      continue;
     }
+    if (!pendingUser) {
+      continue;
+    }
+    turns.push([
+      pendingUser,
+      { role: 'assistant', content: message.content },
+    ]);
+    pendingUser = null;
   }
 
   return turns.slice(-MAX_PUBLIC_CHAT_TURNS).flat();

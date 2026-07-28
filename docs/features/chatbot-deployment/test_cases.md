@@ -44,6 +44,8 @@ Public Chatbot은 bounded client-held history 계약을 검증한다. `memory_mo
 - `SuccessStep`은 선택한 챗봇 유형에 맞는 공개 링크 또는 사내 인증 링크만 표시하고 두 보안 경계를 한 배포 결과에서 섞지 않는다. 내부 챗봇에는 public REST API endpoint/secret/test panel을 표시하지 않는다.
 - 공개 챗봇 공유 링크 설명은 private Knowledge 접근을 암시하지 않는다.
 - 공개 챗봇 페이지는 성공한 최신 20개 turn만 `/run-public/{slug}/chat`의 `conversation.history`로 보내고 conversation ID나 원문을 browser storage에 저장하지 않는다.
+- 공개 챗봇 페이지가 실패 status나 empty final preview 대신 표시한 fallback assistant text는 다음 `conversation.history`에 포함하지 않는다.
+- 공개 챗봇 배포 form은 top-level과 nested Loop LLM을 canonical container path로 구분해 정확히 한 history consumer를 저장한다.
 - 내부 실행 페이지는 `internal_chatbot`을 실행할 때 업무 `inputs`와 별도의 non-empty canonical `conversation.client_id`를 전송하고 client-controlled `memory_mode`를 보내지 않는다.
 - 내부 챗봇 실행 페이지는 사용자 선택기 없이 대화 내용을 위에, 질문 입력창과 전송 버튼을 아래에 표시한다.
 - 내부 챗봇 실행 페이지 우상단은 현재 로그인 사용자 이름과 사용자 권한 적용 상태를 함께 표시한다. 사용자 정보 조회 실패 시 이름은 생략하되 실행 화면과 권한 상태 표시는 유지한다.

@@ -22,7 +22,12 @@ describe('buildPublicConversationRequest', () => {
         { question: 'now' },
         [
           { id: 'user-1', role: 'user', content: 'old' },
-          { id: 'assistant-1', role: 'assistant', content: 'answer' },
+          {
+            id: 'assistant-1',
+            role: 'assistant',
+            content: 'answer',
+            historyEligible: true,
+          },
         ],
         'client_history_v1',
       ),
@@ -63,7 +68,12 @@ describe('buildPublicConversationHistory', () => {
       buildPublicConversationHistory([
         { id: 'welcome', role: 'assistant', content: 'welcome' },
         { id: 'user-1', role: 'user', content: 'question-1' },
-        { id: 'assistant-1', role: 'assistant', content: 'answer-1' },
+        {
+          id: 'assistant-1',
+          role: 'assistant',
+          content: 'answer-1',
+          historyEligible: true,
+        },
         { id: 'user-2', role: 'user', content: 'failed-question' },
         { id: 'error-2', role: 'assistant', content: 'request failed' },
         { id: 'user-3', role: 'user', content: 'pending-question' },
@@ -81,6 +91,7 @@ describe('buildPublicConversationHistory', () => {
         id: `assistant-${index}`,
         role: 'assistant' as const,
         content: `a-${index}`,
+        historyEligible: true,
       },
     ]).flat();
 
@@ -97,5 +108,29 @@ describe('buildPublicConversationHistory', () => {
         { id: 'user-1', role: 'user', content: 'pending' },
       ]),
     ).toEqual([]);
+  });
+
+  it('excludes a displayed fallback that was not produced by a successful run', () => {
+    expect(
+      buildPublicConversationHistory([
+        { id: 'user-1', role: 'user', content: 'first question' },
+        {
+          id: 'assistant-1',
+          role: 'assistant',
+          content: '응답을 처리할 수 없습니다.',
+          historyEligible: false,
+        },
+        { id: 'user-2', role: 'user', content: 'second question' },
+        {
+          id: 'assistant-2',
+          role: 'assistant',
+          content: 'actual answer',
+          historyEligible: true,
+        },
+      ]),
+    ).toEqual([
+      { role: 'user', content: 'second question' },
+      { role: 'assistant', content: 'actual answer' },
+    ]);
   });
 });

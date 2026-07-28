@@ -8,6 +8,7 @@ import {
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { DeploymentFlowModal } from './DeploymentFlowModal';
+import { publicChatConsumerSelectionKey } from '../../utils/publicChatConversationConsumers';
 
 vi.mock('@/app/features/app/components/AppAuthSecretControl', () => ({
   AppAuthSecretControl: ({
@@ -54,7 +55,14 @@ describe('DeploymentFlowModal', () => {
         onClose={vi.fn()}
         appId="app-1"
         deploymentType="api"
-        llmNodes={[{ id: 'llm-1', title: '티켓 분류' }]}
+        llmNodes={[
+          {
+            id: 'llm-1',
+            title: '티켓 분류',
+            containerPath: [],
+            selectionKey: publicChatConsumerSelectionKey('llm-1', []),
+          },
+        ]}
         onDeploy={onDeploy}
       />,
     );
@@ -124,8 +132,20 @@ describe('DeploymentFlowModal', () => {
         appId="app-1"
         deploymentType="chatbot"
         llmNodes={[
-          { id: 'classifier', title: '분류기' },
-          { id: 'answer', title: '최종 답변' },
+          {
+            id: 'classifier',
+            title: '분류기',
+            containerPath: [],
+            selectionKey: publicChatConsumerSelectionKey('classifier', []),
+          },
+          {
+            id: 'answer',
+            title: '항목 반복 / 최종 답변',
+            containerPath: [{ kind: 'loop', node_id: 'loop-1' }],
+            selectionKey: publicChatConsumerSelectionKey('answer', [
+              { kind: 'loop', node_id: 'loop-1' },
+            ]),
+          },
         ]}
         onDeploy={onDeploy}
       />,
@@ -133,7 +153,11 @@ describe('DeploymentFlowModal', () => {
 
     expect(screen.getByRole('button', { name: '배포' })).toBeDisabled();
     fireEvent.change(screen.getByLabelText('대화 기록을 사용할 LLM 노드'), {
-      target: { value: 'answer' },
+      target: {
+        value: publicChatConsumerSelectionKey('answer', [
+          { kind: 'loop', node_id: 'loop-1' },
+        ]),
+      },
     });
     fireEvent.click(screen.getByRole('button', { name: '배포' }));
 
@@ -144,7 +168,10 @@ describe('DeploymentFlowModal', () => {
         expect.any(Object),
         {
           contract_version: 'public_chat_conversation.v1',
-          history_consumer: { node_id: 'answer', container_path: [] },
+          history_consumer: {
+            node_id: 'answer',
+            container_path: [{ kind: 'loop', node_id: 'loop-1' }],
+          },
         },
       ),
     );

@@ -29,6 +29,8 @@ Status: Draft
 
 - 내부 `conversationId`: 내부 실행 페이지 마운트 시 생성하는 canonical UUID다. `localStorage`에 저장하지 않고 top-level `conversation.client_id`로만 전송한다. 서버가 deployment/current user에 결박한 `auth:v1` namespace로 바꾼다.
 - 공개 `messages`: 현재 page lifetime에서 성공한 사용자 질문과 assistant 응답을 순서대로 표시하는 React state다. welcome/error/pending message를 제외한 최신 20개 완료 turn만 다음 요청 history로 보낸다. 서버에는 Public Conversation Session이나 execution-log memory를 만들지 않는다.
+- 공개 표시 응답 중 실제 성공·non-empty final preview만 `historyEligible=true`다. 실패/empty 결과의 UI fallback은 화면에 표시해도 다음 history에서는 제외한다.
+- 공개 배포 `history_consumer`: top-level과 nested Loop의 모든 LLM을 canonical `{container_path,node_id}`로 구분한다. Select value는 전체 location을 직렬화한 key이고 deployment config에는 구조화된 path를 저장한다.
 - 공개 페이지는 conversation ID와 대화 원문을 localStorage/sessionStorage에 저장하지 않는다. refresh/new tab은 빈 history로 시작한다.
 
 인증 내부 durable Session과 transcript projection은 [Conversation Memory component spec](../conversation-memory/component_spec.md)의 후속 target이다. 같은 채팅 시각 컴포넌트는 재사용하되 public/authenticated backend surface, API/auth adapter, CORS/Origin, deployment access policy, session namespace와 secret storage는 분리한다.

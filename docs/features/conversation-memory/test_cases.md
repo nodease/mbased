@@ -300,6 +300,11 @@ Status: Draft
 - MEM-TC-RUN-022: Active deployment가 바뀐 뒤 queued old-session task는 pinned snapshot만 실행하거나 version mismatch로 side effect 전에 거부하고 새 active graph로 실행하지 않는다.
 - MEM-TC-RUN-023: LLM output은 current Memory Context가 상속한 dependency를 새 retrieval/tool dependency와 합산하고 final entry까지 보존한다.
 - MEM-TC-RUN-024: Credential revoke 또는 credential permission decision/verified relation/egress revision 변경 뒤 stale ProviderExecutionCapability는 새 context claim, budget reservation, provider attempt admission과 outbound call 전에 거부된다.
+- MEM-TC-RUN-025: Public absolute deadline이 Celery hard deadline보다 이르면 runtime deadline으로 유지되고 Knowledge/provider 호출 직전 만료를 거부한다.
+- MEM-TC-RUN-026: Public history reference는 canonical deployment/preflight와 Knowledge sync 뒤 한 번만 소비한다.
+- MEM-TC-RUN-027: Public history를 소비한 뒤 일반 또는 external-effect retry 오류가 발생해도 Celery retry를 예약하지 않는다.
+- MEM-TC-RUN-028: WorkflowNode child는 public actor/suppression/deadline을 유지하되 parent raw history/reference/consumer binding을 상속하지 않는다.
+- MEM-TC-RUN-029: 같은 node ID가 parent와 child graph에 존재해도 child LLM/RAG에는 parent public history가 전달되지 않는다.
 
 ## Client Tests
 
@@ -309,6 +314,8 @@ Status: Draft
 - MEM-TC-UI-004: 21번째 완료 turn부터 가장 오래된 turn을 Client request에서 제외한다.
 - MEM-TC-UI-005: refresh 또는 새 tab은 Public history를 복구하지 않는다.
 - MEM-TC-UI-006: localStorage/sessionStorage에 history 또는 conversation ID를 기록하지 않는다.
+- MEM-TC-UI-007: 실패 status나 empty final preview 대신 표시한 fallback assistant text는 다음 history에 포함하지 않는다.
+- MEM-TC-UI-008: 배포 UI는 nested Loop LLM을 canonical container path로 구분하고 같은 node ID가 다른 path에 있어도 정확한 consumer를 저장한다.
 
 ## End-To-End Matrix
 

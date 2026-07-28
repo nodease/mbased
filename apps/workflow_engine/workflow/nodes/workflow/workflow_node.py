@@ -226,6 +226,12 @@ class WorkflowNode(Node[WorkflowNodeData]):
             # parent_run_id를 전달하여 서브 워크플로우의 노드 실행 기록이 부모 워크플로우와 연결되도록 함
             parent_run_id = self.execution_context.get("workflow_run_id")
             sub_execution_context = dict(self.execution_context)
+            for public_history_key in (
+                "public_chat_history",
+                "public_chat_history_ref",
+                "public_chat_history_consumer_ref",
+            ):
+                sub_execution_context.pop(public_history_key, None)
             sub_execution_context["organization_id"] = str(app.organization_id)
             sub_execution_context["app_id"] = str(app.id)
             sub_execution_context["workflow_id"] = str(app.workflow_id)

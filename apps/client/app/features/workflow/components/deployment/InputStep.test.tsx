@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { InputStep } from './InputStep';
+import { publicChatConsumerSelectionKey } from '../../utils/publicChatConversationConsumers';
 
 vi.mock('@/app/features/app/components/AppAuthSecretControl', () => ({
   AppAuthSecretControl: () => <div>App Secret 상태</div>,
@@ -16,9 +17,16 @@ const defaultProps = {
   deploymentTypeLabel: '공개 챗봇',
   description: '',
   onDescriptionChange: vi.fn(),
-  llmNodes: [{ id: 'answer', title: '최종 답변' }],
-  conversationHistoryConsumerNodeId: 'answer',
-  onConversationHistoryConsumerNodeIdChange: vi.fn(),
+  llmNodes: [
+    {
+      id: 'answer',
+      title: '최종 답변',
+      containerPath: [],
+      selectionKey: publicChatConsumerSelectionKey('answer', []),
+    },
+  ],
+  conversationHistoryConsumerSelection: publicChatConsumerSelectionKey('answer', []),
+  onConversationHistoryConsumerSelectionChange: vi.fn(),
   embeddingEnabled: false,
   parentOrigins: [''],
   onEmbeddingEnabledChange: vi.fn(),

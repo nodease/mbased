@@ -58,6 +58,7 @@ import { hasIncomingHandle } from '../../utils/validateWorkflowGraph';
 import { WORKFLOW_NODE_SIZE } from '../../utils/workflowCanvasGeometry';
 import { AgentBuilderPanel } from '../agentBuilder/AgentBuilderPanel';
 import { copyTestExecutionLocationQueryParams } from '../../utils/testExecutionLocation';
+import { collectDeploymentLlmNodes } from '../../utils/publicChatConversationConsumers';
 
 const MIN_ZOOM = 0.4;
 const MAX_ZOOM = 1.6;
@@ -279,6 +280,11 @@ export default function NodeCanvas() {
     setSelectedNodeId,
     setSelectedNodeType,
   });
+
+  const deploymentLlmNodes = useMemo(
+    () => collectDeploymentLlmNodes(nodes),
+    [nodes],
+  );
 
   // Start node detection for deployment options
   const startNode = useMemo(() => {
@@ -1442,12 +1448,7 @@ export default function NodeCanvas() {
         onClose={() => setShowDeployFlowModal(false)}
         appId={currentAppId}
         deploymentType={deploymentType}
-        llmNodes={nodes
-          .filter((node) => node.type === 'llmNode')
-          .map((node) => ({
-            id: node.id,
-            title: String(node.data?.title || 'LLM 노드'),
-          }))}
+        llmNodes={deploymentLlmNodes}
         onDeploy={handleDeploy}
       />
 

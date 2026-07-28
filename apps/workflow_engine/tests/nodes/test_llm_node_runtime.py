@@ -913,6 +913,40 @@ def test_unselected_llm_node_never_receives_public_chat_history():
     assert node._rag_search_query("classify current", {}) == "classify current"  # noqa: SLF001
 
 
+def test_public_llm_rejects_expired_deadline_before_provider_call(monkeypatch):
+    dummy_client = DummyClient()
+    node = LLMNode(
+        "answer",
+        LLMNodeData(
+            title="Answer",
+            provider="openai",
+            model_id="gpt-4o",
+            user_prompt="current question",
+            parameters={},
+        ),
+        execution_context={
+            "public_request_deadline_at": datetime.now(timezone.utc).isoformat(),
+        },
+    )
+    node._client_override = dummy_client  # noqa: SLF001 - provider isolation
+    runtime_control = SimpleNamespace(
+        task_deadline=10.0,
+        binding_container_path=(),
+    )
+    monkeypatch.setattr(
+        "apps.workflow_engine.workflow.nodes.llm.llm_node.time.monotonic",
+        lambda: 10.0,
+    )
+
+    with pytest.raises(
+        NonRetryableWorkflowError,
+        match="conversation.request_expired",
+    ):
+        node.execute({}, runtime_control=runtime_control)
+
+    assert dummy_client.calls == []
+
+
 def test_llm_node_passes_rendered_prompt_and_request_to_judge_first_router(
     monkeypatch,
 ):

@@ -14,6 +14,7 @@ import type {
 } from '../../types/Deployment';
 import { buildBrowserAccessPolicyDraft } from '../../utils/browserAccessPolicy';
 import { BrowserAccessPolicyEditor } from './BrowserAccessPolicyEditor';
+import type { DeploymentOptimizationNode } from './types';
 
 interface InputStepProps {
   appId?: string;
@@ -25,9 +26,9 @@ interface InputStepProps {
   deploymentTypeLabel: string;
   description: string;
   onDescriptionChange: (value: string) => void;
-  llmNodes: Array<{ id: string; title: string }>;
-  conversationHistoryConsumerNodeId: string;
-  onConversationHistoryConsumerNodeIdChange: (nodeId: string) => void;
+  llmNodes: DeploymentOptimizationNode[];
+  conversationHistoryConsumerSelection: string;
+  onConversationHistoryConsumerSelectionChange: (selectionKey: string) => void;
   embeddingEnabled: boolean;
   parentOrigins: string[];
   onEmbeddingEnabledChange: (enabled: boolean) => void;
@@ -51,8 +52,8 @@ export function InputStep({
   description,
   onDescriptionChange,
   llmNodes,
-  conversationHistoryConsumerNodeId,
-  onConversationHistoryConsumerNodeIdChange,
+  conversationHistoryConsumerSelection,
+  onConversationHistoryConsumerSelectionChange,
   embeddingEnabled,
   parentOrigins,
   onEmbeddingEnabledChange,
@@ -71,7 +72,7 @@ export function InputStep({
   const appAuthSecretBlocked =
     requiresAppAuthSecret && (!appId || appAuthSecretReadiness !== 'ready');
   const conversationConsumerBlocked =
-    deploymentType === 'chatbot' && !conversationHistoryConsumerNodeId;
+    deploymentType === 'chatbot' && !conversationHistoryConsumerSelection;
   const policyResult = supportsEmbeddingPolicy
     ? buildBrowserAccessPolicyDraft(embeddingEnabled, parentOrigins)
     : null;
@@ -132,15 +133,15 @@ export function InputStep({
             <select
               id="public-chat-history-consumer"
               className="w-full rounded-md border border-gray-300 px-3 py-2"
-              value={conversationHistoryConsumerNodeId}
+              value={conversationHistoryConsumerSelection}
               onChange={(event) =>
-                onConversationHistoryConsumerNodeIdChange(event.target.value)
+                onConversationHistoryConsumerSelectionChange(event.target.value)
               }
               disabled={isDeploying}
             >
               <option value="">LLM 노드를 선택하세요</option>
               {llmNodes.map((node) => (
-                <option key={node.id} value={node.id}>
+                <option key={node.selectionKey} value={node.selectionKey}>
                   {node.title}
                 </option>
               ))}

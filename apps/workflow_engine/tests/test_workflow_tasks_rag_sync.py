@@ -268,7 +268,10 @@ def test_deployed_graph_execution_revalidates_exact_snapshot():
     assert context["workflow_version"] == FakeSession.deployment.version
 
 
-def test_deployed_public_chatbot_rebuilds_consumer_mapping_from_snapshot():
+def test_deployed_public_chatbot_rebuilds_consumer_mapping_from_snapshot(
+    monkeypatch,
+):
+    lifecycle_events = []
     graph = {
         "nodes": [
             {
@@ -296,6 +299,19 @@ def test_deployed_public_chatbot_rebuilds_consumer_mapping_from_snapshot():
         }
     }
     forged_ref = CanonicalWorkflowNodeLocation((), "classifier").safe_reference
+    monkeypatch.setattr(
+        tasks,
+        "_sync_knowledge_bases_for_execution_subject",
+        lambda *_args, **_kwargs: (
+            lifecycle_events.append("validated"),
+            {"synced_count": 0, "failed": []},
+        )[1],
+    )
+    monkeypatch.setattr(
+        tasks,
+        "consume_public_chat_history",
+        lambda _ref: (lifecycle_events.append("consumed"), ())[1],
+    )
 
     result = tasks.execute_workflow.run(
         graph,
@@ -321,6 +337,8 @@ def test_deployed_public_chatbot_rebuilds_consumer_mapping_from_snapshot():
         CanonicalWorkflowNodeLocation((), "answer").safe_reference
     )
     assert context["execution_actor"] == {"type": "public"}
+    assert "public_chat_history_ref" not in context
+    assert lifecycle_events == ["validated", "consumed"]
 
 
 def test_deployed_graph_execution_rejects_snapshot_drift():
@@ -372,6 +390,87 @@ def test_public_chatbot_execution_rejects_expired_queue_payload_before_db_access
 
     assert FakeWorkflowEngine.calls == []
     assert FakeSyncService.calls == []
+
+
+def test_public_task_deadline_never_exceeds_absolute_request_deadline():
+    current = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+    deadline = tasks._workflow_task_deadline(
+        current + timedelta(seconds=1),
+        now=current,
+        monotonic_now=50.0,
+    )
+
+    assert deadline == pytest.approx(51.0)
+
+
+def test_public_chatbot_does_not_retry_after_one_time_history_is_consumed(
+    monkeypatch,
+):
+    graph = {
+        "nodes": [
+            {
+                "id": "answer",
+                "type": "llmNode",
+                "data": {"model_id": "model-1", "user_prompt": "질문에 답변하세요."},
+            }
+        ],
+        "edges": [],
+    }
+    FakeSession.deployment.type = DeploymentType.CHATBOT
+    FakeSession.deployment.graph_snapshot = graph
+    FakeSession.deployment.config = {
+        "public_conversation": {
+            "contract_version": "public_chat_conversation.v1",
+            "history_consumer": {
+                "node_id": "answer",
+                "container_path": [],
+            },
+        }
+    }
+    consumed = []
+    monkeypatch.setattr(
+        tasks,
+        "consume_public_chat_history",
+        lambda reference: (
+            consumed.append(reference),
+            (
+                {"role": "user", "content": "이전 질문"},
+                {"role": "assistant", "content": "이전 답변"},
+            ),
+        )[1],
+    )
+    monkeypatch.setattr(
+        tasks,
+        "_safe_retry",
+        lambda *_args, **_kwargs: pytest.fail(
+            "consumed one-time history must not schedule a Celery retry"
+        ),
+    )
+    FakeWorkflowEngine.execute_error = RuntimeError("provider unavailable")
+
+    with pytest.raises(
+        NonRetryableWorkflowError,
+        match="conversation.history_replay_required",
+    ):
+        tasks.execute_workflow.run(
+            graph,
+            {},
+            {
+                "workflow_id": str(FakeSession.workflow.id),
+                "execution_id": str(uuid.uuid4()),
+                "deployment_id": str(FakeSession.deployment.id),
+                "workflow_version": FakeSession.deployment.version,
+                "trigger_mode": "app",
+                "public_chat_history_ref": "d" * 32,
+                "public_request_deadline_at": (
+                    datetime.now(timezone.utc) + timedelta(minutes=1)
+                ).isoformat(),
+            },
+            True,
+        )
+
+    assert consumed == ["d" * 32]
 
 
 def test_execute_workflow_rejects_invalid_execution_identity_without_retry():

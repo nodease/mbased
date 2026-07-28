@@ -23,11 +23,16 @@ export interface DeploymentBrowserAccessPolicy {
   };
 }
 
+export interface PublicChatHistoryContainerPathSegment {
+  kind: 'loop';
+  node_id: string;
+}
+
 export interface PublicChatConversationConfig {
   contract_version: 'public_chat_conversation.v1';
   history_consumer: {
     node_id: string;
-    container_path: [];
+    container_path: PublicChatHistoryContainerPathSegment[];
   };
 }
 
