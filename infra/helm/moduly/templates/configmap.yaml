@@ -23,6 +23,9 @@ data:
   AUTH_LOGIN_LIMITER_POLICY_VERSION: {{ .Values.gateway.env.AUTH_LOGIN_LIMITER_POLICY_VERSION | default "v1" | quote }}
   AUTH_LOGIN_FINGERPRINT_PRIMARY_VERSION: {{ .Values.gateway.env.AUTH_LOGIN_FINGERPRINT_PRIMARY_VERSION | default "v1" | quote }}
   AUTH_LOGIN_TRUSTED_PROXY_CIDRS: {{ .Values.gateway.env.AUTH_LOGIN_TRUSTED_PROXY_CIDRS | default "" | quote }}
+  # Public Chatbot client-history rollout mode
+  PUBLIC_CHAT_CONVERSATION_ROLLOUT_MODE: {{ .Values.gateway.env.PUBLIC_CHAT_CONVERSATION_ROLLOUT_MODE | default "compatibility" | quote }}
+
   
   # Celery-specific Redis DB configuration (I/O 경합 방지)
   REDIS_BROKER_DB: "0"     # Celery message queue

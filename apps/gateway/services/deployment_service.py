@@ -1390,7 +1390,7 @@ class DeploymentService:
                 )
             if public_client_history_mode:
                 try:
-                    history_reference = store_public_chat_history(
+                    history_reference = await store_public_chat_history(
                         client_conversation_history,
                         ttl_seconds=PUBLIC_CHAT_REQUEST_TTL_SECONDS,
                     )

@@ -222,5 +222,11 @@ MBA-318은 Public client-held history, legacy Public memory control 차단, cont
 - MEM-REQ-112: Public Client는 완료 응답을 history에 넣기 전에 server와 같은 Unicode scalar/message 32,768-character 상한과 131,072-byte UTF-8 history envelope 상한을 적용해야 한다. 화면에는 표시된 oversized 응답도 이후 요청 history에서는 제외해야 한다.
 - MEM-REQ-113: Public transient execution은 versioned task name과 전용 queue에서만 publish·consume해야 한다. 일반 `workflow.execute`는 public marker가 있는 misrouted task를 DB·Redis·외부 I/O 전에 `conversation.task_contract_mismatch`로 거부해야 한다.
 - MEM-REQ-114: 배포 중 새 Worker는 일반 workflow queue와 Public 전용 queue를 함께 소비하되, 구 Worker가 일반 queue에서 Public payload를 처리할 수 없도록 Gateway가 Public task를 일반 queue에 publish하지 않아야 한다.
+- MEM-REQ-115: 전용 Public `/chat` 요청은 positive integer `deployment_version`을 필수로 보내야 하며 Gateway는 누락·형식 오류를 transient store와 task publish 전에 `conversation.deployment_version_invalid`로 거부해야 한다. Compatibility root route만 version 생략을 허용한다.
+- MEM-REQ-116: Public RAG query embedding은 한 요청에서 여러 provider/model group을 순차 호출할 때 각 provider invoke 직전에 공통 absolute deadline을 다시 검사하고 만료 뒤 추가 외부 I/O를 시작하지 않아야 한다.
+- MEM-REQ-117: Gateway의 transient history 저장은 async Redis 호출과 명시적 bounded timeout을 사용해야 하며 Redis 지연이 Uvicorn event loop를 동기적으로 점유하지 않아야 한다.
+- MEM-REQ-118: `PUBLIC_CHAT_CONVERSATION_ROLLOUT_MODE`는 표준 Docker Compose와 Helm values→ConfigMap→Gateway container env 경로에서 설정 가능해야 한다.
+- MEM-REQ-119: Public `/chat` reverse proxy read/send timeout은 Gateway·Worker absolute request deadline보다 길어야 하며 proxy가 먼저 연결을 끊은 뒤 provider 실행이 계속되는 경로를 만들지 않아야 한다.
+- MEM-REQ-120: Reverse proxy가 Public `/chat` body 상한을 먼저 적용할 때도 `413 conversation.request_too_large`, `Cache-Control: no-store`, `Referrer-Policy: no-referrer`의 content-free 계약을 반환해야 한다.
 
 `PUBLIC_CHAT_CONVERSATION_ROLLOUT_MODE=compatibility`는 배포 순서용 임시 기본값이다. strict 전환 전 active legacy public Chatbot을 consumer mapping이 있는 새 deployment version으로 교체한다.

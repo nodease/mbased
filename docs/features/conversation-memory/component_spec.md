@@ -500,3 +500,8 @@ Public transcript는 현재 Client가 렌더링하는 local messages이며 서�
 - Public audit actor는 authorization subject와 별도다. UI는 history나 actor marker를 권한·신원으로 표시하지 않는다.
 - Gateway는 raw history를 600초 TTL의 일회성 Redis key에 두고 broker에는 opaque reference만 전달한다. Worker는 queued raw history를 거부하고 atomic consume 뒤에만 invocation-local 원문을 만든다. Store unavailable은 소비 전 bounded retry를 사용하지만 invalid/missing/corrupt 또는 소비 뒤 오류는 provider replay 없이 닫는다. Broker expiry와 Worker deadline은 같은 Gateway 생성시각을 사용한다.
 - Public transient task는 `workflow.execute_public_chat.v1`/`workflow-public-chat-v1` 계약으로만 전달한다. 일반 task는 public marker를 fail-closed하고 새 Worker만 전용 queue를 함께 구독한다.
+- Gateway transient store adapter는 async Redis `SET NX EX`를 bounded timeout 안에서 실행한다. Redis가 지연되면 event loop를 점유하지 않고 safe 503으로 종료한다.
+- `/chat` adapter는 `deployment_version`을 필수 precondition으로 검증하지만 compatibility root adapter는 rolling 전환을 위해 생략을 허용한다.
+- Query embedding application service는 각 model group provider invoke 직전에 전달받은 deadline guard를 실행한다. Deadline 예외는 `safe_no_result` provider 오류 처리에 흡수하지 않는다.
+- Compose와 Helm ConfigMap은 Public rollout mode를 Gateway container까지 전달한다.
+- Nginx Public `/chat` location은 Gateway lifetime보다 긴 upstream timeout과 Gateway와 동일한 safe 413 응답 계약을 소유한다.

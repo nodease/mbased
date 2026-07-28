@@ -68,6 +68,8 @@ services:
       AUTH_LOGIN_FINGERPRINT_KEYS: ${AUTH_LOGIN_FINGERPRINT_KEYS:-}
       AUTH_LOGIN_FINGERPRINT_PRIMARY_VERSION: ${AUTH_LOGIN_FINGERPRINT_PRIMARY_VERSION:-}
 
+      PUBLIC_CHAT_CONVERSATION_ROLLOUT_MODE: "${PUBLIC_CHAT_CONVERSATION_ROLLOUT_MODE:-compatibility}"
+
       # Public Conversation Memory is opt-in. Enabling it requires three
       # independent keys and an approved database-backup erasure contract.
       MEMORY_PUBLIC_CONVERSATION_ENABLED: "${MEMORY_PUBLIC_CONVERSATION_ENABLED:-false}"

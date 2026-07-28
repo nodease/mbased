@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import secrets
@@ -10,10 +11,11 @@ from apps.shared.domain.public_chat_history import (
     PublicChatHistoryError,
     normalize_public_chat_history,
 )
-from apps.shared.pubsub import get_redis_client
+from apps.shared.pubsub import get_async_redis_client, get_redis_client
 
 _REFERENCE_PATTERN = re.compile(r"^[0-9a-f]{32}$")
 _KEY_PREFIX = "nodease:public-chat-history:v1:"
+_STORE_TIMEOUT_SECONDS = 2.0
 _CONSUME_SCRIPT = """
 local value = redis.call('GET', KEYS[1])
 if value then
@@ -29,10 +31,11 @@ class PublicChatHistoryTransientStoreError(RuntimeError):
         super().__init__(code)
 
 
-def store_public_chat_history(
+async def store_public_chat_history(
     history: Sequence[dict[str, str]],
     *,
     ttl_seconds: int,
+    timeout_seconds: float = _STORE_TIMEOUT_SECONDS,
     redis_client: Any = None,
 ) -> str:
     if isinstance(ttl_seconds, bool) or not isinstance(ttl_seconds, int):
@@ -43,21 +46,32 @@ def store_public_chat_history(
         raise PublicChatHistoryTransientStoreError(
             "conversation.history_store_unavailable"
         )
+    if (
+        isinstance(timeout_seconds, bool)
+        or not isinstance(timeout_seconds, (int, float))
+        or timeout_seconds <= 0
+    ):
+        raise PublicChatHistoryTransientStoreError(
+            "conversation.history_store_unavailable"
+        )
     normalized = normalize_public_chat_history(list(history))
     payload = json.dumps(
         normalized,
         ensure_ascii=False,
         separators=(",", ":"),
     )
-    client = redis_client or get_redis_client()
+    client = redis_client or get_async_redis_client()
     for _attempt in range(3):
         reference = secrets.token_hex(16)
         try:
-            stored = client.set(
-                _key(reference),
-                payload,
-                ex=ttl_seconds,
-                nx=True,
+            stored = await asyncio.wait_for(
+                client.set(
+                    _key(reference),
+                    payload,
+                    ex=ttl_seconds,
+                    nx=True,
+                ),
+                timeout=float(timeout_seconds),
             )
         except Exception as error:
             raise PublicChatHistoryTransientStoreError(

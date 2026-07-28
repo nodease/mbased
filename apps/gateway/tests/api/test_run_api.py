@@ -272,6 +272,44 @@ def test_public_chatbot_rejects_invalid_deployment_version_before_execution(
     assert "private-current-question" not in response.text
 
 
+def test_public_chatbot_requires_deployment_version_before_execution(
+    monkeypatch,
+):
+    async def unexpected_run(**_kwargs):
+        pytest.fail("missing deployment version must be rejected before execution")
+
+    monkeypatch.setattr(
+        run_endpoint.DeploymentService,
+        "run_deployment",
+        unexpected_run,
+    )
+
+    app = FastAPI()
+    app.add_middleware(PublicConversationCorsBoundaryMiddleware)
+    app.include_router(run_endpoint.router, prefix="/api/v1")
+    app.dependency_overrides[run_endpoint.get_db] = lambda: object()
+    app.dependency_overrides[run_endpoint.get_deployment_runtime_policy] = lambda: (
+        DEFAULT_DEPLOYMENT_RUNTIME_POLICY
+    )
+
+    response = TestClient(app).post(
+        "/api/v1/run-public/public-chatbot/chat",
+        json={
+            "inputs": {"question": "private-current-question"},
+            "conversation": {"history": []},
+        },
+    )
+
+    assert response.status_code == 422
+    assert (
+        response.json()["detail"]["code"]
+        == "conversation.deployment_version_invalid"
+    )
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["referrer-policy"] == "no-referrer"
+    assert "private-current-question" not in response.text
+
+
 def test_public_chatbot_rejects_oversized_inputs_before_tokenization(
     monkeypatch,
 ):

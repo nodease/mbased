@@ -349,3 +349,47 @@ HTTP body, current inputs, raw history와 sanitized final projection은 서로 �
 - Public input schema가 커지면 상한을 완화하기 전에 anonymous admission 비용과 reverse-proxy 설정을 함께 검토한다.
 - Sanitizer 또는 provider framing이 바뀌면 trusted projection 구조 검사와 final exact-token test를 함께 갱신한다.
 - Public task contract v2는 새 task name/queue와 explicit worker rollout evidence 없이는 기존 queue에 혼합하지 않는다.
+
+## Implementation Decision: End-to-end admission and lifetime ownership
+
+### Context
+
+전용 `/chat`이 `deployment_version` 생략을 허용하면 Client가 조회한 deployment와 실행 대상을 결박하는 검사가 우회된다. Query embedding fan-out은 RAG 시작 전 한 번만 deadline을 확인해 여러 model provider를 순차 호출하는 중 absolute lifetime을 넘을 수 있었다. Gateway의 동기 Redis `SET`은 Redis 지연 시 단일 async event loop를 막았다. 표준 배포에는 strict rollout 환경변수 전달 경로가 없었고 Nginx는 Gateway보다 짧은 기본 upstream timeout과 별도 형식의 413을 반환했다.
+
+### Options Considered
+
+- 모든 public root route에 version을 즉시 필수화: legacy compatibility rollout을 깨므로 선택하지 않는다.
+- RAG fan-out 전체 앞에서 deadline 한 번만 검사: 앞선 provider 지연 뒤 다음 provider를 시작할 수 있어 선택하지 않는다.
+- 동기 Redis client에 socket timeout만 설정: event loop blocking 자체가 남으므로 선택하지 않는다.
+- Nginx body 상한을 Gateway보다 크게 해 413을 모두 Gateway에 위임: proxy 단계의 익명 자원 admission을 잃으므로 선택하지 않는다.
+- 전용 `/chat` version 필수화, provider별 guard, async bounded Redis, 표준 rollout env wiring과 proxy-owned 동일 오류 계약: 각 경계가 소유한 상태와 lifetime을 직접 검증하므로 선택한다.
+
+### Final Decision
+
+1. `/chat`은 positive integer `deployment_version`을 필수로 검증하고 누락도 `conversation.deployment_version_invalid`로 종료한다. Compatibility root route의 optional version은 유지한다.
+2. Query embedding execution request는 deadline guard를 전달받고 각 model group provider invoke 직전에 실행한다. Guard 예외는 provider failure policy 밖에서 전파한다.
+3. Gateway transient history 저장은 async Redis `SET NX EX`와 2초 timeout을 사용한다. Timeout·연결 오류는 content-free `conversation.history_store_unavailable`로 분류한다.
+4. Compose와 Helm values→ConfigMap→Gateway env가 `PUBLIC_CHAT_CONVERSATION_ROLLOUT_MODE`를 전달한다.
+5. Nginx Public `/chat`은 610초 read/send timeout을 사용하고 자체 413에도 Gateway와 같은 safe JSON code, no-store와 no-referrer headers를 반환한다.
+
+### Rationale
+
+Version, lifetime, storage availability와 HTTP admission은 각각 API adapter, provider invocation, async infrastructure adapter와 reverse proxy가 검증해야 하는 불변조건이다. 이 경계를 실제 소비 직전에 닫아 stale deployment 실행, deadline 이후 외부 호출, event loop 정지와 proxy/Gateway 오류 계약 drift를 방지한다.
+
+### Affected Files
+
+- `apps/gateway/api/v1/endpoints/run.py`
+- `apps/gateway/services/deployment_service.py`
+- `apps/shared/services/public_chat_history_transient_store.py`
+- `apps/workflow_engine/application/query_embedding_execution.py`
+- `apps/workflow_engine/workflow/nodes/llm/llm_node.py`
+- `docker/docker-compose.yml`
+- `docker/nginx/nginx.conf`
+- `infra/helm/moduly/*`
+- Conversation Memory requirements, API, component, test case 문서와 관련 회귀 테스트
+
+### Follow-up Review Notes
+
+- Public request lifetime이 바뀌면 Gateway timeout, Celery expires, Worker task deadline과 Nginx read/send timeout을 한 계약으로 갱신한다.
+- Redis library 변경 시 async cancellation과 timeout 예외가 event loop를 막거나 내부 오류를 public response에 노출하지 않는지 검토한다.
+- 새 multi-provider fan-out은 loop 시작 전 검사만으로 만족하지 말고 각 외부 invoke 직전 deadline guard를 호출한다.

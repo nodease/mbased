@@ -59,7 +59,7 @@ def _run_public(
     celery = _CaptureCelery()
     celery.stored_history = []
 
-    def store_history(history, *, ttl_seconds):
+    async def store_history(history, *, ttl_seconds):
         celery.stored_history.append(
             {"history": tuple(history), "ttl_seconds": ttl_seconds}
         )

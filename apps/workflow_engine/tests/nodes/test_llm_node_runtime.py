@@ -3456,6 +3456,7 @@ def test_llm_node_precomputes_query_vector_once_per_embedding_model(monkeypatch)
 
     assert len(query_runtime.execute_requests) == 1
     assert query_runtime.execute_requests[0].query == "개발팀 온보딩"
+    assert callable(query_runtime.execute_requests[0].deadline_guard)
     assert query_runtime.invoked_models == [
         "text-embedding-a",
         "text-embedding-b",

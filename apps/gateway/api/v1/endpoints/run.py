@@ -133,7 +133,7 @@ async def run_public_chatbot(
     except PublicChatHistoryError as error:
         _raise_public_chat_history_error(error.code)
 
-    expected_deployment_version = _optional_public_deployment_version(request_body)
+    expected_deployment_version = _required_public_deployment_version(request_body)
     return await DeploymentService.run_deployment(
         db=db,
         url_slug=url_slug,
@@ -152,6 +152,15 @@ def _optional_public_deployment_version(request_body: dict) -> int | None:
         return None
     version = request_body["deployment_version"]
     if isinstance(version, bool) or not isinstance(version, int) or version < 1:
+        _raise_public_chat_history_error(
+            "conversation.deployment_version_invalid"
+        )
+    return version
+
+
+def _required_public_deployment_version(request_body: dict) -> int:
+    version = _optional_public_deployment_version(request_body)
+    if version is None:
         _raise_public_chat_history_error(
             "conversation.deployment_version_invalid"
         )

@@ -3149,6 +3149,7 @@ class LLMNode(Node[LLMNodeData]):
                 knowledge_base_ids=tuple(knowledge_base_ids),
                 failure_policy=self.data.ragFailurePolicy,
                 query=query,
+                deadline_guard=self._enforce_public_external_io_deadline,
             )
         )
         query_vectors_by_kb = {

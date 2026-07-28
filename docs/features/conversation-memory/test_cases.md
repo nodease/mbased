@@ -440,3 +440,9 @@ Disposable PostgreSQL evidence는 `NODEASE_RUN_DISPOSABLE_DB_TEST=1`인 전용 C
 - MEM-TC-BOUND-020: sanitizer가 한 message를 빈 값으로 만들면 완료 pair 전체를 제거하고, 정제로 늘어난 internal marker에는 raw message/envelope 상한을 다시 적용하지 않되 final framed projection token 상한을 지킨다.
 - MEM-TC-BOUND-021: Client는 Unicode scalar/message 및 UTF-8 envelope 상한을 넘는 완료 pair를 history에서 제외·oldest-pair 단위 축소하며 oversized 성공 응답은 화면에 유지하고 이후 정상 turn을 막지 않는다.
 - MEM-TC-BOUND-022: Public Gateway는 versioned task/전용 queue에 publish하고 새 Worker entrypoint만 그 queue를 함께 소비한다. 일반 task에 잘못 전달된 public context는 DB·Redis·Engine 전에 fail-closed한다.
+- MEM-TC-BOUND-023: 유효한 empty history라도 `/chat`에 `deployment_version`이 없으면 실행 service 호출 전에 safe 422로 거부하고 root compatibility route는 기존 optional version 계약을 유지한다.
+- MEM-TC-BOUND-024: 서로 다른 두 embedding model group에서 첫 provider 호출 뒤 deadline이 만료되면 두 번째 provider는 호출하지 않으며 `safe_no_result`가 deadline 예외를 삼키지 않는다.
+- MEM-TC-BOUND-025: Redis `SET`이 응답하지 않으면 async transient store가 bounded timeout 안에 `conversation.history_store_unavailable`로 종료한다.
+- MEM-TC-BOUND-026: Compose와 Helm values→ConfigMap→Gateway env가 `PUBLIC_CHAT_CONVERSATION_ROLLOUT_MODE`를 전달한다.
+- MEM-TC-BOUND-027: Nginx Public `/chat` read/send timeout이 600초 absolute deadline보다 길다.
+- MEM-TC-BOUND-028: Nginx가 oversized Public `/chat`을 차단해도 safe JSON code와 no-store/no-referrer headers를 반환한다.

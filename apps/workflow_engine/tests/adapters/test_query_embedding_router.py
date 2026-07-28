@@ -257,6 +257,58 @@ def test_execution_service_groups_same_model_once_and_keeps_model_boundaries():
     assert result.failed_count == 0
 
 
+def test_execution_service_checks_deadline_before_each_provider_invocation():
+    organization_id = uuid.uuid4()
+    kb_a, kb_b = uuid.uuid4(), uuid.uuid4()
+    binding_a = EmbeddingModelBinding(
+        model_id=uuid.uuid4(),
+        provider_id=uuid.uuid4(),
+        model_identifier="embed-a",
+    )
+    binding_b = EmbeddingModelBinding(
+        model_id=uuid.uuid4(),
+        provider_id=uuid.uuid4(),
+        model_identifier="embed-b",
+    )
+    projection = _Projection({kb_a: binding_a, kb_b: binding_b})
+    provider = _Provider()
+    service = QueryEmbeddingExecutionService(
+        model_projection=projection,
+        provider_runtime=provider,
+    )
+    guard_calls = []
+
+    class _DeadlineExpired(RuntimeError):
+        pass
+
+    def deadline_guard():
+        guard_calls.append(len(guard_calls) + 1)
+        if len(guard_calls) == 2:
+            raise _DeadlineExpired("conversation.request_expired")
+
+    with pytest.raises(_DeadlineExpired):
+        service.execute(
+            QueryEmbeddingExecutionRequest(
+                plan=QueryEmbeddingPlan(
+                    capability_required=True,
+                    organization_id=organization_id,
+                    node_id="llm-1",
+                    state=object(),
+                ),
+                organization_id=organization_id,
+                node_id="llm-1",
+                knowledge_base_ids=(str(kb_a), str(kb_b)),
+                failure_policy="safe_no_result",
+                query="query",
+                deadline_guard=deadline_guard,
+            )
+        )
+
+    assert guard_calls == [1, 2]
+    assert len(provider.calls) == 1
+    assert provider.calls[0].model_binding == binding_a
+
+
 def test_execution_service_zero_candidates_skips_projection_and_provider():
     organization_id = uuid.uuid4()
     projection = _Projection({})

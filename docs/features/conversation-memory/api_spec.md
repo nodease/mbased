@@ -68,7 +68,7 @@ Public run은 기존 동기 deployment response를 유지한다.
 | malformed history/envelope | 422 | conversation.* |
 | Public Chatbot envelope 누락 | 422 | conversation.history_required |
 | legacy memory_mode/conversation_id | 422 | conversation.legacy_control_forbidden |
-| deployment_version 형식 오류 | 422 | conversation.deployment_version_invalid |
+| `/chat` deployment_version 누락 또는 형식 오류 | 422 | conversation.deployment_version_invalid |
 | 조회한 version과 active deployment 불일치 | 409 | conversation.deployment_version_changed |
 | 현재 inputs만으로 4,096 token 초과 | 422 | conversation.current_input_too_large |
 | current inputs canonical JSON이 131,072 bytes 초과 | 422 | conversation.inputs_too_large |
@@ -444,7 +444,7 @@ Arbitrary SQL/filter, free-form provider options와 user-global scope는 허용�
 | conversation.token_count_unavailable | 422 | server token validation 실패 |
 | conversation.history_required | 422 | Public Chatbot envelope 누락 |
 | conversation.legacy_control_forbidden | 422 | legacy Public memory control 사용 |
-| conversation.deployment_version_invalid | 422 | deployment_version이 positive integer가 아님 |
+| conversation.deployment_version_invalid | 422 | `/chat` deployment_version 누락 또는 positive integer가 아님 |
 | conversation.deployment_version_changed | 409 | active deployment가 public info 조회 뒤 교체됨 |
 
 Error detail은 request content, history, prompt, completion과 internal deployment/session 존재를 반사하지 않는다.
@@ -477,6 +477,8 @@ Public Chatbot deployment `config`:
 
 `GET /api/v1/deployments/public/{url_slug}/info`는 Chatbot에 `public_conversation_contract: "client_history_v1" | "legacy_v0"`와 정수 `version`을 `Cache-Control: no-store`로 반환한다. 필드가 없는 구 Gateway는 Client가 `legacy_v0`로 취급한다. 새 Client는 root와 `/chat` body에 조회한 `deployment_version`을 포함한다. Gateway는 active deployment와 다르면 budget, transient store와 task publish 전에 `409 conversation.deployment_version_changed`로 종료한다. Client는 info를 다시 조회하고 이전 version history를 폐기한 뒤 현재 입력을 한 번만 재시도한다.
 
+전용 `/chat` route는 `deployment_version` 생략을 허용하지 않는다. Reverse proxy가 393,216-byte body 상한을 먼저 적용해도 Gateway와 같은 content-free `413 conversation.request_too_large`와 no-store/no-referrer headers를 반환한다. Proxy read/send timeout은 Public absolute request deadline 600초보다 긴 610초다.
+
 Compatibility mode에서 root public Chatbot 요청은 legacy `memory_mode`/`conversation_id`를 제거한 무상태 실행으로 처리한다. `/chat` 요청의 legacy control은 계속 `422 conversation.legacy_control_forbidden`이다. Strict mode에서 root public Chatbot은 `422 conversation.history_required`다.
 
 Gateway는 raw history를 600초 TTL의 일회성 Redis key에 저장하고 transient public task에는 opaque reference, absolute `public_request_deadline_at`과 Celery `expires`만 전달한다. Worker는 queued raw `public_chat_history`를 DB 접근 전에 거부하고 deadline과 canonical deployment/preflight를 검증한 뒤 Knowledge sync 후 reference를 atomic GET+DELETE로 소비한다. Celery hard deadline은 absolute public deadline을 넘지 않으며 Knowledge/provider 외부 I/O 직전에 다시 확인한다. `conversation.history_store_unavailable`만 소비가 확인되기 전 기존 Celery retry 대상이다. Invalid/missing/corrupt reference와 소비 뒤 오류는 자동 replay하지 않고 각각 내부 `conversation.history_unavailable` 또는 `conversation.history_replay_required`로 종료해 Client가 원래 history로 새 요청을 보내게 한다. Stale task는 `conversation.request_expired`, missing/malformed deadline은 `conversation.request_deadline_invalid`로 외부 I/O 전에 거부한다. 이 내부 code, reference와 deadline 값은 public API response에 반사하지 않는다.
@@ -484,3 +486,5 @@ Gateway는 raw history를 600초 TTL의 일회성 Redis key에 저장하고 tran
 Public transient dispatch는 `workflow.execute_public_chat.v1` task를 `workflow-public-chat-v1` queue로 publish한다. 새 Workflow Worker는 rollout 동안 일반 `workflow` queue와 이 전용 queue를 함께 소비한다. 구 Worker는 전용 queue를 구독하지 않으므로 Public payload를 실행하지 않는다. 일반 `workflow.execute`에 public history reference, stateless compatibility marker 또는 public actor marker가 잘못 도착하면 DB·Redis·Engine 접근 전에 내부 `conversation.task_contract_mismatch`로 종료한다.
 
 History는 raw admission과 sanitizer 이후 final projection을 같은 validator로 중복 검사하지 않는다. Gateway raw request에 message/envelope 상한을 적용하고, Worker 내부 sanitizer가 pair 한쪽을 비우면 완료 pair 전체를 제거한다. Sanitizer가 만든 marker가 raw message 상한을 넘더라도 raw admission을 다시 적용하지 않으며 실제 provider framing을 포함한 final projection token 상한으로 제한한다.
+
+Gateway의 transient history 저장은 async Redis와 bounded 2초 timeout을 사용한다. Query embedding fan-out은 model group마다 provider invoke 직전에 같은 Public absolute deadline guard를 실행하며 `safe_no_result` 정책도 deadline 만료를 provider 실패로 삼켜 다음 호출을 계속하지 않는다. Rollout mode는 Compose 환경변수와 Helm `gateway.env.PUBLIC_CHAT_CONVERSATION_ROLLOUT_MODE`에서 설정한다.

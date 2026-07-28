@@ -125,6 +125,12 @@ spec:
             configMapKeyRef:
               name: {{ include "moduly.configMapName" . }}
               key: APP_AUTH_SECRET_LIFECYCLE_MODE
+        - name: PUBLIC_CHAT_CONVERSATION_ROLLOUT_MODE
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "moduly.configMapName" . }}
+              key: PUBLIC_CHAT_CONVERSATION_ROLLOUT_MODE
+
         
         # CORS and Security
         - name: CORS_ORIGINS

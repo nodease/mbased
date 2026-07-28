@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 from apps.shared.services.public_chat_history_transient_store import (
     PublicChatHistoryTransientStoreError,
@@ -11,7 +13,7 @@ class _FakeRedis:
         self.values = {}
         self.set_calls = []
 
-    def set(self, key, value, *, ex, nx):
+    async def set(self, key, value, *, ex, nx):
         self.set_calls.append({"key": key, "value": value, "ex": ex, "nx": nx})
         if nx and key in self.values:
             return False
@@ -30,10 +32,12 @@ def test_public_history_store_uses_ttl_and_one_time_consume():
         {"role": "assistant", "content": "이전 답변"},
     )
 
-    reference = store_public_chat_history(
-        history,
-        ttl_seconds=600,
-        redis_client=redis_client,
+    reference = asyncio.run(
+        store_public_chat_history(
+            history,
+            ttl_seconds=600,
+            redis_client=redis_client,
+        )
     )
 
     assert redis_client.set_calls[0]["ex"] == 600
@@ -53,6 +57,30 @@ def test_public_history_store_uses_ttl_and_one_time_consume():
         )
         is None
     )
+
+
+def test_public_history_store_times_out_without_blocking_gateway_event_loop():
+    class _BlockingRedis:
+        async def set(self, *_args, **_kwargs):
+            await asyncio.Event().wait()
+
+    async def store():
+        return await store_public_chat_history(
+            (),
+            ttl_seconds=600,
+            timeout_seconds=0.001,
+            redis_client=_BlockingRedis(),
+        )
+
+    with pytest.raises(PublicChatHistoryTransientStoreError) as exc_info:
+        asyncio.run(
+            asyncio.wait_for(
+                store(),
+                timeout=0.1,
+            )
+        )
+
+    assert exc_info.value.code == "conversation.history_store_unavailable"
 
 
 def test_public_history_consume_classifies_store_unavailable():
