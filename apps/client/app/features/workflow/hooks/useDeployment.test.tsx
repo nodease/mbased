@@ -97,11 +97,15 @@ describe('useDeployment', () => {
       ReturnType<typeof result.current.handleDeploy>
     >;
     await act(async () => {
-      deploymentResult =
-        await result.current.handleDeploy(
-          '사내 문서 질문 응답 봇',
-          disabledParameterOptimization,
-        );
+      deploymentResult = await result.current.handleDeploy(
+        '사내 문서 질문 응답 봇',
+        disabledParameterOptimization,
+        undefined,
+        {
+          contract_version: 'public_chat_conversation.v1',
+          history_consumer: { node_id: 'answer', container_path: [] },
+        },
+      );
     });
 
     expect(mockedWorkflowApi.createDeployment).toHaveBeenCalledWith(
@@ -112,6 +116,12 @@ describe('useDeployment', () => {
         browser_access_policy: {
           contract_version: 'deployment_browser_access.v1',
           embedding: { enabled: false, parent_origins: [] },
+        },
+        config: {
+          public_conversation: {
+            contract_version: 'public_chat_conversation.v1',
+            history_consumer: { node_id: 'answer', container_path: [] },
+          },
         },
       }),
     );
@@ -204,11 +214,10 @@ describe('useDeployment', () => {
       ReturnType<typeof result.current.handleDeploy>
     >;
     await act(async () => {
-      deploymentResult =
-        await result.current.handleDeploy(
-          '사내 문서 질문 응답 봇',
-          disabledParameterOptimization,
-        );
+      deploymentResult = await result.current.handleDeploy(
+        '사내 문서 질문 응답 봇',
+        disabledParameterOptimization,
+      );
     });
 
     expect(mockedWorkflowApi.preflightDeployment).toHaveBeenCalledWith(

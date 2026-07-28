@@ -1,4 +1,5 @@
 import pytest
+from apps.shared.domain import public_chat_history as public_chat_history_module
 from apps.shared.domain.public_chat_history import (
     MAX_PUBLIC_CHAT_TURNS,
     PublicChatHistoryError,
@@ -136,3 +137,19 @@ def test_bound_public_chat_history_does_not_mutate_caller_payload():
     )
 
     assert history == original
+
+
+def test_bound_public_chat_history_rejects_when_strict_tokenizer_is_unavailable(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        public_chat_history_module,
+        "_strict_count_tokens",
+        lambda _text: (_ for _ in ()).throw(RuntimeError("tokenizer unavailable")),
+    )
+
+    with pytest.raises(PublicChatHistoryError):
+        bound_public_chat_history(
+            [],
+            current_inputs={"question": "한국어 질문"},
+        )

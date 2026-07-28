@@ -4,7 +4,7 @@ import json
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
-from apps.shared.utils.template_utils import count_tokens
+import tiktoken
 
 MAX_PUBLIC_CHAT_TURNS = 20
 MAX_PUBLIC_CHAT_CONTEXT_TOKENS = 4096
@@ -68,13 +68,25 @@ def normalize_public_chat_history(
     return tuple(normalized)
 
 
+def _strict_count_tokens(text: str) -> int:
+    try:
+        encoding = tiktoken.encoding_for_model("gpt-4o-mini")
+    except Exception:
+        # This remains an exact tokenizer fallback, never a character heuristic.
+        # If it is unavailable too, the public request fails closed.
+        encoding = tiktoken.get_encoding("cl100k_base")
+    return len(encoding.encode(text))
+
+
 def bound_public_chat_history(
     value: Any,
     *,
     current_inputs: Mapping[str, Any],
-    token_counter: Callable[[str], int] = count_tokens,
+    token_counter: Callable[[str], int] | None = None,
     max_context_tokens: int = MAX_PUBLIC_CHAT_CONTEXT_TOKENS,
 ) -> tuple[dict[str, str], ...]:
+    if token_counter is None:
+        token_counter = _strict_count_tokens
     if not isinstance(current_inputs, Mapping):
         raise PublicChatHistoryError("conversation.inputs_invalid")
     if max_context_tokens < 1:
@@ -85,11 +97,15 @@ def bound_public_chat_history(
     if _safe_token_count(token_counter, current_text) > max_context_tokens:
         raise PublicChatHistoryError("conversation.current_input_too_large")
 
-    while normalized and _context_token_count(
-        normalized,
-        current_text=current_text,
-        token_counter=token_counter,
-    ) > max_context_tokens:
+    while (
+        normalized
+        and _context_token_count(
+            normalized,
+            current_text=current_text,
+            token_counter=token_counter,
+        )
+        > max_context_tokens
+    ):
         del normalized[:2]
 
     return tuple(dict(message) for message in normalized)
@@ -104,7 +120,9 @@ def _context_token_count(
     history_text = "\n".join(
         f"{message['role']}:{message['content']}" for message in history
     )
-    combined = f"{history_text}\ncurrent:{current_text}" if history_text else current_text
+    combined = (
+        f"{history_text}\ncurrent:{current_text}" if history_text else current_text
+    )
     return _safe_token_count(token_counter, combined)
 
 

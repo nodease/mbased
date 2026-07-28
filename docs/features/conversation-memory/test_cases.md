@@ -405,3 +405,20 @@ Disposable PostgreSQL evidence는 `NODEASE_RUN_DISPOSABLE_DB_TEST=1`인 전용 C
 | MEM-REQ-080~085 | Context Materialization, Provider Attempt Reliability, Summary Pricing, Security/E2E |
 | MEM-REQ-086~096 | Version Binding, Principal/Capability, Purge, Audit Cardinality, Cross-Domain E2E |
 | MEM-NFR-001~009 | Architecture Boundary, API cache/idempotency/CSP, Performance/Reliability, Property/Fuzz |
+
+## MBA-318 Boundary Completion Regression Matrix
+
+- MEM-TC-BOUND-001: multi-LLM graph에서 지정 consumer만 history를 provider prompt와 RAG query에 사용하고 classifier/다른 provider node는 history를 받지 않는다.
+- MEM-TC-BOUND-002: missing/not-found/non-LLM/unknown-version consumer mapping은 preflight, run과 Worker에서 fail-closed한다.
+- MEM-TC-BOUND-003: broker가 forged consumer ref를 보내도 Worker는 deployment snapshot mapping으로 덮어쓴다.
+- MEM-TC-BOUND-004: Public RAG retrieve, collection retrieve와 policy block audit은 모두 `actor_id=null`, `actor_type=public`이다.
+- MEM-TC-BOUND-005: tokenizer model lookup과 exact fallback이 모두 실패하면 provider 호출 없이 `conversation.token_count_unavailable`다.
+- MEM-TC-BOUND-006: legacy control 요청은 budget, secret migration, DB mutation과 task publish를 한 번도 호출하지 않는다.
+- MEM-TC-BOUND-007: 새 Frontend+구 Gateway는 capability 필드 누락을 `memory_mode`/`conversation_id` 없는 legacy root로 처리한다.
+- MEM-TC-BOUND-008: 구 Frontend+새 compatibility Gateway는 root 요청이 성공하되 memory/conversation control을 제거하고 content persistence를 억제한다.
+- MEM-TC-BOUND-009: 새 Frontend+새 Gateway는 `client_history_v1`에서 `/chat`을 사용한다.
+- MEM-TC-BOUND-010: strict Gateway는 root public Chatbot을 history-required로 거부한다.
+- MEM-TC-BOUND-011: Gateway dispatch는 raw history 대신 600초 TTL 일회성 Redis reference, Celery `expires`와 absolute deadline을 전달한다.
+- MEM-TC-BOUND-012: deadline이 지난 broker payload는 Session/Knowledge/Engine/provider 접근 전에 non-retryable하게 종료한다.
+- MEM-TC-BOUND-013: Worker는 malformed 또는 timezone 없는 public deadline을 fail-closed한다.
+- MEM-TC-BOUND-014: compatibility와 strict 모두 Public WorkflowRun/NodeRun/Trace 원문 저장을 활성화하지 않는다.

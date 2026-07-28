@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   buildPublicConversationHistory,
+  buildPublicConversationRequest,
   buildPublicConversationRunPath,
 } from './publicConversationHistory';
 
@@ -10,6 +11,49 @@ describe('buildPublicConversationRunPath', () => {
     expect(buildPublicConversationRunPath('team/chat bot')).toBe(
       '/api/v1/run-public/team%2Fchat%20bot/chat',
     );
+  });
+});
+
+describe('buildPublicConversationRequest', () => {
+  it('uses client-held history only when the Gateway advertises V1', () => {
+    expect(
+      buildPublicConversationRequest(
+        'chat',
+        { question: 'now' },
+        [
+          { id: 'user-1', role: 'user', content: 'old' },
+          { id: 'assistant-1', role: 'assistant', content: 'answer' },
+        ],
+        'client_history_v1',
+      ),
+    ).toEqual({
+      path: '/api/v1/run-public/chat/chat',
+      body: {
+        inputs: { question: 'now' },
+        conversation: {
+          history: [
+            { role: 'user', content: 'old' },
+            { role: 'assistant', content: 'answer' },
+          ],
+        },
+      },
+    });
+  });
+
+  it('falls back to the legacy root request when the capability is absent', () => {
+    expect(
+      buildPublicConversationRequest(
+        'chat',
+        { question: 'now' },
+        [],
+        undefined,
+      ),
+    ).toEqual({
+      path: '/api/v1/run-public/chat',
+      body: {
+        inputs: { question: 'now' },
+      },
+    });
   });
 });
 

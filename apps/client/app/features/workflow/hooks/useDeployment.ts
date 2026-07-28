@@ -7,6 +7,7 @@ import type {
   DeploymentBrowserAccessPolicy,
   DeploymentParameterOptimizationConfig,
   DeploymentType,
+  PublicChatConversationConfig,
 } from '../types/Deployment';
 import { disabledBrowserAccessPolicy } from '../utils/browserAccessPolicy';
 import {
@@ -120,6 +121,7 @@ export function useDeployment({
       description: string,
       parameterOptimization: DeploymentParameterOptimizationConfig,
       browserAccessPolicy?: DeploymentBrowserAccessPolicy,
+      publicConversation?: PublicChatConversationConfig,
     ): Promise<DeploymentResult> => {
       try {
         if (!activeWorkflow?.appId) {
@@ -132,11 +134,14 @@ export function useDeployment({
         const requestedBrowserAccessPolicy = supportsEmbeddingPolicy
           ? browserAccessPolicy || disabledBrowserAccessPolicy()
           : undefined;
+        const deploymentConfig = publicConversation
+          ? { public_conversation: publicConversation }
+          : {};
         const preflight = await workflowApi.preflightDeployment({
           app_id: activeWorkflow.appId,
           description,
           type: deploymentType,
-          config: {},
+          config: deploymentConfig,
           parameter_optimization: parameterOptimization,
           is_active: true,
           ...(requestedBrowserAccessPolicy
@@ -167,6 +172,7 @@ export function useDeployment({
           app_id: activeWorkflow.appId,
           description,
           type: deploymentType,
+          config: deploymentConfig,
           parameter_optimization: parameterOptimization,
           is_active: true,
           ...(normalizedBrowserAccessPolicy

@@ -56,3 +56,13 @@ Public Client는 deployment-owned parent embedding policy가 확인된 surface�
 ## Accessibility
 
 - 내부 질문 입력은 자동 높이 `textarea`, 전송은 `button[type=submit]`이다. `Enter` 전송과 `Shift+Enter` 줄바꿈 안내를 composer 아래에 표시하고 전송 중에는 입력/버튼을 비활성화한다.
+
+## Public Conversation Consumer Selection
+
+- 공개 Chatbot 배포 모달은 “대화 기록을 사용할 LLM 노드” select를 표시한다.
+- LLM node가 하나면 해당 node를 선택 상태로 표시하고, 여러 개면 사용자가 하나를 고르기 전 배포 버튼을 비활성화한다.
+- 선택값은 preflight/create의 동일한 versioned config로 보내며 최종 runtime은 Gateway와 Worker의 canonical snapshot 검증 결과를 사용한다.
+- Embed Chat은 public info의 `client_history_v1` capability에서만 `/chat` history envelope을 보낸다.
+- capability가 `legacy_v0`이거나 누락되면 mixed-revision 호환 root를 사용하되 `memory_mode`와 `conversation_id`를 보내지 않는다.
+- 새 Gateway compatibility adapter는 이 root 요청을 server-side Memory가 아닌 stateless public 실행으로 변환한다.
+- strict rollout 전환 뒤 legacy capability deployment는 새 consumer config version으로 재배포해야 한다.

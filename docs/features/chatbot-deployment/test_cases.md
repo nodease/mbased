@@ -140,3 +140,17 @@ Public Chatbot은 bounded client-held history 계약을 검증한다. `memory_mo
 - 공개 페이지는 localStorage/sessionStorage 사용 가능 여부와 무관하게 conversation ID 또는 history 원문을 저장하지 않는다. 내부 페이지의 page-session UUID는 별도 authenticated control이다.
 - 인증 workflow가 `conversation_id` 또는 `memory_mode`라는 입력 변수를 선언해도 typed control과 혼동하지 않고 업무 값이 보존된다.
 - 다른 organization을 active context로 선택한 사용자가 내부 링크를 열면 run-info는 `404`를 반환하며 클라이언트는 링크만으로 organization을 자동 전환하지 않는다.
+
+## Public Conversation Boundary Completion
+
+- 공개 Chatbot에 LLM이 하나면 consumer select가 그 node를 표시하고, 여러 개면 명시적 선택 전 배포가 차단된다.
+- Preflight와 create가 동일한 `public_chat_conversation.v1` config를 받는다.
+- Public info는 valid mapping에 `client_history_v1`, missing/invalid legacy deployment에 `legacy_v0`를 반환한다.
+- Embed Chat은 capability가 있으면 `/chat`, 없거나 legacy이면 `memory_mode`/`conversation_id` 없는 root request를 만든다.
+- 새 Gateway compatibility root는 legacy memory controls를 제거하고 `memory_mode=false`, `conversation_id=null`, persistence suppression으로 실행한다.
+- Strict mode root Chatbot은 `conversation.history_required`로 거부한다.
+- Multi-LLM runtime은 지정 consumer 외 node에 history 또는 history 기반 RAG query를 전달하지 않는다.
+- Public RAG audit 세 경로는 public actor를 기록한다.
+- Invalid legacy control은 budget/migration/publish 전에 zero-write로 거부한다.
+- Tokenizer failure는 휴리스틱 없이 422로 종료한다.
+- Celery task에는 raw history 대신 opaque reference만 있고 Worker가 600초 TTL history를 한 번만 소비한다. Celery expires와 Worker absolute deadline은 동일 요청 lifetime을 강제하고 stale queue task는 external I/O 전에 종료한다.

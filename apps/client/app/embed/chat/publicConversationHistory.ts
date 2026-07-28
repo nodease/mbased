@@ -1,7 +1,12 @@
 export const MAX_PUBLIC_CHAT_TURNS = 20;
 
+export type PublicConversationContract = 'client_history_v1' | 'legacy_v0';
+
 export const buildPublicConversationRunPath = (urlSlug: string): string =>
   `/api/v1/run-public/${encodeURIComponent(urlSlug)}/chat`;
+
+const buildLegacyPublicRunPath = (urlSlug: string): string =>
+  `/api/v1/run-public/${encodeURIComponent(urlSlug)}`;
 
 export interface PublicConversationHistoryMessage {
   role: 'user' | 'assistant';
@@ -11,6 +16,36 @@ export interface PublicConversationHistoryMessage {
 interface DisplayMessage extends PublicConversationHistoryMessage {
   id: string;
 }
+
+export interface PublicConversationRequest {
+  path: string;
+  body: Record<string, unknown>;
+}
+
+export const buildPublicConversationRequest = (
+  urlSlug: string,
+  inputs: Record<string, unknown>,
+  messages: readonly DisplayMessage[],
+  contract: PublicConversationContract | undefined,
+): PublicConversationRequest => {
+  if (contract === 'client_history_v1') {
+    return {
+      path: buildPublicConversationRunPath(urlSlug),
+      body: {
+        inputs,
+        conversation: {
+          history: buildPublicConversationHistory(messages),
+        },
+      },
+    };
+  }
+  return {
+    path: buildLegacyPublicRunPath(urlSlug),
+    body: {
+      inputs,
+    },
+  };
+};
 
 export const buildPublicConversationHistory = (
   messages: readonly DisplayMessage[],

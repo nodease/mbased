@@ -445,3 +445,27 @@ Error detail은 request content, history, prompt, completion과 internal deploym
 - Public Chatbot의 legacy `inputs.memory_mode`와 `inputs.conversation_id`는 거부한다.
 - WEBAPP/WIDGET 등 non-Chatbot public 실행은 기존 single-run contract를 유지한다.
 - Authenticated internal Chatbot의 subject-bound legacy control은 후속 durable Memory cutover 전까지 유지한다.
+
+## MBA-318 Public Conversation Deployment Contract
+
+Public Chatbot deployment `config`:
+
+```json
+{
+  "public_conversation": {
+    "contract_version": "public_chat_conversation.v1",
+    "history_consumer": {
+      "node_id": "final-answer-llm",
+      "container_path": []
+    }
+  }
+}
+```
+
+`history_consumer`는 snapshot 안의 정확히 한 `llmNode` canonical location이어야 한다. `/chat`은 mapping 누락·not-found·non-LLM을 content-free `409 conversation.consumer_mapping_*`로 거부한다. Preflight/create는 제공된 mapping을 `422`로 검증하며 strict rollout에서는 누락도 거부한다.
+
+`GET /api/v1/deployments/public/{url_slug}/info`는 Chatbot에 `public_conversation_contract: "client_history_v1" | "legacy_v0"`를 반환한다. 필드가 없는 구 Gateway는 Client가 `legacy_v0`로 취급한다.
+
+Compatibility mode에서 root public Chatbot 요청은 legacy `memory_mode`/`conversation_id`를 제거한 무상태 실행으로 처리한다. `/chat` 요청의 legacy control은 계속 `422 conversation.legacy_control_forbidden`이다. Strict mode에서 root public Chatbot은 `422 conversation.history_required`다.
+
+Gateway는 raw history를 600초 TTL의 일회성 Redis key에 저장하고 transient public task에는 opaque reference, absolute `public_request_deadline_at`과 Celery `expires`만 전달한다. Worker는 deadline을 먼저 검증한 뒤 reference를 atomic GET+DELETE로 소비한다. Stale task는 `conversation.request_expired`, missing/malformed deadline은 `conversation.request_deadline_invalid`, missing/consumed/corrupt reference는 내부 `conversation.history_unavailable`로 외부 I/O 전에 거부한다. 이 내부 code, reference와 deadline 값은 public API response에 반사하지 않는다.

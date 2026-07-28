@@ -10,6 +10,7 @@ import type {
   DeploymentBrowserAccessPolicy,
   DeploymentType,
   DeploymentParameterOptimizationConfig,
+  PublicChatConversationConfig,
 } from '../../types/Deployment';
 import { InputStep } from './InputStep';
 import { SuccessStep } from './SuccessStep';
@@ -29,6 +30,7 @@ interface Props {
     description: string,
     parameterOptimization: DeploymentParameterOptimizationConfig,
     browserAccessPolicy?: DeploymentBrowserAccessPolicy,
+    publicConversation?: PublicChatConversationConfig,
   ) => Promise<DeploymentResult>;
 }
 
@@ -46,13 +48,18 @@ export function DeploymentFlowModal({
   const [description, setDescription] = useState('');
   const [deploymentResult, setDeploymentResult] =
     useState<DeploymentResult | null>(null);
-  const [issuedSecret, setIssuedSecret] =
-    useState<IssuedAppAuthSecret | null>(null);
+  const [issuedSecret, setIssuedSecret] = useState<IssuedAppAuthSecret | null>(
+    null,
+  );
   const [appAuthSecretReadiness, setAppAuthSecretReadiness] =
     useState<AppAuthSecretReadiness>('checking');
   const [isDeploying, setIsDeploying] = useState(false);
   const [embeddingEnabled, setEmbeddingEnabled] = useState(false);
   const [parentOrigins, setParentOrigins] = useState<string[]>(['']);
+  const [
+    conversationHistoryConsumerNodeId,
+    setConversationHistoryConsumerNodeId,
+  ] = useState('');
   const [parameterOptimization, setParameterOptimization] =
     useState<DeploymentParameterOptimizationConfig>({
       enabled: false,
@@ -80,6 +87,9 @@ export function DeploymentFlowModal({
       setDeploymentResult(null);
       setEmbeddingEnabled(false);
       setParentOrigins(['']);
+      setConversationHistoryConsumerNodeId(
+        llmNodes.length === 1 ? llmNodes[0].id : '',
+      );
     }
   }, [isOpen, llmNodes]);
 
@@ -109,13 +119,30 @@ export function DeploymentFlowModal({
     setIsDeploying(true);
 
     try {
-      const result = nextBrowserAccessPolicy
+      const publicConversation: PublicChatConversationConfig | undefined =
+        deploymentType === 'chatbot' && conversationHistoryConsumerNodeId
+          ? {
+              contract_version: 'public_chat_conversation.v1',
+              history_consumer: {
+                node_id: conversationHistoryConsumerNodeId,
+                container_path: [],
+              },
+            }
+          : undefined;
+      const result = publicConversation
         ? await onDeploy(
             description,
             parameterOptimization,
             nextBrowserAccessPolicy,
+            publicConversation,
           )
-        : await onDeploy(description, parameterOptimization);
+        : nextBrowserAccessPolicy
+          ? await onDeploy(
+              description,
+              parameterOptimization,
+              nextBrowserAccessPolicy,
+            )
+          : await onDeploy(description, parameterOptimization);
       setDeploymentResult(result);
 
       if (result.success) {
@@ -227,6 +254,13 @@ export function DeploymentFlowModal({
               deploymentTypeLabel={getDeploymentTypeName()}
               description={description}
               onDescriptionChange={setDescription}
+              llmNodes={llmNodes}
+              conversationHistoryConsumerNodeId={
+                conversationHistoryConsumerNodeId
+              }
+              onConversationHistoryConsumerNodeIdChange={
+                setConversationHistoryConsumerNodeId
+              }
               embeddingEnabled={embeddingEnabled}
               parentOrigins={parentOrigins}
               onEmbeddingEnabledChange={(enabled) => {

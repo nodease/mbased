@@ -23,6 +23,14 @@ export interface DeploymentBrowserAccessPolicy {
   };
 }
 
+export interface PublicChatConversationConfig {
+  contract_version: 'public_chat_conversation.v1';
+  history_consumer: {
+    node_id: string;
+    container_path: [];
+  };
+}
+
 export interface DeploymentBrowserAccessRevisionCreate {
   browser_access_policy: DeploymentBrowserAccessPolicy;
   is_active?: boolean;

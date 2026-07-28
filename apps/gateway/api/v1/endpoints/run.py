@@ -12,6 +12,7 @@ from fastapi import (
 from sqlalchemy.orm import Session
 
 from apps.gateway.api.deps import get_deployment_runtime_policy
+from apps.gateway.core.config import settings
 from apps.shared.db.session import get_db
 from apps.gateway.services.deployment_service import DeploymentService
 from apps.gateway.middleware.public_conversation_cors import (
@@ -85,6 +86,9 @@ async def run_workflow_public(
             url_slug=url_slug,
             user_inputs=user_inputs,
             client_conversation_history=None,
+            allow_stateless_public_chatbot_compatibility=(
+                settings.PUBLIC_CHAT_CONVERSATION_ROLLOUT_MODE == "compatibility"
+            ),
             auth_token=None,
             require_auth=False,  # 인증 불필요
             trigger_mode="app",  # 웹 앱/임베딩 호출
@@ -92,9 +96,8 @@ async def run_workflow_public(
         )
     except HTTPException as error:
         detail = error.detail
-        if (
-            isinstance(detail, dict)
-            and str(detail.get("code", "")).startswith("conversation.")
+        if isinstance(detail, dict) and str(detail.get("code", "")).startswith(
+            "conversation."
         ):
             mark_public_conversation_transport_boundary(request.scope)
         raise

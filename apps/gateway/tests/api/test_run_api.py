@@ -89,6 +89,7 @@ def test_public_run_forwards_injected_runtime_policy_at_fastapi_boundary(
         "url_slug": "injected-policy-app",
         "user_inputs": {"question": "개발팀 커밋 컨벤션은?"},
         "client_conversation_history": None,
+        "allow_stateless_public_chatbot_compatibility": True,
         "auth_token": None,
         "require_auth": False,
         "trigger_mode": "app",

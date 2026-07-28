@@ -1,5 +1,6 @@
 import uuid
 import sys
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -9,6 +10,9 @@ from apps.shared.db.models.workflow_deployment import DeploymentType
 from apps.shared.domain.deployment_runtime_policy import (
     DEFAULT_DEPLOYMENT_RUNTIME_POLICY,
     SURFACE_WEBHOOK_RUN,
+)
+from apps.shared.domain.workflow_node_location import (
+    CanonicalWorkflowNodeLocation,
 )
 from apps.workflow_engine.workflow.errors import NonRetryableWorkflowError
 
@@ -97,6 +101,7 @@ def _active_deployment_pair(
         is_active=True,
         created_by=created_by,
         graph_snapshot=graph_snapshot or {"nodes": []},
+        config={},
     )
     FakeSession.app = SimpleNamespace(
         id=app_id,
@@ -178,7 +183,9 @@ def patch_task_dependencies(monkeypatch):
         is_active=True,
         created_by=FakeSession.app.created_by,
         graph_snapshot={"nodes": []},
+        config={},
     )
+    monkeypatch.setattr(tasks, "consume_public_chat_history", lambda _ref: ())
     monkeypatch.setattr(tasks, "SessionLocal", lambda: FakeSession())
     monkeypatch.setitem(
         sys.modules,
@@ -261,6 +268,61 @@ def test_deployed_graph_execution_revalidates_exact_snapshot():
     assert context["workflow_version"] == FakeSession.deployment.version
 
 
+def test_deployed_public_chatbot_rebuilds_consumer_mapping_from_snapshot():
+    graph = {
+        "nodes": [
+            {
+                "id": "classifier",
+                "type": "llmNode",
+                "data": {"model_id": "model-1", "user_prompt": "분류하세요."},
+            },
+            {
+                "id": "answer",
+                "type": "llmNode",
+                "data": {"model_id": "model-1", "user_prompt": "질문에 답변하세요."},
+            },
+        ],
+        "edges": [],
+    }
+    FakeSession.deployment.type = DeploymentType.CHATBOT
+    FakeSession.deployment.graph_snapshot = graph
+    FakeSession.deployment.config = {
+        "public_conversation": {
+            "contract_version": "public_chat_conversation.v1",
+            "history_consumer": {
+                "node_id": "answer",
+                "container_path": [],
+            },
+        }
+    }
+    forged_ref = CanonicalWorkflowNodeLocation((), "classifier").safe_reference
+
+    result = tasks.execute_workflow.run(
+        graph,
+        {},
+        {
+            "workflow_id": str(FakeSession.workflow.id),
+            "execution_id": str(uuid.uuid4()),
+            "deployment_id": str(FakeSession.deployment.id),
+            "workflow_version": FakeSession.deployment.version,
+            "trigger_mode": "app",
+            "public_chat_history_ref": "b" * 32,
+            "public_chat_history_consumer_ref": forged_ref,
+            "public_request_deadline_at": (
+                datetime.now(timezone.utc) + timedelta(minutes=1)
+            ).isoformat(),
+        },
+        True,
+    )
+
+    context = FakeWorkflowEngine.calls[0]["kwargs"]["execution_context"]
+    assert result["status"] == "success"
+    assert context["public_chat_history_consumer_ref"] == (
+        CanonicalWorkflowNodeLocation((), "answer").safe_reference
+    )
+    assert context["execution_actor"] == {"type": "public"}
+
+
 def test_deployed_graph_execution_rejects_snapshot_drift():
     FakeSession.deployment.graph_snapshot = {"nodes": [], "edges": []}
 
@@ -281,6 +343,35 @@ def test_deployed_graph_execution_rejects_snapshot_drift():
         )
 
     assert FakeWorkflowEngine.calls == []
+
+
+def test_public_chatbot_execution_rejects_expired_queue_payload_before_db_access(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        tasks,
+        "SessionLocal",
+        lambda: pytest.fail("expired public payload must not access the database"),
+    )
+
+    with pytest.raises(
+        NonRetryableWorkflowError,
+        match="conversation.request_expired",
+    ):
+        tasks.execute_workflow.run(
+            {"nodes": []},
+            {},
+            {
+                "public_chat_history_ref": "c" * 32,
+                "public_request_deadline_at": (
+                    datetime.now(timezone.utc) - timedelta(seconds=1)
+                ).isoformat(),
+            },
+            True,
+        )
+
+    assert FakeWorkflowEngine.calls == []
+    assert FakeSyncService.calls == []
 
 
 def test_execute_workflow_rejects_invalid_execution_identity_without_retry():
@@ -318,7 +409,9 @@ def test_draft_execution_rejects_unresolved_external_action_before_engine(task_n
         "execution_id": str(uuid.uuid4()),
     }
 
-    with pytest.raises(NonRetryableWorkflowError, match="workflow_configuration_unresolved"):
+    with pytest.raises(
+        NonRetryableWorkflowError, match="workflow_configuration_unresolved"
+    ):
         if task_name == "execute_workflow":
             tasks.execute_workflow.run(graph, {}, execution_context, False)
         else:
@@ -765,7 +858,9 @@ def test_deployed_execution_rejects_unresolved_external_action_before_engine():
         graph_snapshot=graph_snapshot
     )
 
-    with pytest.raises(NonRetryableWorkflowError, match="workflow_configuration_unresolved"):
+    with pytest.raises(
+        NonRetryableWorkflowError, match="workflow_configuration_unresolved"
+    ):
         tasks.execute_by_deployment.run(
             str(deployment.id),
             {},

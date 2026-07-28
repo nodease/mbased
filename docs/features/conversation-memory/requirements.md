@@ -201,3 +201,18 @@ Public 값을 완화하려면 별도 보안·비용 검토가 필요하다. Auth
 MBA-318은 Public client-held history, legacy Public memory control 차단, content-free Workflow logging과 Embed Chat 전달을 구현한다. MBA-316/317의 durable persistence 및 public lifecycle foundation은 active API에 등록하지 않고 보존한다.
 
 남은 범위는 authenticated internal Chatbot의 RBAC/CSRF/Origin, durable session/turn/entry, transcript lifecycle, retention/legal hold, provider admission/lease/fencing과 운영 UI다. 이 후속 구현은 active durable Memory domain contract를 최신 `dev`와 ADR-0074 경계에 맞게 선별 적용한다.
+
+## MBA-318 Boundary Completion Requirements
+
+- MEM-REQ-097: Public Chatbot 배포는 history를 소비할 정확한 `llmNode` canonical location을 versioned deployment config로 지정해야 하며 first/last node를 자동 추측하지 않아야 한다.
+- MEM-REQ-098: Gateway와 Worker는 deployment snapshot에서 consumer mapping을 각각 검증하고 LLMNode는 자신의 canonical location이 일치할 때만 history를 provider와 RAG query에 사용해야 한다.
+- MEM-REQ-099: Public RAG audit actor는 `actor_id=null`, `actor_type=public`이어야 하며 app owner, credential principal 또는 generic system actor로 대체하지 않아야 한다.
+- MEM-REQ-100: Public token validation은 실제 tokenizer만 사용하고 tokenizer를 사용할 수 없으면 문자 휴리스틱 없이 `conversation.token_count_unavailable`로 fail-closed해야 한다.
+- MEM-REQ-101: Public envelope, legacy control과 consumer mapping 검증은 budget admission, secret migration, DB mutation과 task publish보다 먼저 완료해야 한다.
+- MEM-REQ-102: 혼합 revision 동안 public info capability가 client-history 지원 여부를 나타내야 하며 capability가 없는 구 Gateway와 구 Client 조합도 가용해야 한다.
+- MEM-REQ-103: 새 Gateway가 legacy root public Chatbot 요청을 호환 처리할 때 legacy control을 제거하고 server Memory와 content persistence를 활성화하지 않는 무상태 실행이어야 한다.
+- MEM-REQ-104: strict rollout mode에서는 root public Chatbot 실행을 허용하지 않고 전용 `/chat` history 계약만 허용해야 한다.
+- MEM-REQ-105: Public raw history는 bounded TTL의 일회성 transient store에만 두고 broker에는 opaque reference만 전달해야 하며, task는 Gateway 생성 시각 기준 bounded absolute deadline과 broker expiry를 가져야 한다.
+- MEM-REQ-106: Worker는 DB 조회, Knowledge sync, Workflow Engine과 provider 호출 전에 deadline을 재검증하고 expired/malformed public task를 non-retryable하게 거부해야 한다.
+
+`PUBLIC_CHAT_CONVERSATION_ROLLOUT_MODE=compatibility`는 배포 순서용 임시 기본값이다. strict 전환 전 active legacy public Chatbot을 consumer mapping이 있는 새 deployment version으로 교체한다.

@@ -21,6 +21,12 @@ class Settings(BaseSettings):
     # Gateway and Worker processes have drained.
     QUERY_EMBEDDING_POLICY_WRITE_MODE: Literal["disabled", "active"] = "disabled"
 
+    # Compatibility keeps old public chatbot clients available as stateless
+    # requests while mixed Gateway/Frontend revisions drain.
+    PUBLIC_CHAT_CONVERSATION_ROLLOUT_MODE: Literal["compatibility", "strict"] = (
+        "compatibility"
+    )
+
     # AWS Settings
     AWS_ACCESS_KEY_ID: Optional[str] = None
     AWS_SECRET_ACCESS_KEY: Optional[str] = None

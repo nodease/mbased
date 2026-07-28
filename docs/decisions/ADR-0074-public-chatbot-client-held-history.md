@@ -128,3 +128,56 @@ LLMNode는 Gateway가 검증·bound한 history의 각 content를 정확히 한 �
 - 내부 surface는 authenticated execution subject, organization RBAC, CSRF/Origin, retention/legal policy와 operator transcript authorization을 별도로 검토한다.
 - Public 대화의 refresh 복구 요구가 생기면 raw browser storage를 바로 추가하지 않고 Option B의 encrypted client-held state를 별도 ADR로 검토한다.
 - 운영 검증은 Public WorkflowRun/NodeRun/Trace payload에 원문이 남지 않는지와 Redis result TTL/소비 후 제거를 포함한다.
+
+## Implementation Decision: Typed Consumer, Rollout And Queue Lifetime
+
+### Context
+
+전용 `/chat` route와 client-held history만으로는 실행 경계가 완결되지 않았다. 하나의 graph에 여러 LLM node가 있으면 모든 node가 같은 global execution context를 읽을 수 있었고, 익명 RAG audit은 owner가 아닌 `system`으로 기록되었다. Generic token helper는 tokenizer 실패 시 문자 수 추정값을 반환했고, legacy control 검증은 budget 및 secret migration 뒤에 수행되었다. 또한 Frontend와 Gateway가 서로 다른 revision이면 `/chat` 또는 root 계약이 맞지 않았으며 Redis broker backlog의 raw history는 Gateway timeout 뒤에도 소비될 수 있었다.
+
+### Options Considered
+
+- 모든 LLM node에 history를 계속 제공하고 prompt로 역할을 구분: classifier·router·다른 provider로 불필요한 대화가 전파되어 선택하지 않는다.
+- 첫 번째 또는 마지막 LLM node를 자동 추측: multi-LLM graph 의미를 서버가 안전하게 알 수 없어 선택하지 않는다.
+- 배포 snapshot에 canonical node location을 명시하고 Worker가 다시 계산: 배포자 선택과 runtime fail-closed 검증을 함께 제공하므로 선택한다.
+- 혼합 revision을 즉시 hard cutover: 정상 public Chatbot이 배포 순서에 따라 404/422가 되어 선택하지 않는다.
+- legacy root에서 server Memory를 임시 유지: 데이터 최소화 결정을 되돌리므로 선택하지 않는다.
+- Celery expiry만 사용: dequeue 시점에 stale 실행을 막는 Worker 검증이 없어 충분하지 않다.
+
+### Final Decision
+
+1. Public Chatbot 배포 config는 `public_chat_conversation.v1`과 정확한 `history_consumer.node_id/container_path`를 저장한다. 대상은 snapshot 안의 `llmNode` 하나여야 한다.
+2. Gateway는 `/chat` dispatch에 consumer의 canonical safe reference만 넣고 Worker는 canonical deployment row와 graph snapshot에서 이를 다시 계산한다. LLMNode는 자신의 canonical location과 일치할 때만 provider prompt와 RAG query에 history를 사용한다.
+3. Public 실행은 authorization subject와 분리된 `execution_actor={"type":"public"}`를 사용한다. RAG audit은 `actor_id=null`, `actor_type=public`이며 app owner·credential principal·system으로 대체하지 않는다.
+4. Public token bound는 실제 tokenizer만 사용한다. model tokenizer를 얻지 못하면 `cl100k_base`를 사용하고 그것도 실패하면 `conversation.token_count_unavailable`로 provider 호출 전에 거부한다. 문자 수 추정은 사용하지 않는다.
+5. Envelope와 legacy control 검증, consumer mapping 검증은 budget admission, secret migration, DB mutation과 task publish 전에 끝난다.
+6. `compatibility` rollout 동안 public info는 `client_history_v1` 또는 `legacy_v0` capability를 반환한다. 새 Client는 capability가 없거나 legacy이면 legacy control 없이 root를 사용한다. 새 Gateway의 root public Chatbot 호환 요청은 `memory_mode=false`, `conversation_id=null`, content persistence suppression 상태로 무상태 실행한다. `strict` 전환 뒤 root public Chatbot은 history-required로 닫는다.
+7. Gateway는 raw history를 600초 TTL의 일회성 Redis key에 저장하고 Celery task에는 128-bit opaque reference만 넣는다. Public transient dispatch는 같은 생성 시각 기준 600초 deadline을 context와 Celery `expires`에 함께 기록한다. Worker는 DB, Knowledge sync, engine과 provider보다 먼저 absolute deadline을 검증한 뒤 history를 atomic GET+DELETE로 한 번만 소비하며 stale/malformed/missing reference를 non-retryable하게 거부한다. Result는 소비 직후 제거한다.
+
+### Rationale
+
+이 결정은 history의 소유자, 유일한 소비자, 실제 actor, 검증 순서, 배포 version 호환성과 transport lifetime을 각각 명시한다. Capability rollout은 가용성을 유지하지만 새 Gateway에서 legacy public server storage를 다시 활성화하지 않는다. Broker header와 Worker absolute deadline을 함께 사용하면 broker 특성이나 consumer 중단 상태와 무관하게 timeout 뒤 provider 실행을 막는다.
+
+### Affected Files
+
+- `apps/shared/domain/public_chat_conversation.py`
+- `apps/shared/domain/public_chat_history.py`
+- `apps/shared/services/public_chat_history_transient_store.py`
+- `apps/shared/schemas/deployment.py`
+- `apps/gateway/core/config.py`
+- `apps/gateway/api/v1/endpoints/deployment.py`
+- `apps/gateway/api/v1/endpoints/run.py`
+- `apps/gateway/services/deployment_service.py`
+- `apps/workflow_engine/tasks.py`
+- `apps/workflow_engine/workflow/nodes/llm/llm_node.py`
+- `apps/client/app/features/workflow/components/deployment/*`
+- `apps/client/app/features/workflow/hooks/useDeployment.ts`
+- `apps/client/app/embed/chat/*`
+- 관련 Shared, Gateway, Workflow Engine, Client 테스트와 기능 문서
+
+### Follow-up Review Notes
+
+- 배포 순서는 capability를 이해하는 Frontend, compatibility Gateway, 기존 Client drain, strict Gateway 순으로 운영 검토한다.
+- strict 전환 전 active legacy Chatbot 배포를 새 versioned consumer config로 재배포한다.
+- Redis TTL 삭제 시점만 신뢰하지 않는다. 보안 불변조건은 opaque reference의 일회 소비와 Worker absolute deadline 재검증이다.
+- multi-LLM, nested loop location, tokenizer failure, zero-write invalid request, public audit actor, forged broker mapping과 stalled queue를 회귀 테스트한다.

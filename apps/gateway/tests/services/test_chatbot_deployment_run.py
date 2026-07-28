@@ -40,6 +40,7 @@ def _run_public(
     trigger_mode="app",
     conversation_history=_UNSET_HISTORY,
     async_result_cls=None,
+    allow_stateless_public_chatbot_compatibility=False,
 ):
     from apps.gateway.services import deployment_service as deployment_module
 
@@ -52,6 +53,15 @@ def _run_public(
         )
 
     celery = _CaptureCelery()
+    celery.stored_history = []
+
+    def store_history(history, *, ttl_seconds):
+        celery.stored_history.append(
+            {"history": tuple(history), "ttl_seconds": ttl_seconds}
+        )
+        return "a" * 32
+
+    monkeypatch.setattr(deployment_module, "store_public_chat_history", store_history)
     monkeypatch.setattr(deployment_module, "celery_app", celery)
     # run_deployment 내부의 `from celery.result import AsyncResult`가 가짜를 집도록 패치
     monkeypatch.setattr(
@@ -67,6 +77,9 @@ def _run_public(
             trigger_mode=trigger_mode,
             runtime_policy=DEFAULT_DEPLOYMENT_RUNTIME_POLICY,
             client_conversation_history=conversation_history,
+            allow_stateless_public_chatbot_compatibility=(
+                allow_stateless_public_chatbot_compatibility
+            ),
             auth_token=None,
             require_auth=False,
         )
@@ -104,10 +117,15 @@ def test_public_run_blocks_unresolved_external_configuration_before_publish(
     deployment_row.graph_snapshot = {
         "nodes": [
             {
+                "id": "answer-llm",
+                "type": "llmNode",
+                "data": {"model_id": "model-1", "user_prompt": "질문에 답변하세요."},
+            },
+            {
                 "id": "slack-1",
                 "type": "slackPostNode",
                 "data": {"title": "Slack"},
-            }
+            },
         ],
         "edges": [],
     }
@@ -198,9 +216,18 @@ def test_public_chatbot_threads_client_history_without_server_memory(monkeypatch
     ctx = _captured_context(celery)
     assert ctx["memory_mode"] is False
     assert ctx["conversation_id"] is None
-    assert ctx["public_chat_history"] == list(history)
+    assert "public_chat_history" not in ctx
+    assert ctx["public_chat_history_ref"] == "a" * 32
+    assert "이전 질문" not in repr(celery.captured.args)
+    assert celery.stored_history == [{"history": history, "ttl_seconds": 600}]
     assert ctx["suppress_content_persistence"] is True
+    assert ctx["execution_actor"] == {"type": "public"}
+    assert ctx["public_chat_history_consumer_ref"].startswith(
+        "workflow-node-location:v1:"
+    )
+    assert ctx["public_request_deadline_at"]
     assert _captured_inputs(celery) == {"question": "안녕"}
+    assert celery.captured.options["expires"] is not None
     assert result["status"] == "success"
 
 
@@ -249,6 +276,19 @@ def test_public_chatbot_rejects_legacy_conversation_controls(
 ):
     app_row, deployment_row = _deployed_app(DeploymentType.CHATBOT)
     db = _Db(rows=[app_row, deployment_row])
+    side_effects = []
+    from apps.gateway.services import deployment_service as deployment_module
+
+    monkeypatch.setattr(
+        deployment_module.WorkflowBudgetService,
+        "ensure_workflow_budget_allows_execution",
+        lambda *_args, **_kwargs: side_effects.append("budget"),
+    )
+    monkeypatch.setattr(
+        deployment_module.DeploymentService,
+        "migrate_legacy_node_secrets",
+        lambda *_args, **_kwargs: side_effects.append("migration"),
+    )
 
     with pytest.raises(HTTPException) as exc_info:
         _run_public(
@@ -260,6 +300,35 @@ def test_public_chatbot_rejects_legacy_conversation_controls(
 
     assert exc_info.value.status_code == 422
     assert exc_info.value.detail["code"] == "conversation.legacy_control_forbidden"
+    assert side_effects == []
+
+
+def test_legacy_public_chatbot_route_runs_stateless_without_persistence(monkeypatch):
+    app_row, deployment_row = _deployed_app(DeploymentType.CHATBOT)
+    deployment_row.config = {}
+    db = _Db(rows=[app_row, deployment_row])
+
+    celery, result = _run_public(
+        db,
+        app_row.url_slug,
+        {
+            "question": "x",
+            "memory_mode": True,
+            "conversation_id": "legacy-browser-session",
+        },
+        monkeypatch,
+        conversation_history=None,
+        allow_stateless_public_chatbot_compatibility=True,
+    )
+
+    ctx = _captured_context(celery)
+    assert result["status"] == "success"
+    assert _captured_inputs(celery) == {"question": "x"}
+    assert ctx["memory_mode"] is False
+    assert ctx["conversation_id"] is None
+    assert ctx["suppress_content_persistence"] is True
+    assert ctx["execution_actor"] == {"type": "public"}
+    assert ctx["public_chat_stateless_compatibility"] is True
 
 
 def test_non_chatbot_does_not_force_memory_but_threads_conversation_id(monkeypatch):
@@ -454,10 +523,10 @@ def test_authenticated_run_uses_current_user_execution_subject(
     monkeypatch.setattr(
         deployment_module,
         "is_deployment_type_allowed_for_surface",
-        lambda deployment_type, surface, *, policy: evaluated_surfaces.append(
-            (deployment_type, surface)
-        )
-        or evaluate_surface(deployment_type, surface, policy=policy),
+        lambda deployment_type, surface, *, policy: (
+            evaluated_surfaces.append((deployment_type, surface))
+            or evaluate_surface(deployment_type, surface, policy=policy)
+        ),
     )
 
     celery, result = _run_authenticated(
@@ -829,6 +898,25 @@ def _deployed_app(deployment_type):
     workflow_id = uuid4()
     organization_id = uuid4()
     deployment_id = uuid4()
+    graph_snapshot = {"nodes": [], "edges": []}
+    config = {}
+    if deployment_type is DeploymentType.CHATBOT:
+        graph_snapshot = {
+            "nodes": [
+                {
+                    "id": "answer-llm",
+                    "type": "llmNode",
+                    "data": {"model_id": "model-1", "user_prompt": "질문에 답변하세요."},
+                }
+            ],
+            "edges": [],
+        }
+        config = {
+            "public_conversation": {
+                "contract_version": "public_chat_conversation.v1",
+                "history_consumer": {"node_id": "answer-llm", "container_path": []},
+            }
+        }
     app_row = App(
         id=uuid4(),
         name="챗봇 앱",
@@ -847,7 +935,8 @@ def _deployed_app(deployment_type):
         app_id=app_row.id,
         version=1,
         type=deployment_type,
-        graph_snapshot={"nodes": [], "edges": []},
+        graph_snapshot=graph_snapshot,
+        config=config,
         is_active=True,
         created_by=uuid4(),
     )
@@ -861,7 +950,12 @@ class _CaptureCelery:
         self.captured = None
 
     def send_task(self, name, args=None, kwargs=None, **options):
-        self.captured = SimpleNamespace(name=name, args=args, kwargs=kwargs)
+        self.captured = SimpleNamespace(
+            name=name,
+            args=args,
+            kwargs=kwargs,
+            options=options,
+        )
         return SimpleNamespace(id="fake-task-id")
 
 

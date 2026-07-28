@@ -18,7 +18,9 @@ vi.mock('@/app/features/app/components/AppAuthSecretControl', () => ({
   }: {
     appId: string;
     issuedSecret?: { value: string; version: number } | null;
-    onSecretAvailable?: (secret: { value: string; version: number } | null) => void;
+    onSecretAvailable?: (
+      secret: { value: string; version: number } | null,
+    ) => void;
     onReadinessChange?: (readiness: 'ready') => void;
   }) => (
     <div>
@@ -110,5 +112,41 @@ describe('DeploymentFlowModal', () => {
     rerender(renderModal(false));
     rerender(renderModal(true));
     expect(await screen.findByText('현재 Secret: 없음')).toBeVisible();
+  });
+
+  it('requires an explicit history consumer when a chatbot has multiple LLM nodes', async () => {
+    const onDeploy = vi.fn().mockResolvedValue({ success: true, version: 1 });
+
+    render(
+      <DeploymentFlowModal
+        isOpen
+        onClose={vi.fn()}
+        appId="app-1"
+        deploymentType="chatbot"
+        llmNodes={[
+          { id: 'classifier', title: '분류기' },
+          { id: 'answer', title: '최종 답변' },
+        ]}
+        onDeploy={onDeploy}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: '배포' })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('대화 기록을 사용할 LLM 노드'), {
+      target: { value: 'answer' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '배포' }));
+
+    await waitFor(() =>
+      expect(onDeploy).toHaveBeenCalledWith(
+        '',
+        expect.any(Object),
+        expect.any(Object),
+        {
+          contract_version: 'public_chat_conversation.v1',
+          history_consumer: { node_id: 'answer', container_path: [] },
+        },
+      ),
+    );
   });
 });

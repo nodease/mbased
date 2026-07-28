@@ -11,8 +11,8 @@ import {
   type WorkflowCitation,
 } from '@/app/features/workflow/utils/deploymentRunResult';
 import {
-  buildPublicConversationHistory,
-  buildPublicConversationRunPath,
+  buildPublicConversationRequest,
+  type PublicConversationContract,
 } from '../publicConversationHistory';
 import './embed-reset.css';
 
@@ -22,6 +22,7 @@ interface DeploymentInfo {
   version: number;
   description?: string;
   type: string;
+  public_conversation_contract?: PublicConversationContract;
   input_schema?: {
     variables: Array<{
       name: string;
@@ -48,7 +49,6 @@ interface Message {
 export default function EmbedChatPage() {
   const params = useParams();
   const urlSlug = params.urlSlug as string;
-
   const [deploymentInfo, setDeploymentInfo] = useState<DeploymentInfo | null>(
     null,
   );
@@ -128,17 +128,18 @@ export default function EmbedChatPage() {
         ) ?? {};
 
       // 실제 API 호출
-      const response = await fetch(buildPublicConversationRunPath(urlSlug), {
+      const publicRequest = buildPublicConversationRequest(
+        urlSlug,
+        inputs,
+        messages,
+        deploymentInfo?.public_conversation_contract,
+      );
+      const response = await fetch(publicRequest.path, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({
-          inputs,
-          conversation: {
-            history: buildPublicConversationHistory(messages),
-          },
-        }),
+        body: JSON.stringify(publicRequest.body),
       });
 
       if (!response.ok) {

@@ -189,9 +189,7 @@ class DeploymentResponse(DeploymentBase):
             redact_legacy_workflow_node_secrets,
         )
 
-        return redact_legacy_workflow_node_secrets(
-            strip_workflow_node_bindings(value)
-        )
+        return redact_legacy_workflow_node_secrets(strip_workflow_node_bindings(value))
 
 
 class DeploymentInfoResponse(BaseModel):
@@ -204,6 +202,9 @@ class DeploymentInfoResponse(BaseModel):
     type: str
     input_schema: Optional[dict] = None
     output_schema: Optional[dict] = None
+    public_conversation_contract: Optional[
+        Literal["client_history_v1", "legacy_v0"]
+    ] = None
 
 
 class DeploymentRunInfoResponse(BaseModel):

@@ -205,3 +205,13 @@ Response: `{"status": "success", "results": { ... }}`.
 - 공개 실행 표면(`/run-public`)은 무인증이며 `execution_subject`를 주입하지 않는다. 따라서 private Knowledge/RAG는 workflow owner 권한으로 fallback하지 않고 anonymous public-only 후보만 사용할 수 있다.
 - `internal_chatbot` 인증 실행(`/deployments/{deployment_id}/run`)은 대상 workflow organization의 active membership과 workflow `execute` 권한을 요구한다. `X-Organization-Id`가 전달되면 배포 앱 organization과의 일치도 확인하며, 로그인 사용자를 RAG 실행 권한 주체로 전달한다.
 - Target Conversation Session과 별도 내부 챗봇 access grant는 현재 `internal_chatbot`의 실행 주체·KB permission 재검사를 대체하지 않으며, 도입 시 별도 API 계약으로 추가한다.
+
+## Public Conversation Capability And Rollout
+
+Public Chatbot preflight/create의 `config.public_conversation`은 `public_chat_conversation.v1`과 한 개의 canonical `history_consumer`를 사용한다. 대상 node는 deployment snapshot의 `llmNode`여야 한다. Gateway는 `/chat` 실행 전에 mapping을 검증하고 Worker가 persisted deployment row에서 다시 검증한다.
+
+Public info response의 `public_conversation_contract`는 `client_history_v1` 또는 `legacy_v0`이다. 구 Gateway처럼 필드가 없으면 Client는 legacy로 취급한다. Compatibility rollout에서 legacy root 요청은 새 Gateway가 server Memory 없이 stateless로 실행하고, strict rollout에서는 root Chatbot 요청을 거부한다.
+
+Public `/chat` raw history는 600초 TTL의 일회성 Redis key에만 저장하고 Celery에는 opaque reference를 전달한다. Execution context는 authorization subject 대신 별도 public audit actor, canonical consumer safe reference, content persistence suppression과 600초 absolute deadline을 포함한다. Celery publish도 같은 시각의 `expires`를 사용한다. Worker는 deadline을 먼저 검사하고 history reference를 atomic GET+DELETE로 소비하며 snapshot에서 consumer ref를 재구성한다.
+
+추가 safe error code는 `conversation.consumer_mapping_required`, `conversation.consumer_mapping_invalid`, `conversation.consumer_mapping_not_found`, `conversation.consumer_mapping_node_type_invalid`, `conversation.request_deadline_invalid`, `conversation.request_expired`다. Request content와 internal node identity는 error에 반사하지 않는다.
