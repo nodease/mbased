@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react';
+import type { Edge } from '@xyflow/react';
 import { workflowApi } from '@/app/features/workflow/api/workflowApi';
 import { useWorkflowStore } from '@/app/features/workflow/store/useWorkflowStore';
 import type { DeploymentResult } from '../components/deployment/types';
@@ -17,6 +18,7 @@ import {
 
 interface UseDeploymentProps {
   nodes: AppNode[]; // 시작 노드 타입 확인 및 graph_snapshot용
+  edges: Edge[];
   isSettingsOpen: boolean;
   toggleSettings: () => void;
   isVersionHistoryOpen: boolean;
@@ -29,6 +31,7 @@ interface UseDeploymentProps {
 
 export function useDeployment({
   nodes,
+  edges,
   isSettingsOpen,
   toggleSettings,
   isVersionHistoryOpen,
@@ -137,6 +140,7 @@ export function useDeployment({
         const deploymentConfig = publicConversation
           ? { public_conversation: publicConversation }
           : {};
+        const graphSnapshot = { nodes, edges };
         const preflight = await workflowApi.preflightDeployment({
           app_id: activeWorkflow.appId,
           description,
@@ -144,6 +148,7 @@ export function useDeployment({
           config: deploymentConfig,
           parameter_optimization: parameterOptimization,
           is_active: true,
+          graph_snapshot: graphSnapshot,
           ...(requestedBrowserAccessPolicy
             ? { browser_access_policy: requestedBrowserAccessPolicy }
             : {}),
@@ -175,6 +180,7 @@ export function useDeployment({
           config: deploymentConfig,
           parameter_optimization: parameterOptimization,
           is_active: true,
+          graph_snapshot: graphSnapshot,
           ...(normalizedBrowserAccessPolicy
             ? { browser_access_policy: normalizedBrowserAccessPolicy }
             : {}),
@@ -190,7 +196,7 @@ export function useDeployment({
           version: response.version,
           input_schema: response.input_schema ?? null,
           output_schema: response.output_schema ?? null,
-          graph_snapshot: { nodes }, // webhook trigger 감지용
+          graph_snapshot: graphSnapshot, // webhook trigger 감지용
           message: preflightWarning,
           browser_access_policy:
             response.browser_access_policy ?? normalizedBrowserAccessPolicy,
@@ -242,7 +248,7 @@ export function useDeployment({
         };
       }
     },
-    [deploymentType, activeWorkflow?.appId, activeWorkflow?.id, nodes],
+    [deploymentType, activeWorkflow?.appId, activeWorkflow?.id, nodes, edges],
   );
 
   return {

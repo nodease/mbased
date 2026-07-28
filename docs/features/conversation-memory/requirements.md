@@ -234,5 +234,8 @@ MBA-318은 Public client-held history, legacy Public memory control 차단, cont
 - MEM-REQ-124: Public model-routing runtime Judge는 최초 호출과 incomplete compact retry를 포함한 각 provider invocation 직전에 공통 absolute deadline을 검사하고 만료 예외를 stored-model fallback으로 흡수하지 않아야 한다.
 - MEM-REQ-125: 전용 Public task는 `memory_mode=true` 또는 non-null `conversation_id`를 DB·Redis·외부 I/O 전에 fail-closed하고, safe false/null sentinel도 canonical execution context에서 제거해야 한다.
 - MEM-REQ-126: Public root와 `/chat`의 600초 absolute deadline은 ASGI 요청 수신 시점에 body buffering·JSON parsing보다 먼저 한 번 생성해야 한다. Gateway admission, transient Redis TTL·I/O timeout, Celery `expires`, 결과 polling과 Worker는 이 값을 새로 계산하지 않고 남은 lifetime만 사용해야 한다.
+- MEM-REQ-127: Client deployment preflight와 create는 consumer 선택에 사용한 현재 편집 graph의 동일한 `{nodes, edges}` snapshot을 보내야 하며 저장된 이전 draft로 fallback해 config와 graph가 어긋나지 않아야 한다.
+- MEM-REQ-128: Workflow Engine은 공통 노드 실행 경계에서 각 node `execute` 직전에 task deadline을 검사하고, 만료 뒤 `FileExtractionNode`의 remote fetch를 포함한 새 외부 I/O를 시작하지 않아야 한다.
+- MEM-REQ-129: Strict rollout에서 active Public Chatbot browser-access revision은 복제할 source config와 graph의 consumer mapping을 row 생성, activation preflight와 active pointer mutation 전에 재검증해야 한다. Inactive revision은 staging할 수 있지만 활성화 시 같은 검증을 통과해야 한다.
 
 `PUBLIC_CHAT_CONVERSATION_ROLLOUT_MODE=compatibility`는 배포 순서용 임시 기본값이다. strict 전환 전 active legacy public Chatbot을 consumer mapping이 있는 새 deployment version으로 교체한다.

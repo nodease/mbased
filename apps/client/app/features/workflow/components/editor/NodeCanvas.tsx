@@ -271,6 +271,7 @@ export default function NodeCanvas() {
     handleDeploy,
   } = useDeployment({
     nodes,
+    edges,
     isSettingsOpen,
     toggleSettings,
     isVersionHistoryOpen,

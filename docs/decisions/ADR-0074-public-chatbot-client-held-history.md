@@ -512,3 +512,45 @@ Public 요청의 실제 lifetime은 task publish가 아니라 edge가 request를
 - Public request body를 처리하는 middleware 순서를 바꿀 때 deadline stamp가 모든 buffering보다 앞서는지 검토한다.
 - 새 Public pre-dispatch I/O 또는 retry를 추가하면 남은 deadline으로 timeout을 제한한다.
 - Reverse proxy timeout은 application deadline보다 길게 유지하되 그 차이를 application lifetime 연장에 사용하지 않는다.
+
+## Implementation Decision: 편집 graph, 공통 node deadline과 strict revision 재활성화
+
+### Context
+
+Public conversation consumer는 현재 편집 graph에서 선택되지만 Client deployment 요청이 `graph_snapshot`을 생략하면 Gateway는 마지막 저장 draft를 검증해 config와 graph가 어긋날 수 있다. Worker의 external-effect executor와 일부 LLM/RAG 호출만 deadline을 검사하면 직접 remote fetch를 수행하는 File Extraction 같은 node는 absolute deadline 뒤에도 외부 I/O를 시작할 수 있다. 또한 strict rollout 검증이 일반 create/toggle에만 있으면 browser-access policy revision의 active 생성이 legacy mapping 없는 snapshot을 새 active version으로 만들 수 있다.
+
+### Options Considered
+
+- 배포 전에 draft save를 강제: 저장 실패·동시 편집과 별도 lifecycle을 추가하고 preflight/create 사이 snapshot 일치를 직접 보장하지 못해 선택하지 않는다.
+- 외부 I/O node를 발견할 때마다 개별 deadline guard 추가: 새 node가 누락될 수 있고 동일 불변조건이 여러 구현에 분산되어 선택하지 않는다.
+- Browser revision 생성 후 public info/runtime에서 legacy capability로 완화: strict mode의 활성화 차단 계약을 깨므로 선택하지 않는다.
+- 현재 graph를 두 deployment 요청에 결박하고, 모든 node의 공통 실행 직전에 deadline을 검사하며, active browser revision guard에서 strict consumer 계약을 재검증: 세 경계에서 각각 원인을 직접 차단하므로 선택한다.
+
+### Final Decision
+
+1. Client는 배포 동작을 시작할 때 현재 `{nodes, edges}`를 하나의 graph snapshot으로 잡고 동일 값을 preflight와 create에 보낸다.
+2. Workflow Engine은 각 node의 `execute` 호출 직전에 task deadline을 검사한다. 만료 시 node 구현을 호출하지 않고 non-retryable `external_effect.deadline_exceeded`로 종료한다.
+3. Browser-access revision은 active 요청일 때 source를 잠근 뒤 public conversation config와 graph를 strict rollout 설정으로 검증하고, 그 다음 mail/runtime activation preflight와 revision row 생성을 진행한다.
+4. Inactive browser revision은 staging을 허용하지만 이후 active 전환은 동일한 strict 검증을 통과해야 한다.
+
+### Rationale
+
+선택·검증·저장에 같은 graph를 사용해야 canonical consumer location이 안정적이다. Deadline은 개별 provider adapter 목록이 아니라 공통 node 실행 경계에 있어야 direct/future external I/O에도 fail-closed한다. Strict rollout은 활성 상태로 들어가는 모든 lifecycle 경로에 동일해야 우회 activation이 생기지 않는다.
+
+### Affected Files
+
+- `apps/client/app/features/workflow/hooks/useDeployment.ts`
+- `apps/client/app/features/workflow/components/editor/NodeCanvas.tsx`
+- `apps/gateway/application/deployment/browser_access_errors.py`
+- `apps/gateway/adapters/deployment_browser_access_activation.py`
+- `apps/gateway/composition/deployment.py`
+- `apps/gateway/api/v1/endpoints/deployment.py`
+- `apps/workflow_engine/workflow/core/workflow_engine.py`
+- 관련 Client, Gateway, Workflow Engine 회귀 테스트
+- Chatbot Deployment와 Conversation Memory 문서 및 architecture
+
+### Follow-up Review Notes
+
+- 새로운 deployment UI는 preflight와 create에 서로 다른 graph source를 사용하지 않는지 검토한다.
+- 새 node가 direct network/file/provider I/O를 추가해도 공통 deadline 경계를 우회하지 않아야 한다.
+- Public deployment의 신규 activation/revision lifecycle은 strict consumer contract와 active pointer mutation 순서를 함께 검토한다.

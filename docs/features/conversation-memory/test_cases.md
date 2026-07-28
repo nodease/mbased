@@ -453,3 +453,6 @@ Disposable PostgreSQL evidence는 `NODEASE_RUN_DISPOSABLE_DB_TEST=1`인 전용 C
 - MEM-TC-BOUND-033: 전용 Public task의 `memory_mode=true` 또는 non-null `conversation_id`는 DB 전에 거부되며 safe false/null sentinel은 canonical engine context에서 제거된다.
 - MEM-TC-BOUND-034: ASGI middleware가 Public root와 `/chat` 요청의 body buffering 전에 생성한 동일 deadline이 Gateway service, execution context와 Celery `expires`까지 보존된다.
 - MEM-TC-BOUND-035: admission 전에 만료된 Public 요청은 budget/secret migration/Redis/task publish를 호출하지 않고 safe 504로 종료하며, Redis TTL·I/O timeout과 Gateway result polling은 고정 600초가 아니라 남은 deadline을 사용한다.
+- MEM-TC-BOUND-036: Client는 unsaved LLM consumer와 edge를 포함한 현재 graph의 동일 snapshot을 deployment preflight와 create에 전달한다.
+- MEM-TC-BOUND-037: task deadline이 만료된 File Extraction 진입 노드는 remote fetch를 포함한 node 실행을 시작하지 않고 non-retryable `external_effect.deadline_exceeded`로 종료한다.
+- MEM-TC-BOUND-038: Strict mode의 active browser-access revision은 legacy Public Chatbot consumer mapping을 다른 preflight와 mutation 전에 safe 422로 거부하고 rollback하며, inactive staging은 active 전환 전까지 pointer를 바꾸지 않는다.

@@ -9,6 +9,7 @@ from apps.gateway.auth.dependencies import get_current_user
 from apps.gateway.auth.permissions import ensure_workflow_permission
 from apps.gateway.core.config import settings
 from apps.gateway.application.deployment.browser_access_errors import (
+    BrowserAccessConversationContractError,
     BrowserAccessPolicyError,
     BrowserAccessResourceHidden,
 )
@@ -506,6 +507,16 @@ def create_browser_access_revision(
         )
     except BrowserAccessPolicyError as exc:
         _raise_browser_access_policy_error(exc)
+    except BrowserAccessConversationContractError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": exc.code,
+                "message": (
+                    "The public conversation consumer mapping is invalid."
+                ),
+            },
+        ) from None
     except BrowserAccessResourceHidden:
         raise HTTPException(status_code=404, detail="Deployment not found") from None
     except DeploymentPreflightBlocked as exc:

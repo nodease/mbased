@@ -12,7 +12,7 @@ Status: Draft
 ## Components
 
 - "게시하기" 드롭다운: 시작 노드가 `startNode`일 때 **"공개 챗봇 배포"**와 **"내부 챗봇 배포"**를 별도 항목으로 노출한다. 각각 `handlePublishAsChatbot`과 `handlePublishAsInternalChatbot` 호출로 `deploymentType='chatbot'` 또는 `'internal_chatbot'`인 모달을 연다.
-- `useDeployment.handleDeploy`: `chatbot`은 `${origin}/embed/chat/{url_slug}` 공개 링크만 결과에 넣고, `internal_chatbot`은 `${origin}/modules/{workflow_id}/run?deploymentId={deployment_id}` 인증 실행 링크만 넣는다.
+- `useDeployment.handleDeploy`: 현재 편집 중인 동일 `{nodes, edges}` snapshot을 preflight와 create에 함께 보내 consumer 선택과 검증 graph가 어긋나지 않게 한다. `chatbot`은 `${origin}/embed/chat/{url_slug}` 공개 링크만 결과에 넣고, `internal_chatbot`은 `${origin}/modules/{workflow_id}/run?deploymentId={deployment_id}` 인증 실행 링크만 넣는다.
 - `DeploymentFlowModal.getDeploymentTypeName`: `chatbot` → `"공개 챗봇"`, `internal_chatbot` → `"내부 챗봇"`.
 - `SuccessStep`: `chatbot`은 공개 챗봇 공유 카드만, `internal_chatbot`은 사내 인증 실행 카드만 표시해 두 보안 경계를 한 배포 결과에서 섞지 않는다.
 - 공개 `chatbot`과 `widget` 배포 form은 “외부 사이트에 삽입 허용” toggle과 exact parent origin 목록 editor를 제공한다. 기본값은 disabled이고 enabled 상태에서 1~20개 origin이 없으면 submit하지 않는다. `internal_chatbot`, `webapp`과 다른 type에는 표시하지 않는다.

@@ -53,6 +53,7 @@ from apps.gateway.application.deployment.preflight import DeploymentPreflightUse
 from apps.gateway.application.deployment.workflow_node_binding import (
     WorkflowNodeBindingUseCase,
 )
+from apps.gateway.core.config import settings
 from apps.shared.services.workflow_node_catalog import (
     implemented_node_types,
     node_side_effect_mapping,
@@ -102,6 +103,9 @@ def build_browser_access_revision_use_case(
                         source.app_id: source.deployment_type
                     },
                 )
+            ),
+            require_public_chat_conversation_contract=(
+                settings.PUBLIC_CHAT_CONVERSATION_ROLLOUT_MODE == "strict"
             ),
         ),
         SqlAlchemyDeploymentBrowserAccessAuditRecorder(db, actor=actor),

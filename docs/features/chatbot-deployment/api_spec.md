@@ -77,7 +77,7 @@ Content-Type: application/json
 }
 ```
 
-Response는 `201 DeploymentResponse`다. Source의 app/type/graph snapshot/config/input/output schema/description을 복제하고 새 version과 policy를 저장하며 source row를 수정하지 않는다. `is_active=false`가 기본값이고 active 요청은 기존 activation preflight/lifecycle lock/single-active transaction을 사용한다. Missing/cross-scope source는 기존 safe 404, wrong type은 422다.
+Response는 `201 DeploymentResponse`다. Source의 app/type/graph snapshot/config/input/output schema/description을 복제하고 새 version과 policy를 저장하며 source row를 수정하지 않는다. `is_active=false`가 기본값이고 active 요청은 기존 activation preflight/lifecycle lock/single-active transaction을 사용한다. Strict rollout의 active Public Chatbot revision은 source snapshot의 `public_conversation` consumer mapping을 다른 activation 검사와 row 생성보다 먼저 재검증하며 invalid legacy source는 safe 422로 rollback한다. Inactive revision은 staging할 수 있지만 이후 활성화 시 같은 strict 검증을 통과해야 한다. Missing/cross-scope source는 기존 safe 404, wrong type은 422다.
 
 ### Public Browser Policy Projection
 
