@@ -24,6 +24,10 @@ Status: Draft
 - MEM-TC-PUB-010: Client는 welcome/error/pending message를 제외하고 최신 완료 20 turn만 보낸다.
 - MEM-TC-PUB-011: Public lifecycle route는 API router에 등록되지 않고 no-store/no-referrer 404를 반환한다.
 - MEM-TC-PUB-012: Public history 응답은 CORS grant를 제공하지 않고 validation error에 원문을 반사하지 않는다.
+- MEM-TC-PUB-013: History leaf content는 한 번만 정제하며 redaction marker를 다시 검사해 정상 형제 turn 전체를 지우지 않는다.
+- MEM-TC-PUB-014: RAG 검색어는 현재 질문과 가장 최근 완료 turn의 정제된 history를 1,000자 안에서 사용하고, 오래된 초과 turn은 pair 단위로 제외한다.
+- MEM-TC-PUB-015: History가 없으면 기존 현재 질문 RAG 검색어를 그대로 유지하고, history 유무가 Knowledge candidate·authorization 결과를 바꾸지 않는다.
+- MEM-TC-PUB-016: `/chat/` OPTIONS와 redirect 응답도 `/chat`과 동일하게 CORS grant 없이 no-store/no-referrer 경계를 적용한다.
 
 ## Architecture Boundary Tests
 
@@ -261,6 +265,7 @@ Status: Draft
 - MEM-TC-API-005: WEBAPP/WIDGET single-run과 authenticated internal Chatbot route는 기존 계약을 유지한다.
 - MEM-TC-API-006: Public Chatbot history path가 execution subject를 app owner나 login cookie로 합성하지 않는다.
 - MEM-TC-API-007: legacy memory_mode/conversation_id는 Public history path에서 거부되지만 authenticated internal control은 subject-bound namespace를 유지한다.
+- MEM-TC-API-008: `/run-public/{slug}/chat/` preflight는 404이고 POST redirect를 포함한 모든 응답에서 CORS grant를 제거한다.
 
 ## Workflow Runtime Tests
 
@@ -331,6 +336,7 @@ Status: Draft
 - MEM-TC-SEC-007: oversized UTF-8/malformed JSON과 token counter failure.
 - MEM-TC-SEC-008: Public lifecycle/grant/transcript route probe.
 - MEM-TC-SEC-009: external Origin/CORS credentialed read와 cache/referrer 노출.
+- MEM-TC-SEC-010: 정제 marker를 포함한 history를 다시 정제해 전체 serialized history가 marker 하나로 치환되는 회귀.
 
 ## Rolling Deployment And Migration Tests
 

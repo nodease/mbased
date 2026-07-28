@@ -11,11 +11,12 @@ Embed Chat React memory
   -> POST /run-public/{slug}/chat { inputs, conversation.history }
   -> Gateway shape/turn/token validation
   -> Workflow task (redacted args representation)
-  -> LLMNode untrusted user/assistant messages
+  -> LLMNode leaf content single sanitation
+  -> bounded RAG query context + untrusted provider history block
   -> HTTP response
 ```
 
-Gateway는 history를 권위 데이터로 사용하지 않고 20 turn/4,096 token으로 bound한다. WorkflowLogger는 이 surface에서 run/node/trace content persistence를 닫고 metadata만 남긴다. Public Conversation lifecycle router와 public persistence composition은 active API에 연결하지 않는다.
+Gateway는 history를 권위 데이터로 사용하지 않고 20 turn/4,096 token으로 bound한다. LLMNode는 각 history content를 한 번 정제한 canonical projection만 RAG 검색과 provider message 조립에 공유한다. RAG 검색어에는 현재 질문을 우선하고 남는 1,000자 안에서 가장 최근 완료 turn부터 포함하며, history는 Knowledge candidate·authorization 판정에 사용하지 않는다. WorkflowLogger는 이 surface에서 run/node/trace content persistence를 닫고 metadata만 남긴다. Public Conversation lifecycle router와 public persistence composition은 active API에 연결하지 않는다.
 
 아래 Session aggregate, repository, lease, purge와 summary component는 authenticated internal Chatbot 후속 target이다.
 

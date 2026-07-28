@@ -63,6 +63,7 @@ from apps.shared.services.tracing.metadata import TraceMetadataSanitizer
 from apps.shared.utils.prompt_injection_guard import (
     PLATFORM_UNTRUSTED_CONTEXT_GUARDRAIL_PROMPT,
     build_untrusted_context_block,
+    frame_sanitized_untrusted_context_block,
     sanitize_untrusted_text,
     stringify_untrusted_value,
 )
@@ -235,6 +236,12 @@ class WorkflowRAGFanoutResult:
 class PromptRenderResult:
     content: str
     untrusted_context_block: str = ""
+
+
+@dataclass(frozen=True)
+class _SanitizedClientConversation:
+    messages: tuple[dict[str, str], ...] = ()
+    redacted_lines: int = 0
 
 
 class _UntrustedPromptValue:
@@ -1370,7 +1377,12 @@ class LLMNode(Node[LLMNodeData]):
                 label="UPSTREAM_SYSTEM_INPUT",
             )
             rendered_user_prompt = self._render_prompt(self.data.user_prompt, inputs)
-            rag_search_query = self._rag_search_query(rendered_user_prompt, inputs)
+            client_conversation = self._sanitized_client_conversation()
+            rag_search_query = self._rag_search_query(
+                rendered_user_prompt,
+                inputs,
+                client_conversation=client_conversation,
+            )
             assistant_render = self._render_privileged_prompt(
                 self.data.assistant_prompt,
                 inputs,
@@ -1378,7 +1390,9 @@ class LLMNode(Node[LLMNodeData]):
             )
             system_content = system_render.content
             rendered_assistant_prompt = assistant_render.content
-            client_conversation_messages = self._client_conversation_messages()
+            client_conversation_messages = self._client_conversation_messages(
+                client_conversation
+            )
             privileged_untrusted_blocks = [
                 block
                 for block in (
@@ -2160,15 +2174,57 @@ class LLMNode(Node[LLMNodeData]):
         self,
         rendered_user_prompt: str,
         inputs: Dict[str, Any],
+        *,
+        client_conversation: _SanitizedClientConversation | None = None,
     ) -> str:
-        """명시된 질문 변수만 RAG 검색어로 사용하고, 기존 graph는 prompt를 유지한다."""
+        """현재 질문과 bounded public 대화 맥락으로 RAG 검색어를 구성한다."""
         variable_name = self.data.context_variable
         if not variable_name:
-            return rendered_user_prompt
+            query = rendered_user_prompt
+        else:
+            value = self._prompt_variable_context(inputs).get(variable_name)
+            query = stringify_untrusted_value(value, key_path=variable_name).strip()
+            query = query[:MAX_RAG_REWRITTEN_QUERY_LENGTH]
 
-        value = self._prompt_variable_context(inputs).get(variable_name)
-        query = stringify_untrusted_value(value, key_path=variable_name).strip()
-        return query[:MAX_RAG_REWRITTEN_QUERY_LENGTH]
+        if client_conversation is None:
+            client_conversation = self._sanitized_client_conversation()
+        return self._rag_query_with_client_history(query, client_conversation)
+
+    @staticmethod
+    def _rag_query_with_client_history(
+        query: str,
+        client_conversation: _SanitizedClientConversation,
+    ) -> str:
+        if not client_conversation.messages:
+            return query
+
+        current_query = query.strip()
+        if not current_query:
+            return query
+        current_section = f"current user:\n{current_query}"
+        if len(current_section) > MAX_RAG_REWRITTEN_QUERY_LENGTH:
+            return current_query[:MAX_RAG_REWRITTEN_QUERY_LENGTH]
+
+        pairs = [
+            client_conversation.messages[index : index + 2]
+            for index in range(0, len(client_conversation.messages), 2)
+        ]
+        selected_sections: list[str] = []
+        remaining = MAX_RAG_REWRITTEN_QUERY_LENGTH - len(current_section)
+        for user_message, assistant_message in reversed(pairs):
+            section = (
+                f"previous user:\n{user_message['content']}\n"
+                f"previous assistant:\n{assistant_message['content']}"
+            )
+            required = len(section) + 2
+            if required > remaining:
+                break
+            selected_sections.append(section)
+            remaining -= required
+
+        selected_sections.reverse()
+        selected_sections.append(current_section)
+        return "\n\n".join(selected_sections)
 
     def _render_privileged_prompt(
         self,
@@ -2241,30 +2297,48 @@ class LLMNode(Node[LLMNodeData]):
 
         return context
 
-    def _client_conversation_messages(self) -> list[dict[str, str]]:
+    def _sanitized_client_conversation(self) -> _SanitizedClientConversation:
         history = self.execution_context.get("public_chat_history")
         if history is None:
-            return []
+            return _SanitizedClientConversation()
         try:
             normalized = normalize_public_chat_history(history)
         except PublicChatHistoryError as error:
             raise NonRetryableWorkflowError(error.code) from None
 
-        sanitized_history = [
-            {
-                "role": message["role"],
-                "content": sanitize_untrusted_text(message["content"])[0],
-            }
-            for message in normalized
-        ]
+        sanitized_history: list[dict[str, str]] = []
+        redacted_lines = 0
+        for message in normalized:
+            sanitized_content, message_redacted_lines = sanitize_untrusted_text(
+                message["content"]
+            )
+            sanitized_history.append(
+                {"role": message["role"], "content": sanitized_content}
+            )
+            redacted_lines += message_redacted_lines
+        return _SanitizedClientConversation(
+            messages=tuple(sanitized_history),
+            redacted_lines=redacted_lines,
+        )
+
+    def _client_conversation_messages(
+        self,
+        client_conversation: _SanitizedClientConversation | None = None,
+    ) -> list[dict[str, str]]:
+        if client_conversation is None:
+            client_conversation = self._sanitized_client_conversation()
+        if not client_conversation.messages:
+            return []
+
         history_text = json.dumps(
-            sanitized_history,
+            client_conversation.messages,
             ensure_ascii=False,
             separators=(",", ":"),
         )
-        history_block = build_untrusted_context_block(
+        history_block = frame_sanitized_untrusted_context_block(
             history_text,
             label="CLIENT_CONVERSATION_HISTORY",
+            redacted_lines=client_conversation.redacted_lines,
         )
         if not history_block:
             return []

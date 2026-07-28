@@ -63,12 +63,42 @@ MBA-318 Public Chatbot은 Option C를 사용한다.
 
 ### Decision And Rationale
 
-Public Chatbot의 client-held history는 `/api/v1/run-public/{url_slug}/chat`만 사용한다. `PublicConversationCorsBoundaryMiddleware`는 이 경로를 endpoint 실행 전부터 Conversation transport로 소유하고 모든 응답에서 CORS grant를 제거하며 `Cache-Control: no-store`, `Referrer-Policy: no-referrer`를 강제한다. 공용 root `/api/v1/run-public/{url_slug}`는 Web App과 Widget 호환성을 위해 기존 CORS 동작을 유지한다.
+Public Chatbot의 client-held history는 `/api/v1/run-public/{url_slug}/chat`만 사용한다. `PublicConversationCorsBoundaryMiddleware`는 이 경로와 router가 canonical path로 돌려보내는 exact trailing-slash `/chat/`을 endpoint 실행 전부터 Conversation transport로 소유하고 모든 응답에서 CORS grant를 제거하며 `Cache-Control: no-store`, `Referrer-Policy: no-referrer`를 강제한다. `/chat/`은 별도 API가 아니라 redirect 전후에 동일한 보안 header를 적용하기 위한 transport alias다. 공용 root `/api/v1/run-public/{url_slug}`는 Web App과 Widget 호환성을 위해 기존 CORS 동작을 유지한다.
 
 ### Follow-up Review Notes
 
 - OPTIONS, malformed JSON, 잘못된 content type, schema validation error가 모두 전용 경계에서 안전한 header를 반환하는지 회귀 테스트한다.
+- `/chat/` OPTIONS와 redirect 응답이 global CORS를 상속하지 않는지 회귀 테스트한다.
 - 공용 root의 비-Chatbot 브라우저 CORS 동작이 유지되는지 별도 회귀 테스트한다.
+
+## Implementation Decision: Shared Sanitized History Projection
+
+### Context
+
+Public history는 provider 대화 맥락뿐 아니라 대명사형 후속 질문의 RAG 검색에도 필요하다. 기존 구현은 provider message를 조립하기 직전에만 history를 읽어서 RAG 검색이 현재 질문만 사용했고, 각 content를 정제한 뒤 serialized JSON 전체를 다시 정제해 redaction marker 자체가 prompt-injection 패턴으로 탐지되는 문제가 있었다.
+
+### Options Considered
+
+- Provider message에만 history를 사용: 일반 멀티턴 답변은 가능하지만 RAG evidence gate가 먼저 종료되는 후속 질문은 이전 대상을 찾지 못하므로 선택하지 않는다.
+- RAG와 provider가 history를 각각 정제: 소비자별 규칙 drift와 중복 정제 위험이 있어 선택하지 않는다.
+- leaf content를 한 번 정제한 canonical projection을 두 소비자가 공유: 정제 결과와 권한 경계를 일관되게 유지하므로 선택한다.
+
+### Decision And Rationale
+
+LLMNode는 Gateway가 검증·bound한 history의 각 content를 정확히 한 번 정제해 request-local projection으로 만든다. Provider용 JSON은 별도의 framing-only helper로 untrusted block에 넣고 다시 정제하지 않는다. RAG 검색어는 동일 projection의 가장 최근 완료 user/assistant pair와 현재 질문을 사용하되 현재 질문을 우선하고 전체를 1,000자로 제한한다. 들어가지 않는 오래된 pair는 부분 절단하지 않는다. 이 history는 검색 text에만 사용하며 Knowledge candidate resolution, public/private audience와 authorization 판단에는 전달하지 않는다.
+
+### Affected Files
+
+- `apps/shared/utils/prompt_injection_guard.py`
+- `apps/workflow_engine/workflow/nodes/llm/llm_node.py`
+- `apps/gateway/middleware/public_conversation_cors.py`
+- Conversation Memory와 Chatbot Deployment component/API/test 문서 및 관련 테스트
+
+### Follow-up Review Notes
+
+- 정상 turn 사이에 의심 content가 있어도 해당 content만 marker로 바뀌고 다른 turn이 보존되는지 검증한다.
+- RAG 검색어가 현재 질문, 최신 완료 pair, 1,000자 상한과 anonymous public-only candidate 결정을 함께 보존하는지 검증한다.
+- History가 없는 기존 graph의 RAG 검색어가 바뀌지 않는지 검증한다.
 
 ## Affected Files
 

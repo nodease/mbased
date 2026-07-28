@@ -27,6 +27,8 @@ Public Chatbot은 bounded client-held history 계약을 검증한다. `memory_mo
 
 - Public history는 system message 뒤, 현재 user prompt 앞에 untrusted block으로 삽입되고 legacy `WorkflowRun` memory 조회를 하지 않는다.
 - Gateway가 허용한 4,000자 초과 message도 generic structured-value cutoff로 잘리지 않으며 prompt-injection/secret-like 정제는 유지한다.
+- History content는 한 번 정제한 projection을 provider block과 RAG 검색어에 공유하며, redaction marker 재검사로 정상 turn을 함께 지우지 않는다.
+- RAG follow-up은 현재 질문과 가장 최근 완료 pair를 1,000자 안에서 검색어에 포함하고 오래된 초과 pair를 제외한다. History가 없으면 현재 질문 검색어가 바뀌지 않으며 candidate·authorization 결과도 동일하다.
 - authenticated legacy `conversation_id`가 있으면 `_build_memory_summary`의 기존 격리 query를 유지하고, `memory_mode`가 꺼져 있으면 조회하지 않는다.
 
 ### Workflow Logging
@@ -68,7 +70,7 @@ Public Chatbot은 bounded client-held history 계약을 검증한다. `memory_mo
 - Preflight는 Knowledge passed/warning/blocked와 별개로 valid canonical `normalized_browser_access_policy`를 반환하고 malformed policy는 inactive preview에서도 422다.
 - Browser policy revision은 source graph/config/input/output/description을 보존하고 새 inactive version을 만들며 source/current draft/active pointer를 변경하지 않는다. Active revision은 기존 preflight와 single-active transaction을 사용한다.
 - Public browser policy projection은 active app ownership/type을 검증하고 safe field만 반환한다. Null/malformed/unknown policy는 disabled, inactive/wrong type/cross-app pointer는 safe 404다.
-- Public Chatbot `/run-public/{slug}/chat`의 성공, OPTIONS, malformed JSON, wrong content type와 validation error는 configured Origin에도 CORS grant가 없고 no-store/no-referrer를 유지한다. 비-Chatbot 공용 root는 configured first-party global CORS 계약을 유지한다.
+- Public Chatbot `/run-public/{slug}/chat`과 trailing-slash redirect 경계의 성공, OPTIONS, malformed JSON, wrong content type와 validation error는 configured Origin에도 CORS grant가 없고 no-store/no-referrer를 유지한다. 비-Chatbot 공용 root는 configured first-party global CORS 계약을 유지한다.
 
 ## E2E Tests
 

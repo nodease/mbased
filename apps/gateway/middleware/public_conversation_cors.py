@@ -87,6 +87,7 @@ def _is_public_conversation_path(path: str) -> bool:
         return False
     return suffix in {
         "chat",
+        "chat/",
         "conversations",
         "conversations/",
         "conversation",

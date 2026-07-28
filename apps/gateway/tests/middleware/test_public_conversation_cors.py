@@ -88,6 +88,33 @@ def test_public_chat_run_preflight_is_not_a_cors_grant():
     assert response.headers["referrer-policy"] == "no-referrer"
 
 
+def test_trailing_slash_public_chat_run_is_also_a_transport_boundary():
+    client = _client()
+    responses = {
+        "preflight": client.options(
+            "/api/v1/run-public/chat/chat/",
+            headers={
+                "Origin": "https://parent.example",
+                "Access-Control-Request-Method": "POST",
+            },
+        ),
+        "redirect": client.post(
+            "/api/v1/run-public/chat/chat/",
+            json={},
+            headers={"Origin": "https://parent.example"},
+            follow_redirects=False,
+        ),
+    }
+
+    assert responses["preflight"].status_code == 404
+    assert responses["redirect"].status_code == 307
+    for name, response in responses.items():
+        assert "access-control-allow-origin" not in response.headers, name
+        assert "access-control-allow-credentials" not in response.headers, name
+        assert response.headers["cache-control"] == "no-store", name
+        assert response.headers["referrer-policy"] == "no-referrer", name
+
+
 def test_public_chat_run_framework_failures_never_inherit_global_cors():
     client = _client()
     responses = {

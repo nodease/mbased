@@ -185,7 +185,8 @@ Response: `{"status": "success", "results": { ... }}`.
 
 ## Memory Scoping
 
-- Public `/chat`은 client history를 현재 provider prompt 앞의 untrusted block으로 전달하고 `_build_memory_summary`의 DB 조회를 사용하지 않는다.
+- Public `/chat`은 client history의 각 content를 한 번 정제한 projection으로 만든다. 이 projection은 현재 provider prompt 앞의 untrusted block과 RAG 검색어 구성에 함께 사용하고 `_build_memory_summary`의 DB 조회를 사용하지 않는다.
+- RAG 검색어는 현재 질문을 우선하고 전체 1,000자 안에서 가장 최근 완료 user/assistant pair부터 추가한다. 초과한 오래된 pair는 부분 절단하지 않고 제외한다. Client history는 Knowledge candidate 선택, public/private audience 또는 authorization 판단에 사용하지 않는다.
 - authenticated legacy 경로의 `_build_memory_summary`는 기존 호환 범위에만 남는다. Durable internal target은 authenticated session scope, dedicated Memory store, node별 policy와 current source authorization을 사용한다.
 
 ## Errors
