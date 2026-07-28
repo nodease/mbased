@@ -263,3 +263,42 @@ Admission 시점의 raw 표현과 실제 소비 시점의 최종 표현을 같�
 - 새로운 외부 provider node는 write/read 여부와 무관하게 공통 deadline 경계를 우회하지 않는지 검토한다.
 - history sanitizer/framing 형식이 바뀌면 raw admission뿐 아니라 최종 projection exact-token 회귀 테스트를 함께 갱신한다.
 - Strict rollout 전환 검증은 create, preflight와 inactive deployment reactivation 세 상태 전이를 모두 포함한다.
+## Implementation Decision: Queue representation, consume retry and deployment transition
+
+### Context
+
+Gateway가 opaque reference만 publish하더라도 Worker가 reserved raw history field를 다시 허용하면 구형·오작동 producer가 broker 비저장 계약을 우회할 수 있다. Redis atomic consume 호출은 store unavailable, invalid reference, missing value와 corrupt value를 구분하지 않아 소비 전 일시 장애까지 non-retryable하게 종료했다. 또한 열린 Embed Chat은 같은 slug의 public info를 최초 한 번만 읽어 active deployment가 바뀌어도 이전 capability와 history를 계속 사용했다.
+
+### Options Considered
+
+- Gateway producer만 신뢰하고 Worker의 raw field 호환을 유지: broker 원문과 redelivery replay를 허용하므로 선택하지 않는다.
+- 모든 Redis consume 오류를 retry 또는 non-retryable 한쪽으로 통일: availability 또는 at-most-once history 경계 중 하나를 깨므로 선택하지 않는다.
+- Client가 요청 전 info를 매번 조회하되 version precondition은 두지 않음: info와 run 사이 active pointer race가 남으므로 선택하지 않는다.
+- Worker raw field fail-closed, typed consume error, request deployment version precondition과 Client one-shot recovery: 각 신뢰·불확실성·상태 전이 경계를 직접 닫으므로 선택한다.
+
+### Final Decision
+
+1. `workflow.execute`는 queued context에 `public_chat_history`가 있으면 DB, Redis, Knowledge와 Engine 전에 `conversation.history_payload_forbidden`으로 종료한다. `public_chat_history_ref`만 public transport 표식이며 raw history는 Worker가 validated reference를 atomic consume한 뒤 invocation-local context에만 만든다.
+2. Transient store error는 safe code를 보존한다. `conversation.history_store_unavailable`만 history 소비가 확인되기 전 기존 bounded Celery retry를 사용한다. Invalid/missing/corrupt reference는 non-retryable이고, Redis가 consume 뒤 응답을 잃은 경우 retry가 missing으로 닫히더라도 provider를 호출하거나 history를 replay하지 않는다.
+3. 새 Public Client는 public info의 `version`을 root와 `/chat` body의 `deployment_version`으로 보낸다. Gateway는 active deployment row와 일치하지 않으면 budget, transient store와 task publish 전에 `409 conversation.deployment_version_changed`를 반환한다. Public info는 `Cache-Control: no-store`다.
+4. Embed Chat은 version conflict에서 public info를 다시 조회하고 이전 deployment의 완료 history를 폐기한다. 현재 사용자 입력만 새 version의 input schema와 capability로 다시 구성해 한 번 재시도하며 두 번째 실패는 일반 오류로 종료한다.
+
+### Rationale
+
+Raw/reference 표현, atomic consume 결과와 active deployment version은 caller가 추측할 값이 아니라 각 소유 경계가 검증해야 하는 상태다. Retry는 provider effect 전에만 허용하고 version이 바뀐 history는 자동 이관하지 않아 broker 비저장, at-most-once consume와 deployment snapshot 의미를 함께 보존한다.
+
+### Affected Files
+
+- `apps/shared/services/public_chat_history_transient_store.py`
+- `apps/workflow_engine/tasks.py`
+- `apps/gateway/api/v1/endpoints/run.py`
+- `apps/gateway/api/v1/endpoints/deployment.py`
+- `apps/gateway/services/deployment_service.py`
+- `apps/client/app/embed/chat/*`
+- Conversation Memory requirements, API, component와 test case 문서
+
+### Follow-up Review Notes
+
+- 새 producer 또는 task envelope revision은 raw public history field를 다시 허용하지 않는다.
+- Redis client/library 변경 시 pre-consume unavailable과 consumed/missing/corrupt 분류가 provider replay를 만들지 않는지 검토한다.
+- Public info capability가 추가되면 slug가 아니라 deployment version을 conversation reset 경계로 유지한다.

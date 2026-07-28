@@ -432,3 +432,7 @@ Disposable PostgreSQL evidence는 `NODEASE_RUN_DISPOSABLE_DB_TEST=1`인 전용 C
 - MEM-TC-BOUND-012: deadline이 지난 broker payload는 Session/Knowledge/Engine/provider 접근 전에 non-retryable하게 종료한다.
 - MEM-TC-BOUND-013: Worker는 malformed 또는 timezone 없는 public deadline을 fail-closed한다.
 - MEM-TC-BOUND-014: compatibility와 strict 모두 Public WorkflowRun/NodeRun/Trace 원문 저장을 활성화하지 않는다.
+- MEM-TC-BOUND-015: Worker는 raw history만 있거나 opaque reference와 raw history가 함께 있는 queued task를 DB/Redis/Engine 전에 non-retryable하게 거부한다.
+- MEM-TC-BOUND-016: Redis store unavailable은 consume 전 bounded retry를 사용하지만 invalid/missing/corrupt 또는 응답 유실 뒤 이미 소비된 reference는 provider replay 없이 종료한다.
+- MEM-TC-BOUND-017: Public root와 `/chat`은 조회한 deployment version에 결박되고 mismatch는 transient store/task publish 전 safe 409다.
+- MEM-TC-BOUND-018: 열린 Embed Chat이 `legacy_v0`과 `client_history_v1` 사이에서 재배포되면 info를 no-store로 갱신하고 이전 history를 폐기한 뒤 새 version으로 한 번만 재시도한다.

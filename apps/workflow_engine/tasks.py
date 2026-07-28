@@ -96,6 +96,11 @@ def _safe_retry(self, error: Exception):
     )
 
 
+def _reject_queued_public_chat_history(execution_context: Dict[str, Any]) -> None:
+    if "public_chat_history" in execution_context:
+        raise NonRetryableWorkflowError("conversation.history_payload_forbidden")
+
+
 def _workflow_task_deadline(
     public_request_deadline: datetime | None = None,
     *,
@@ -555,10 +560,7 @@ def _canonical_deployed_graph_execution_context(
     ):
         context.pop(key, None)
 
-    has_public_history = (
-        "public_chat_history_ref" in queued_context
-        or "public_chat_history" in queued_context
-    )
+    has_public_history = "public_chat_history_ref" in queued_context
     stateless_compatibility = (
         queued_context.get("public_chat_stateless_compatibility") is True
     )
@@ -625,6 +627,7 @@ def execute_workflow(
     from apps.workflow_engine.workflow.core.workflow_engine import WorkflowEngine
 
     queued_context = dict(execution_context or {})
+    _reject_queued_public_chat_history(queued_context)
     public_request_deadline = _enforce_public_request_deadline(queued_context)
     task_deadline = _workflow_task_deadline(public_request_deadline)
     session = None
@@ -665,12 +668,7 @@ def execute_workflow(
             except PublicChatHistoryError as error:
                 raise NonRetryableWorkflowError(error.code) from None
             _enforce_public_request_deadline(execution_context)
-            try:
-                public_chat_history = consume_public_chat_history(history_reference)
-            except PublicChatHistoryTransientStoreError:
-                raise NonRetryableWorkflowError(
-                    "conversation.history_unavailable"
-                ) from None
+            public_chat_history = consume_public_chat_history(history_reference)
             if public_chat_history is None:
                 raise NonRetryableWorkflowError("conversation.history_unavailable")
             public_history_consumed = True
@@ -709,6 +707,10 @@ def execute_workflow(
     except ExternalEffectError as e:
         logger.warning("Workflow external effect stopped: code=%s", e.code)
         return _external_effect_error_result(e)
+    except PublicChatHistoryTransientStoreError as e:
+        if e.code == "conversation.history_store_unavailable":
+            _safe_retry(self, e)
+        raise NonRetryableWorkflowError("conversation.history_unavailable") from None
     except (PermanentDeploymentExecutionError, NonRetryableWorkflowError) as e:
         logger.error(
             "Workflow execution blocked: error_type=%s",

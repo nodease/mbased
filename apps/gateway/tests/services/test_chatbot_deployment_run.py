@@ -41,6 +41,7 @@ def _run_public(
     conversation_history=_UNSET_HISTORY,
     async_result_cls=None,
     allow_stateless_public_chatbot_compatibility=False,
+    expected_deployment_version=None,
 ):
     from apps.gateway.services import deployment_service as deployment_module
 
@@ -80,6 +81,7 @@ def _run_public(
             allow_stateless_public_chatbot_compatibility=(
                 allow_stateless_public_chatbot_compatibility
             ),
+            expected_deployment_version=expected_deployment_version,
             auth_token=None,
             require_auth=False,
         )
@@ -366,6 +368,56 @@ def test_public_chatbot_requires_client_history_envelope(monkeypatch):
     assert exc_info.value.detail["code"] == "conversation.history_required"
 
 
+def test_public_chatbot_rejects_stale_deployment_version_before_side_effects(
+    monkeypatch,
+):
+    from apps.gateway.services import deployment_service as deployment_module
+
+    app_row, deployment_row = _deployed_app(DeploymentType.CHATBOT)
+    deployment_row.version = 2
+    db = _Db(rows=[app_row, deployment_row])
+    side_effects = []
+    celery = _CaptureCelery()
+    monkeypatch.setattr(deployment_module, "celery_app", celery)
+    monkeypatch.setattr(
+        deployment_module,
+        "store_public_chat_history",
+        lambda *_args, **_kwargs: side_effects.append("history_store"),
+    )
+    monkeypatch.setattr(
+        deployment_module.WorkflowBudgetService,
+        "ensure_workflow_budget_allows_execution",
+        lambda *_args, **_kwargs: side_effects.append("budget"),
+    )
+    monkeypatch.setattr(
+        deployment_module.DeploymentService,
+        "migrate_legacy_node_secrets",
+        lambda *_args, **_kwargs: side_effects.append("migration"),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(
+            deployment_module.DeploymentService.run_deployment(
+                db=db,
+                url_slug=app_row.url_slug,
+                user_inputs={"question": "current"},
+                trigger_mode="app",
+                runtime_policy=DEFAULT_DEPLOYMENT_RUNTIME_POLICY,
+                client_conversation_history=(),
+                expected_deployment_version=1,
+                require_auth=False,
+            )
+        )
+
+    assert exc_info.value.status_code == 409
+    assert (
+        exc_info.value.detail["code"]
+        == "conversation.deployment_version_changed"
+    )
+    assert side_effects == []
+    assert celery.captured is None
+
+
 def test_public_run_does_not_fallback_to_owner_execution_subject(monkeypatch):
     app_row, deployment_row = _deployed_app(DeploymentType.CHATBOT)
     db = _Db(rows=[app_row, deployment_row])
@@ -382,7 +434,13 @@ def test_public_run_rejects_workflow_node_deployment(monkeypatch):
     db = _Db(rows=[app_row, deployment_row])
 
     with pytest.raises(HTTPException) as exc_info:
-        _run_public(db, app_row.url_slug, {"question": "x"}, monkeypatch)
+        _run_public(
+            db,
+            app_row.url_slug,
+            {"question": "x"},
+            monkeypatch,
+            expected_deployment_version=999,
+        )
 
     assert exc_info.value.status_code == 404
     assert exc_info.value.detail == "Deployment not found."

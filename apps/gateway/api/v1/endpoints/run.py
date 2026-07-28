@@ -81,6 +81,9 @@ async def run_workflow_public(
     user_inputs = request_body.get("inputs", {})
     # 웹 앱/임베딩: 공개 접근 (인증 불필요)
     try:
+        expected_deployment_version = _optional_public_deployment_version(
+            request_body
+        )
         return await DeploymentService.run_deployment(
             db=db,
             url_slug=url_slug,
@@ -89,6 +92,7 @@ async def run_workflow_public(
             allow_stateless_public_chatbot_compatibility=(
                 settings.PUBLIC_CHAT_CONVERSATION_ROLLOUT_MODE == "compatibility"
             ),
+            expected_deployment_version=expected_deployment_version,
             auth_token=None,
             require_auth=False,  # 인증 불필요
             trigger_mode="app",  # 웹 앱/임베딩 호출
@@ -129,16 +133,29 @@ async def run_public_chatbot(
     except PublicChatHistoryError as error:
         _raise_public_chat_history_error(error.code)
 
+    expected_deployment_version = _optional_public_deployment_version(request_body)
     return await DeploymentService.run_deployment(
         db=db,
         url_slug=url_slug,
         user_inputs=user_inputs,
         client_conversation_history=client_conversation_history,
+        expected_deployment_version=expected_deployment_version,
         auth_token=None,
         require_auth=False,
         trigger_mode="app",
         runtime_policy=runtime_policy,
     )
+
+
+def _optional_public_deployment_version(request_body: dict) -> int | None:
+    if "deployment_version" not in request_body:
+        return None
+    version = request_body["deployment_version"]
+    if isinstance(version, bool) or not isinstance(version, int) or version < 1:
+        _raise_public_chat_history_error(
+            "conversation.deployment_version_invalid"
+        )
+    return version
 
 
 def _raise_public_chat_history_error(code: str) -> NoReturn:

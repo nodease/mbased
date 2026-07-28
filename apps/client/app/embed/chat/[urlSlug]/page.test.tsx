@@ -1,0 +1,152 @@
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import EmbedChatPage from './page';
+import type { PublicConversationContract } from '../publicConversationHistory';
+
+vi.mock('next/navigation', () => ({
+  useParams: () => ({ urlSlug: 'public-chat' }),
+}));
+
+vi.mock('@/app/features/workflow/components/execution/CitationList', () => ({
+  CitationList: () => null,
+}));
+
+const jsonResponse = (body: unknown, status = 200): Response =>
+  new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json' },
+  });
+
+const deploymentInfo = (
+  version: number,
+  contract: PublicConversationContract,
+) => ({
+  url_slug: 'public-chat',
+  name: `Public chatbot v${version}`,
+  version,
+  type: 'chatbot',
+  public_conversation_contract: contract,
+  input_schema: {
+    variables: [{ name: 'question', type: 'text', label: 'Question' }],
+  },
+  output_schema: {
+    outputs: [{ variable: 'answer', label: 'Answer' }],
+  },
+});
+
+describe('EmbedChatPage deployment transition', () => {
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    vi.clearAllMocks();
+  });
+
+  it.each([
+    {
+      from: 'client_history_v1' as const,
+      to: 'legacy_v0' as const,
+      firstPath: '/api/v1/run-public/public-chat/chat',
+      retryPath: '/api/v1/run-public/public-chat',
+    },
+    {
+      from: 'legacy_v0' as const,
+      to: 'client_history_v1' as const,
+      firstPath: '/api/v1/run-public/public-chat',
+      retryPath: '/api/v1/run-public/public-chat/chat',
+    },
+  ])(
+    'refreshes $from to $to, clears old history, and retries once',
+    async ({ from, to, firstPath, retryPath }) => {
+      const fetchMock = vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(jsonResponse(deploymentInfo(1, from)))
+        .mockResolvedValueOnce(
+          jsonResponse({
+            status: 'success',
+            results: { answer: 'First deployment answer' },
+          }),
+        )
+        .mockResolvedValueOnce(
+          jsonResponse(
+            {
+              detail: {
+                code: 'conversation.deployment_version_changed',
+                message: 'The active deployment changed.',
+              },
+            },
+            409,
+          ),
+        )
+        .mockResolvedValueOnce(jsonResponse(deploymentInfo(2, to)))
+        .mockResolvedValueOnce(
+          jsonResponse({
+            status: 'success',
+            results: { answer: 'New deployment answer' },
+          }),
+        );
+      vi.stubGlobal('fetch', fetchMock);
+
+      render(<EmbedChatPage />);
+
+      expect(
+        await screen.findByRole('heading', { name: 'Public chatbot v1' }),
+      ).toBeVisible();
+
+      fireEvent.change(screen.getByRole('textbox'), {
+        target: { value: 'First question' },
+      });
+      fireEvent.click(screen.getByRole('button'));
+      expect(await screen.findByText('First deployment answer')).toBeVisible();
+
+      fireEvent.change(screen.getByRole('textbox'), {
+        target: { value: 'Question after redeploy' },
+      });
+      fireEvent.click(screen.getByRole('button'));
+
+      expect(await screen.findByText('New deployment answer')).toBeVisible();
+      expect(
+        screen.getByRole('heading', { name: 'Public chatbot v2' }),
+      ).toBeVisible();
+      expect(screen.queryByText('First question')).not.toBeInTheDocument();
+      expect(
+        screen.queryByText('First deployment answer'),
+      ).not.toBeInTheDocument();
+      expect(screen.getByText('Question after redeploy')).toBeVisible();
+
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(5));
+      expect(fetchMock.mock.calls[0]).toEqual([
+        '/api/v1/deployments/public/public-chat/info',
+        { cache: 'no-store' },
+      ]);
+      expect(fetchMock.mock.calls[1]?.[0]).toBe(firstPath);
+      expect(fetchMock.mock.calls[2]?.[0]).toBe(firstPath);
+      expect(fetchMock.mock.calls[3]).toEqual([
+        '/api/v1/deployments/public/public-chat/info',
+        { cache: 'no-store' },
+      ]);
+      expect(fetchMock.mock.calls[4]?.[0]).toBe(retryPath);
+
+      const staleBody = JSON.parse(
+        String(fetchMock.mock.calls[2]?.[1]?.body),
+      ) as Record<string, unknown>;
+      expect(staleBody.deployment_version).toBe(1);
+
+      const retryBody = JSON.parse(
+        String(fetchMock.mock.calls[4]?.[1]?.body),
+      ) as Record<string, unknown>;
+      expect(retryBody.deployment_version).toBe(2);
+      if (to === 'client_history_v1') {
+        expect(retryBody.conversation).toEqual({ history: [] });
+      } else {
+        expect(retryBody).not.toHaveProperty('conversation');
+      }
+    },
+  );
+});

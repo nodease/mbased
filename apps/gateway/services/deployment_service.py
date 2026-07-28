@@ -989,6 +989,7 @@ class DeploymentService:
         runtime_policy: DeploymentRuntimePolicy,
         client_conversation_history: tuple[dict[str, str], ...] | None = None,
         allow_stateless_public_chatbot_compatibility: bool = False,
+        expected_deployment_version: int | None = None,
         auth_token: Optional[str] = None,
         require_auth: bool = True,  # 인증 필요 여부 (기본값: 필요)
     ) -> Dict[str, Any]:
@@ -1031,6 +1032,7 @@ class DeploymentService:
         if not deployment:
             raise HTTPException(status_code=404, detail="Deployment data not found.")
 
+
         # 3. 활성상태 체크
         if not deployment.is_active:
             raise HTTPException(status_code=404, detail="Deployment is inactive")
@@ -1040,6 +1042,27 @@ class DeploymentService:
             runtime_policy=runtime_policy,
         ):
             raise HTTPException(status_code=404, detail="Deployment not found.")
+        if expected_deployment_version is not None:
+            if (
+                isinstance(expected_deployment_version, bool)
+                or not isinstance(expected_deployment_version, int)
+                or expected_deployment_version < 1
+            ):
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "code": "conversation.deployment_version_invalid",
+                        "message": "The public deployment version is invalid.",
+                    },
+                )
+            if deployment.version != expected_deployment_version:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "conversation.deployment_version_changed",
+                        "message": "The active public deployment changed.",
+                    },
+                )
 
         # 4. 인증 검증은 verifier lifecycle 경계를 사용한다.
         if require_auth:

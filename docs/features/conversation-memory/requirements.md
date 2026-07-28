@@ -214,5 +214,8 @@ MBA-318은 Public client-held history, legacy Public memory control 차단, cont
 - MEM-REQ-104: strict rollout mode에서는 root public Chatbot 실행을 허용하지 않고 전용 `/chat` history 계약만 허용해야 한다.
 - MEM-REQ-105: Public raw history는 bounded TTL의 일회성 transient store에만 두고 broker에는 opaque reference만 전달해야 하며, task는 Gateway 생성 시각 기준 bounded absolute deadline과 broker expiry를 가져야 한다.
 - MEM-REQ-106: Worker는 DB 조회, Knowledge sync, Workflow Engine과 provider 호출 전에 deadline을 재검증하고 expired/malformed public task를 non-retryable하게 거부해야 한다.
+- MEM-REQ-107: Worker는 queued `public_chat_history` 원문을 DB와 external I/O 전에 fail-closed하고, raw history는 validated opaque reference를 atomic consume한 뒤 invocation-local context에만 materialize해야 한다.
+- MEM-REQ-108: Redis consume의 `store_unavailable`은 history 소비가 확인되기 전 기존 bounded Celery retry를 사용하되 invalid/missing/corrupt 또는 소비 후 오류는 자동 replay하지 않아야 한다.
+- MEM-REQ-109: Public Client는 조회한 active deployment version을 root와 `/chat` 요청에 결박해야 한다. Gateway mismatch는 부수효과 전에 safe conflict로 종료하며 Client는 public info를 no-store로 갱신하고 이전 version history를 폐기한 뒤 현재 입력을 한 번만 재시도해야 한다.
 
 `PUBLIC_CHAT_CONVERSATION_ROLLOUT_MODE=compatibility`는 배포 순서용 임시 기본값이다. strict 전환 전 active legacy public Chatbot을 consumer mapping이 있는 새 deployment version으로 교체한다.

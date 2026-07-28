@@ -28,12 +28,14 @@ export const buildPublicConversationRequest = (
   inputs: Record<string, unknown>,
   messages: readonly DisplayMessage[],
   contract: PublicConversationContract | undefined,
+  deploymentVersion: number,
 ): PublicConversationRequest => {
   if (contract === 'client_history_v1') {
     return {
       path: buildPublicConversationRunPath(urlSlug),
       body: {
         inputs,
+        deployment_version: deploymentVersion,
         conversation: {
           history: buildPublicConversationHistory(messages),
         },
@@ -44,6 +46,7 @@ export const buildPublicConversationRequest = (
     path: buildLegacyPublicRunPath(urlSlug),
     body: {
       inputs,
+      deployment_version: deploymentVersion,
     },
   };
 };
@@ -62,20 +65,14 @@ export const buildPublicConversationHistory = (
       pendingUser = { role: 'user', content: message.content };
       continue;
     }
-    if (
-      message.id.startsWith('error-') ||
-      message.historyEligible !== true
-    ) {
+    if (message.id.startsWith('error-') || message.historyEligible !== true) {
       pendingUser = null;
       continue;
     }
     if (!pendingUser) {
       continue;
     }
-    turns.push([
-      pendingUser,
-      { role: 'assistant', content: message.content },
-    ]);
+    turns.push([pendingUser, { role: 'assistant', content: message.content }]);
     pendingUser = null;
   }
 

@@ -7,10 +7,10 @@ Status: Implemented Public client-held history; authenticated durable Memory fol
 Public Chatbot은 별도 Memory aggregate를 생성하지 않는 client-held history path다.
 
 ```text
-Embed Chat React memory
-  -> POST /run-public/{slug}/chat { inputs, conversation.history }
-  -> Gateway shape/turn/token validation
-  -> Workflow task (redacted args representation)
+Embed Chat React memory + no-store public deployment info
+  -> POST /run-public/{slug}/chat { inputs, deployment_version, conversation.history }
+  -> Gateway version precondition + shape/turn/token validation
+  -> Workflow task (opaque history reference only)
   -> LLMNode leaf content single sanitation
   -> bounded RAG query context + untrusted provider history block
   -> HTTP response
@@ -492,7 +492,8 @@ Public transcript는 현재 Client가 렌더링하는 local messages이며 서�
 - Gateway와 Worker는 canonical snapshot location을 검증하며 LLMNode는 자신이 지정 consumer일 때만 history projection을 만든다. 다른 classifier/router/provider node는 현재 입력만 사용한다.
 - public info capability가 `client_history_v1`이면 Embed Chat은 `/chat`과 client-held history를 사용한다.
 - capability가 `legacy_v0`이거나 필드가 없으면 Embed Chat은 `memory_mode`와 `conversation_id` 없이 rollout 호환 root 요청을 사용한다.
+- Embed Chat은 두 경로 모두 public info의 `version`을 `deployment_version`으로 보내며, active version conflict에서는 info를 no-store로 갱신하고 이전 history를 폐기한 뒤 현재 입력을 한 번만 재시도한다.
 - 새 Gateway의 compatibility adapter는 root 요청을 무상태로 실행하며 server Memory identity를 만들지 않는다.
 - strict rollout 전환 뒤에는 모든 active public Chatbot deployment가 versioned consumer config를 가져야 한다.
 - Public audit actor는 authorization subject와 별도다. UI는 history나 actor marker를 권한·신원으로 표시하지 않는다.
-- Gateway는 raw history를 600초 TTL의 일회성 Redis key에 두고 broker에는 opaque reference만 전달한다. Broker expiry와 Worker deadline은 같은 Gateway 생성시각을 사용하며 Worker는 deadline 확인 뒤 reference를 atomic GET+DELETE로 소비해 timeout 또는 재전달 뒤 stale provider 실행을 허용하지 않는다.
+- Gateway는 raw history를 600초 TTL의 일회성 Redis key에 두고 broker에는 opaque reference만 전달한다. Worker는 queued raw history를 거부하고 atomic consume 뒤에만 invocation-local 원문을 만든다. Store unavailable은 소비 전 bounded retry를 사용하지만 invalid/missing/corrupt 또는 소비 뒤 오류는 provider replay 없이 닫는다. Broker expiry와 Worker deadline은 같은 Gateway 생성시각을 사용한다.

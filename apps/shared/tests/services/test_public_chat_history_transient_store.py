@@ -1,4 +1,6 @@
+import pytest
 from apps.shared.services.public_chat_history_transient_store import (
+    PublicChatHistoryTransientStoreError,
     consume_public_chat_history,
     store_public_chat_history,
 )
@@ -51,3 +53,29 @@ def test_public_history_store_uses_ttl_and_one_time_consume():
         )
         is None
     )
+
+
+def test_public_history_consume_classifies_store_unavailable():
+    class _UnavailableRedis:
+        def eval(self, *_args):
+            raise ConnectionError("redis unavailable")
+
+    with pytest.raises(PublicChatHistoryTransientStoreError) as exc_info:
+        consume_public_chat_history(
+            "a" * 32,
+            redis_client=_UnavailableRedis(),
+        )
+
+    assert exc_info.value.code == "conversation.history_store_unavailable"
+
+
+def test_public_history_consume_classifies_invalid_and_corrupt_values():
+    with pytest.raises(PublicChatHistoryTransientStoreError) as invalid:
+        consume_public_chat_history("not-a-reference", redis_client=_FakeRedis())
+    assert invalid.value.code == "conversation.history_reference_invalid"
+
+    corrupt_redis = _FakeRedis()
+    corrupt_redis.values["nodease:public-chat-history:v1:" + ("b" * 32)] = b"{"
+    with pytest.raises(PublicChatHistoryTransientStoreError) as corrupt:
+        consume_public_chat_history("b" * 32, redis_client=corrupt_redis)
+    assert corrupt.value.code == "conversation.history_store_corrupt"

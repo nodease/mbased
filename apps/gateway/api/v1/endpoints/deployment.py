@@ -819,6 +819,8 @@ def get_deployment_info_public(
     input_schema와 output_schema를 조회합니다.
 
     """
+    response.headers["Cache-Control"] = "no-store"
+
     from fastapi import HTTPException
 
     from apps.shared.db.models.app import App

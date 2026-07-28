@@ -17,6 +17,9 @@ from apps.shared.domain.public_chat_history import (
 from apps.shared.domain.workflow_node_location import (
     CanonicalWorkflowNodeLocation,
 )
+from apps.shared.services.public_chat_history_transient_store import (
+    PublicChatHistoryTransientStoreError,
+)
 from apps.workflow_engine.workflow.errors import NonRetryableWorkflowError
 
 
@@ -399,6 +402,46 @@ def test_public_chatbot_execution_rejects_expired_queue_payload_before_db_access
     assert FakeSyncService.calls == []
 
 
+@pytest.mark.parametrize(
+    "queued_history",
+    [
+        {"public_chat_history": [{"role": "user", "content": "raw"}]},
+        {
+            "public_chat_history_ref": "c" * 32,
+            "public_chat_history": [{"role": "user", "content": "raw"}],
+        },
+    ],
+)
+def test_public_chatbot_execution_rejects_raw_history_before_db_access(
+    monkeypatch,
+    queued_history,
+):
+    monkeypatch.setattr(
+        tasks,
+        "SessionLocal",
+        lambda: pytest.fail("raw public history must be rejected before database access"),
+    )
+
+    with pytest.raises(
+        NonRetryableWorkflowError,
+        match="conversation.history_payload_forbidden",
+    ):
+        tasks.execute_workflow.run(
+            {"nodes": []},
+            {},
+            {
+                **queued_history,
+                "public_request_deadline_at": (
+                    datetime.now(timezone.utc) + timedelta(minutes=1)
+                ).isoformat(),
+            },
+            True,
+        )
+
+    assert FakeWorkflowEngine.calls == []
+    assert FakeSyncService.calls == []
+
+
 def test_public_task_deadline_never_exceeds_absolute_request_deadline():
     current = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
@@ -478,6 +521,71 @@ def test_public_chatbot_does_not_retry_after_one_time_history_is_consumed(
         )
 
     assert consumed == ["d" * 32]
+
+
+def test_public_chatbot_retries_when_redis_is_unavailable_before_consume(
+    monkeypatch,
+):
+    graph = {
+        "nodes": [
+            {
+                "id": "answer",
+                "type": "llmNode",
+                "data": {"model_id": "model-1", "user_prompt": "answer"},
+            }
+        ],
+        "edges": [],
+    }
+    FakeSession.deployment.type = DeploymentType.CHATBOT
+    FakeSession.deployment.graph_snapshot = graph
+    FakeSession.deployment.config = {
+        "public_conversation": {
+            "contract_version": "public_chat_conversation.v1",
+            "history_consumer": {
+                "node_id": "answer",
+                "container_path": [],
+            },
+        }
+    }
+    retry_errors = []
+
+    class _RetryScheduled(Exception):
+        pass
+
+    def unavailable(_reference):
+        raise PublicChatHistoryTransientStoreError(
+            "conversation.history_store_unavailable"
+        )
+
+    def schedule_retry(_task, error):
+        retry_errors.append(error)
+        raise _RetryScheduled()
+
+    monkeypatch.setattr(tasks, "consume_public_chat_history", unavailable)
+    monkeypatch.setattr(tasks, "_safe_retry", schedule_retry)
+
+    with pytest.raises(_RetryScheduled):
+        tasks.execute_workflow.run(
+            graph,
+            {},
+            {
+                "workflow_id": str(FakeSession.workflow.id),
+                "execution_id": str(uuid.uuid4()),
+                "deployment_id": str(FakeSession.deployment.id),
+                "workflow_version": FakeSession.deployment.version,
+                "trigger_mode": "app",
+                "public_chat_history_ref": "e" * 32,
+                "public_request_deadline_at": (
+                    datetime.now(timezone.utc) + timedelta(minutes=1)
+                ).isoformat(),
+            },
+            True,
+        )
+
+    assert [error.code for error in retry_errors] == [
+        "conversation.history_store_unavailable"
+    ]
+    assert FakeWorkflowEngine.calls == []
 
 
 def test_execute_workflow_rejects_invalid_execution_identity_without_retry():

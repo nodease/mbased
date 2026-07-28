@@ -30,11 +30,13 @@ describe('buildPublicConversationRequest', () => {
           },
         ],
         'client_history_v1',
+        3,
       ),
     ).toEqual({
       path: '/api/v1/run-public/chat/chat',
       body: {
         inputs: { question: 'now' },
+        deployment_version: 3,
         conversation: {
           history: [
             { role: 'user', content: 'old' },
@@ -52,11 +54,13 @@ describe('buildPublicConversationRequest', () => {
         { question: 'now' },
         [],
         undefined,
+        4,
       ),
     ).toEqual({
       path: '/api/v1/run-public/chat',
       body: {
         inputs: { question: 'now' },
+        deployment_version: 4,
       },
     });
   });

@@ -580,6 +580,7 @@ def test_public_deployment_info_policy_is_replaceable_at_fastapi_composition_bou
 
     assert response.status_code == 200
     assert response.json()["type"] == DeploymentType.API.value
+    assert response.headers["cache-control"] == "no-store"
     assert "access-control-allow-origin" not in response.headers
     assert DEFAULT_DEPLOYMENT_RUNTIME_POLICY.allowed_types_by_surface[
         SURFACE_PUBLIC_INFO

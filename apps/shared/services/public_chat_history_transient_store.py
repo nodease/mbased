@@ -24,7 +24,9 @@ return value
 
 
 class PublicChatHistoryTransientStoreError(RuntimeError):
-    pass
+    def __init__(self, code: str):
+        self.code = code
+        super().__init__(code)
 
 
 def store_public_chat_history(
@@ -75,8 +77,8 @@ def consume_public_chat_history(
         raise PublicChatHistoryTransientStoreError(
             "conversation.history_reference_invalid"
         )
-    client = redis_client or get_redis_client()
     try:
+        client = redis_client or get_redis_client()
         payload = client.eval(_CONSUME_SCRIPT, 1, _key(reference))
     except Exception as error:
         raise PublicChatHistoryTransientStoreError(

@@ -60,7 +60,10 @@ def test_public_run_forwards_injected_runtime_policy_at_fastapi_boundary(
 
     response = TestClient(app).post(
         "/run-public/injected-policy-app",
-        json={"inputs": {"question": "개발팀 커밋 컨벤션은?"}},
+        json={
+            "inputs": {"question": "개발팀 커밋 컨벤션은?"},
+            "deployment_version": 7,
+        },
     )
 
     assert response.status_code == 200
@@ -90,6 +93,7 @@ def test_public_run_forwards_injected_runtime_policy_at_fastapi_boundary(
         "user_inputs": {"question": "개발팀 커밋 컨벤션은?"},
         "client_conversation_history": None,
         "allow_stateless_public_chatbot_compatibility": True,
+        "expected_deployment_version": 7,
         "auth_token": None,
         "require_auth": False,
         "trigger_mode": "app",
@@ -131,6 +135,7 @@ def test_public_run_forwards_bounded_client_history_without_capability_token(
                     {"role": "assistant", "content": "old answer"},
                 ]
             },
+            "deployment_version": 3,
         },
     )
 
@@ -140,6 +145,7 @@ def test_public_run_forwards_bounded_client_history_without_capability_token(
         {"role": "assistant", "content": "old answer"},
     )
     assert captured["user_inputs"] == {"question": "new question"}
+    assert captured["expected_deployment_version"] == 3
     assert response.headers["cache-control"] == "no-store"
     assert response.headers["referrer-policy"] == "no-referrer"
     assert "access-control-allow-origin" not in response.headers
@@ -220,6 +226,45 @@ def test_public_chatbot_missing_history_keeps_no_store_transport_boundary(
     assert response.headers["cache-control"] == "no-store"
     assert response.headers["referrer-policy"] == "no-referrer"
     assert "access-control-allow-origin" not in response.headers
+    assert "private-current-question" not in response.text
+
+
+@pytest.mark.parametrize("deployment_version", [True, 0, -1, "1"])
+def test_public_chatbot_rejects_invalid_deployment_version_before_execution(
+    monkeypatch,
+    deployment_version,
+):
+    async def unexpected_run(**_kwargs):
+        pytest.fail("invalid deployment version must be rejected before execution")
+
+    monkeypatch.setattr(
+        run_endpoint.DeploymentService,
+        "run_deployment",
+        unexpected_run,
+    )
+
+    app = FastAPI()
+    app.add_middleware(PublicConversationCorsBoundaryMiddleware)
+    app.include_router(run_endpoint.router, prefix="/api/v1")
+    app.dependency_overrides[run_endpoint.get_db] = lambda: object()
+    app.dependency_overrides[run_endpoint.get_deployment_runtime_policy] = lambda: (
+        DEFAULT_DEPLOYMENT_RUNTIME_POLICY
+    )
+
+    response = TestClient(app).post(
+        "/api/v1/run-public/public-chatbot/chat",
+        json={
+            "inputs": {"question": "private-current-question"},
+            "conversation": {"history": []},
+            "deployment_version": deployment_version,
+        },
+    )
+
+    assert response.status_code == 422
+    assert (
+        response.json()["detail"]["code"]
+        == "conversation.deployment_version_invalid"
+    )
     assert "private-current-question" not in response.text
 
 
