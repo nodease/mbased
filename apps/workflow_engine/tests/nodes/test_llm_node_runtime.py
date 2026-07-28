@@ -5127,10 +5127,12 @@ def test_low_confidence_judge_uses_requirement_safe_fallback_without_adjudicator
             )
 
     judge_call_count = 0
+    judge_deadline_guards = []
 
-    def assess_requirements(**_kwargs):
+    def assess_requirements(**kwargs):
         nonlocal judge_call_count
         judge_call_count += 1
+        judge_deadline_guards.append(kwargs.get("deadline_guard"))
         return _Assessment()
 
     monkeypatch.setattr(
@@ -5198,6 +5200,9 @@ def test_low_confidence_judge_uses_requirement_safe_fallback_without_adjudicator
     assert metadata["judge"]["adjudication_attempted"] is False
     assert metadata["judge"]["safe_fallback_used"] is True
     assert judge_call_count == 1
+    assert len(judge_deadline_guards) == 1
+    assert judge_deadline_guards[0].__self__ is node
+    assert judge_deadline_guards[0].__name__ == "_enforce_public_external_io_deadline"
 
 
 def test_runtime_judge_failure_is_recorded_separately_from_judge_not_called(

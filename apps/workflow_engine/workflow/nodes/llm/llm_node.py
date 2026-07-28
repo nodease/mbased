@@ -830,6 +830,7 @@ class LLMNode(Node[LLMNodeData]):
                     routing_feature_text=routing_feature_text or "",
                     structural_facts=structural_facts,
                     rag_context=routing_rag_context,
+                    deadline_guard=self._enforce_public_external_io_deadline,
                 )
                 judge_attempts = [
                     (judge_model_id, judge_selection, requirement_assessment)
@@ -885,6 +886,8 @@ class LLMNode(Node[LLMNodeData]):
                     selected_model_id=selected_by_server,
                     reason_code=selection_reason_code,
                 )
+            except NonRetryableWorkflowError:
+                raise
             except (RuntimeError, ValueError, TypeError, SQLAlchemyError) as exc:
                 # Judge는 초기 학습을 위한 보조 경로다. 일시 실패가 운영 요청을
                 # 차단하면 안 되므로 이미 계산한 기본 모델로 닫는다.

@@ -507,3 +507,6 @@ Public transcript는 현재 Client가 렌더링하는 local messages이며 서�
 - Nginx Public `/chat` location은 Gateway lifetime보다 긴 upstream timeout과 Gateway와 동일한 safe 413 응답 계약을 소유한다.
 - Helm Ingress template도 600초 absolute lifetime보다 긴 read/send timeout을 렌더링하고 600초 이하 values를 거부한다.
 - LLMNode model-routing judge는 Public content-persistence suppression을 learning label보다 먼저 확인한다. Suppressed 실행은 selection과 content-free usage만 유지하고 feature text/vector/hash label write를 건너뛴다.
+- Public history transient store의 Worker consume adapter는 요청마다 남은 deadline 이하의 bounded Redis client를 만들고 atomic consume 뒤 connection pool을 정리한다.
+- ModelRoutingRuntimeJudge는 optional deadline guard를 최초와 compact retry provider invoke 직전에 호출하며 LLMNode는 공통 Public external-I/O guard를 주입한다.
+- 전용 Public task adapter는 unsafe legacy memory control을 canonical row 조회 전에 거부하고 safe false/null sentinel도 WorkflowEngine context로 전달하지 않는다.

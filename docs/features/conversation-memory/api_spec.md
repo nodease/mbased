@@ -490,3 +490,7 @@ History는 raw admission과 sanitizer 이후 final projection을 같은 validato
 Gateway의 transient history 저장은 async Redis와 bounded 2초 timeout을 사용한다. Query embedding fan-out은 model group마다 provider invoke 직전에 같은 Public absolute deadline guard를 실행하며 `safe_no_result` 정책도 deadline 만료를 provider 실패로 삼켜 다음 호출을 계속하지 않는다. Rollout mode는 Compose 환경변수와 Helm `gateway.env.PUBLIC_CHAT_CONVERSATION_ROLLOUT_MODE`에서 설정한다.
 
 `suppress_content_persistence=true`인 Public execution은 model routing judge의 content-derived learning label을 queue하지 않는다. Model selection과 content-free usage 통계는 실행에 사용할 수 있지만 visitor input의 feature text/vector/hash를 durable learner dataset에 포함하지 않는다.
+
+Worker의 Redis atomic consume은 short-lived client에 2초와 남은 task deadline 중 더 짧은 connect/read timeout을 적용한다. Timeout 뒤에도 absolute deadline이 남으면 소비 전 store unavailable retry를 사용할 수 있지만 deadline에 도달했으면 `conversation.request_expired`로 종료한다. Model-routing runtime Judge는 incomplete compact retry를 포함한 각 provider invocation 직전에 같은 deadline guard를 실행한다.
+
+전용 Public task는 `memory_mode`가 없거나 정확히 `false`이고 `conversation_id`가 없거나 `null`인 payload만 허용한다. `true` 또는 non-null 값은 DB 전에 `conversation.task_contract_mismatch`로 거부하고, 허용된 sentinel도 canonical runtime context에서 제거한다.

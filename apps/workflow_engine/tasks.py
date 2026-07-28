@@ -45,6 +45,7 @@ from apps.shared.services.workflow_task_publisher import (
     send_workflow_task,
 )
 from apps.shared.services.public_chat_history_transient_store import (
+    PUBLIC_CHAT_HISTORY_TRANSIENT_IO_TIMEOUT_SECONDS,
     PublicChatHistoryTransientStoreError,
     consume_public_chat_history,
 )
@@ -127,7 +128,12 @@ def _validate_public_task_contract(
         execution_context.get("public_chat_stateless_compatibility") is True
     )
     if (
-        not is_deployed
+        (
+            "memory_mode" in execution_context
+            and execution_context["memory_mode"] is not False
+        )
+        or execution_context.get("conversation_id") is not None
+        or not is_deployed
         or has_history_reference == is_stateless
         or execution_context.get("trigger_mode") != "app"
         or execution_context.get("execution_actor") != {"type": "public"}
@@ -158,6 +164,16 @@ def _workflow_task_deadline(
         - current.astimezone(timezone.utc)
     ).total_seconds()
     return min(task_deadline, current_monotonic + max(0.0, remaining_seconds))
+
+
+def _public_history_consume_timeout_seconds(task_deadline: float) -> float:
+    remaining_seconds = task_deadline - time.monotonic()
+    if remaining_seconds <= 0:
+        raise NonRetryableWorkflowError("conversation.request_expired")
+    return min(
+        PUBLIC_CHAT_HISTORY_TRANSIENT_IO_TIMEOUT_SECONDS,
+        remaining_seconds,
+    )
 
 
 def _enforce_public_request_deadline(
@@ -588,7 +604,9 @@ def _canonical_deployed_graph_execution_context(
     context["deployment_id"] = str(deployment.id)
     context["workflow_version"] = deployment.version
     for key in (
+        "conversation_id",
         "execution_actor",
+        "memory_mode",
         "public_chat_history_consumer_ref",
         "public_chat_history_token_budget",
         "public_chat_stateless_compatibility",
@@ -754,7 +772,10 @@ def _execute_workflow(
             except PublicChatHistoryError as error:
                 raise NonRetryableWorkflowError(error.code) from None
             _enforce_public_request_deadline(execution_context)
-            public_chat_history = consume_public_chat_history(history_reference)
+            public_chat_history = consume_public_chat_history(
+                history_reference,
+                timeout_seconds=_public_history_consume_timeout_seconds(task_deadline),
+            )
             if public_chat_history is None:
                 raise NonRetryableWorkflowError("conversation.history_unavailable")
             public_history_consumed = True
@@ -795,6 +816,11 @@ def _execute_workflow(
         return _external_effect_error_result(e)
     except PublicChatHistoryTransientStoreError as e:
         if e.code == "conversation.history_store_unavailable":
+            if time.monotonic() >= task_deadline:
+                raise NonRetryableWorkflowError(
+                    "conversation.request_expired"
+                ) from None
+            _enforce_public_request_deadline(queued_context)
             _safe_retry(self, e)
         raise NonRetryableWorkflowError("conversation.history_unavailable") from None
     except (PermanentDeploymentExecutionError, NonRetryableWorkflowError) as e:

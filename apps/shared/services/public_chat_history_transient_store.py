@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import re
 import secrets
 from collections.abc import Sequence
@@ -15,7 +16,7 @@ from apps.shared.pubsub import get_async_redis_client, get_redis_client
 
 _REFERENCE_PATTERN = re.compile(r"^[0-9a-f]{32}$")
 _KEY_PREFIX = "nodease:public-chat-history:v1:"
-_STORE_TIMEOUT_SECONDS = 2.0
+PUBLIC_CHAT_HISTORY_TRANSIENT_IO_TIMEOUT_SECONDS = 2.0
 _CONSUME_SCRIPT = """
 local value = redis.call('GET', KEYS[1])
 if value then
@@ -35,7 +36,7 @@ async def store_public_chat_history(
     history: Sequence[dict[str, str]],
     *,
     ttl_seconds: int,
-    timeout_seconds: float = _STORE_TIMEOUT_SECONDS,
+    timeout_seconds: float = PUBLIC_CHAT_HISTORY_TRANSIENT_IO_TIMEOUT_SECONDS,
     redis_client: Any = None,
 ) -> str:
     if isinstance(ttl_seconds, bool) or not isinstance(ttl_seconds, int):
@@ -50,6 +51,7 @@ async def store_public_chat_history(
         isinstance(timeout_seconds, bool)
         or not isinstance(timeout_seconds, (int, float))
         or timeout_seconds <= 0
+        or not math.isfinite(float(timeout_seconds))
     ):
         raise PublicChatHistoryTransientStoreError(
             "conversation.history_store_unavailable"
@@ -85,19 +87,41 @@ async def store_public_chat_history(
 def consume_public_chat_history(
     reference: str,
     *,
+    timeout_seconds: float,
     redis_client: Any = None,
 ) -> tuple[dict[str, str], ...] | None:
     if not isinstance(reference, str) or not _REFERENCE_PATTERN.fullmatch(reference):
         raise PublicChatHistoryTransientStoreError(
             "conversation.history_reference_invalid"
         )
+    if (
+        isinstance(timeout_seconds, bool)
+        or not isinstance(timeout_seconds, (int, float))
+        or timeout_seconds <= 0
+        or not math.isfinite(float(timeout_seconds))
+    ):
+        raise PublicChatHistoryTransientStoreError(
+            "conversation.history_store_unavailable"
+        )
+    client = None
+    owns_client = redis_client is None
     try:
-        client = redis_client or get_redis_client()
+        client = redis_client or get_redis_client(
+            socket_timeout_seconds=float(timeout_seconds)
+        )
         payload = client.eval(_CONSUME_SCRIPT, 1, _key(reference))
     except Exception as error:
         raise PublicChatHistoryTransientStoreError(
             "conversation.history_store_unavailable"
         ) from error
+    finally:
+        if owns_client and client is not None:
+            try:
+                client.close()
+            except Exception:
+                # Command outcome classification must not be replaced by a
+                # best-effort connection-pool cleanup failure.
+                pass
     if payload is None:
         return None
     try:
@@ -115,6 +139,7 @@ def _key(reference: str) -> str:
 
 
 __all__ = [
+    "PUBLIC_CHAT_HISTORY_TRANSIENT_IO_TIMEOUT_SECONDS",
     "PublicChatHistoryTransientStoreError",
     "consume_public_chat_history",
     "store_public_chat_history",

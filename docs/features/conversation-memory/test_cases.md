@@ -448,3 +448,6 @@ Disposable PostgreSQL evidence는 `NODEASE_RUN_DISPOSABLE_DB_TEST=1`인 전용 C
 - MEM-TC-BOUND-028: Nginx가 oversized Public `/chat`을 차단해도 safe JSON code와 no-store/no-referrer headers를 반환한다.
 - MEM-TC-BOUND-029: Helm default/production values와 Ingress template은 600초보다 긴 Public read/send timeout을 렌더링하고 operator annotations를 보존한다.
 - MEM-TC-BOUND-030: 동일한 deployed judge-first routing은 일반 실행에서 learning label을 queue하지만 `suppress_content_persistence` 실행에서는 queue하지 않고 safe suppression status만 남긴다.
+- MEM-TC-BOUND-031: Redis history consume은 short-lived client에 2초와 남은 task deadline 중 더 짧은 connect/read timeout을 적용하고 client를 닫는다.
+- MEM-TC-BOUND-032: runtime Judge의 최초 provider가 incomplete를 반환한 뒤 deadline guard가 만료되면 compact retry provider를 호출하지 않고 deadline 예외를 전파한다.
+- MEM-TC-BOUND-033: 전용 Public task의 `memory_mode=true` 또는 non-null `conversation_id`는 DB 전에 거부되며 safe false/null sentinel은 canonical engine context에서 제거된다.

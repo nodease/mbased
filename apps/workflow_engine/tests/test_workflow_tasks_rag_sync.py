@@ -191,7 +191,9 @@ def patch_task_dependencies(monkeypatch):
         graph_snapshot={"nodes": []},
         config={},
     )
-    monkeypatch.setattr(tasks, "consume_public_chat_history", lambda _ref: ())
+    monkeypatch.setattr(
+        tasks, "consume_public_chat_history", lambda _ref, **_kwargs: ()
+    )
     monkeypatch.setattr(tasks, "SessionLocal", lambda: FakeSession())
     monkeypatch.setitem(
         sys.modules,
@@ -305,6 +307,7 @@ def test_deployed_public_chatbot_rebuilds_consumer_mapping_from_snapshot(
         }
     }
     forged_ref = CanonicalWorkflowNodeLocation((), "classifier").safe_reference
+    consume_timeouts = []
     monkeypatch.setattr(
         tasks,
         "_sync_knowledge_bases_for_execution_subject",
@@ -316,7 +319,11 @@ def test_deployed_public_chatbot_rebuilds_consumer_mapping_from_snapshot(
     monkeypatch.setattr(
         tasks,
         "consume_public_chat_history",
-        lambda _ref: (lifecycle_events.append("consumed"), ())[1],
+        lambda _ref, *, timeout_seconds: (
+            lifecycle_events.append("consumed"),
+            consume_timeouts.append(timeout_seconds),
+            (),
+        )[2],
     )
 
     result = tasks.execute_public_chat_workflow.run(
@@ -333,6 +340,8 @@ def test_deployed_public_chatbot_rebuilds_consumer_mapping_from_snapshot(
             "execution_actor": {"type": "public"},
             "suppress_content_persistence": True,
             "public_chat_history_token_budget": 4096,
+            "memory_mode": False,
+            "conversation_id": None,
             "public_request_deadline_at": (
                 datetime.now(timezone.utc) + timedelta(minutes=1)
             ).isoformat(),
@@ -350,7 +359,10 @@ def test_deployed_public_chatbot_rebuilds_consumer_mapping_from_snapshot(
     assert context["public_chat_history_token_budget"] == (
         remaining_public_chat_history_tokens({"question": "current"})
     )
+    assert "memory_mode" not in context
+    assert "conversation_id" not in context
     assert lifecycle_events == ["validated", "consumed"]
+    assert 0 < consume_timeouts[0] <= 2.0
 
 
 def test_deployed_graph_execution_rejects_snapshot_drift():
@@ -453,6 +465,65 @@ def test_public_chatbot_execution_rejects_raw_history_before_db_access(
     assert FakeSyncService.calls == []
 
 
+@pytest.mark.parametrize(
+    "legacy_controls",
+    [
+        {"memory_mode": True, "conversation_id": None},
+        {"memory_mode": False, "conversation_id": "forged-public-session"},
+    ],
+)
+def test_public_chatbot_task_rejects_unsafe_legacy_memory_controls_before_db(
+    monkeypatch,
+    legacy_controls,
+):
+    monkeypatch.setattr(
+        tasks,
+        "SessionLocal",
+        lambda: pytest.fail(
+            "unsafe public memory controls must be rejected before database access"
+        ),
+    )
+
+    with pytest.raises(
+        NonRetryableWorkflowError,
+        match="conversation.task_contract_mismatch",
+    ):
+        tasks.execute_public_chat_workflow.run(
+            {"nodes": []},
+            {},
+            {
+                "public_chat_stateless_compatibility": True,
+                "trigger_mode": "app",
+                "execution_actor": {"type": "public"},
+                "suppress_content_persistence": True,
+                "public_request_deadline_at": (
+                    datetime.now(timezone.utc) + timedelta(minutes=1)
+                ).isoformat(),
+                **legacy_controls,
+            },
+            True,
+        )
+
+    assert FakeWorkflowEngine.calls == []
+
+
+def test_public_history_consume_timeout_is_capped_by_remaining_task_deadline(
+    monkeypatch,
+):
+    monkeypatch.setattr(tasks.time, "monotonic", lambda: 50.0)
+
+    assert tasks._public_history_consume_timeout_seconds(55.0) == 2.0
+    assert tasks._public_history_consume_timeout_seconds(50.125) == pytest.approx(
+        0.125
+    )
+
+    with pytest.raises(
+        NonRetryableWorkflowError,
+        match="conversation.request_expired",
+    ):
+        tasks._public_history_consume_timeout_seconds(50.0)
+
+
 def test_public_task_deadline_never_exceeds_absolute_request_deadline():
     current = datetime(2026, 1, 1, tzinfo=timezone.utc)
 
@@ -493,7 +564,7 @@ def test_public_chatbot_does_not_retry_after_one_time_history_is_consumed(
     monkeypatch.setattr(
         tasks,
         "consume_public_chat_history",
-        lambda reference: (
+        lambda reference, **_kwargs: (
             consumed.append(reference),
             (
                 {"role": "user", "content": "이전 질문"},
@@ -565,7 +636,7 @@ def test_public_chatbot_retries_when_redis_is_unavailable_before_consume(
     class _RetryScheduled(Exception):
         pass
 
-    def unavailable(_reference):
+    def unavailable(_reference, **_kwargs):
         raise PublicChatHistoryTransientStoreError(
             "conversation.history_store_unavailable"
         )

@@ -432,3 +432,44 @@ HTTP client lifetime과 durable data minimization은 Docker 단일 경로가 아
 - ingress-nginx가 아닌 controller는 `ingress.annotations`로 동일하거나 더 긴 controller-specific timeout을 설정하고 rendered manifest를 배포 전에 검증한다.
 - Public request deadline을 변경할 때 Docker Nginx와 Helm Ingress timeout을 함께 갱신한다.
 - 새 model-routing learner write 경로는 `suppress_content_persistence`를 우회하지 않는지 검토한다.
+
+## Implementation Decision: Worker consume, Judge attempt and legacy-control isolation
+
+### Context
+
+Gateway Redis 저장에만 timeout을 적용하면 Worker의 동기 atomic consume은 Redis가 연결을 유지한 채 응답하지 않을 때 Celery slot을 absolute deadline 뒤까지 점유할 수 있다. LLM main provider와 RAG embedding에 deadline guard가 있어도 그 전에 실행되는 model-routing Judge의 최초·compact retry provider 호출은 같은 lifetime 밖에서 시작할 수 있었다. 또한 Gateway가 safe `memory_mode=false`, `conversation_id=null`을 보내더라도 전용 task가 위조된 true/non-null 값을 검증하지 않고 canonical context에 보존하면 legacy execution-log Memory 조회가 Public prompt에 섞일 수 있다.
+
+### Options Considered
+
+- Redis consume에 Public 600초 deadline만 적용: 한 stalled request가 장시간 Worker slot을 점유하므로 선택하지 않는다.
+- 동기 consume을 thread future로 감싸기: timeout 후에도 blocking thread와 socket 작업을 중단할 수 없어 선택하지 않는다.
+- Runtime Judge 앞에서 한 번만 deadline 검사: incomplete compact retry 직전 만료를 놓치므로 선택하지 않는다.
+- Legacy control을 canonicalization에서 safe 값으로 덮어쓰기만 함: forged producer와 contract drift를 숨기므로 선택하지 않는다.
+- Redis socket timeout을 남은 deadline과 2초로 합성하고, Judge provider attempt마다 guard를 호출하며, unsafe legacy control을 DB 전에 거부한 뒤 safe sentinel도 제거: 각 실제 소비 경계에서 fail-closed하므로 선택한다.
+
+### Final Decision
+
+1. Worker history consume은 request-local Redis client의 connect/read timeout을 `min(2초, task_deadline - monotonic_now)`로 설정하고 atomic EVAL 뒤 client를 닫는다.
+2. Store unavailable timeout 뒤 absolute deadline이 남아 있을 때만 기존 소비 전 bounded Celery retry를 허용한다. Deadline에 도달하면 `conversation.request_expired`로 non-retryable 종료한다.
+3. `ModelRoutingRuntimeJudge`는 optional deadline guard를 최초 provider와 incomplete compact retry 직전에 각각 호출한다.
+4. LLMNode는 공통 Public external-I/O deadline guard를 Judge에 주입하고 `NonRetryableWorkflowError`를 judge unavailable fallback으로 변환하지 않는다.
+5. 전용 Public task는 `memory_mode=true` 또는 non-null `conversation_id`를 Session 생성 전에 `conversation.task_contract_mismatch`로 거부한다. 허용된 false/null sentinel은 canonical execution context에서 제거한다.
+
+### Rationale
+
+Absolute lifetime과 Public 데이터 격리는 요청 진입 시점의 한 번짜리 검증이 아니라 blocking I/O와 content-bearing provider 호출 및 legacy Memory 진입 직전의 불변조건이다. Short-lived socket timeout은 Worker slot을 bounded하게 회수하고 provider-attempt guard는 retry 비용을 막으며 task-level legacy validation은 위조·구형 producer가 server-side history를 다시 활성화하지 못하게 한다.
+
+### Affected Files
+
+- `apps/shared/pubsub.py`
+- `apps/shared/services/public_chat_history_transient_store.py`
+- `apps/workflow_engine/tasks.py`
+- `apps/workflow_engine/services/model_routing_runtime_judge.py`
+- `apps/workflow_engine/workflow/nodes/llm/llm_node.py`
+- Conversation Memory requirements, API, component, test case 문서와 관련 회귀 테스트
+
+### Follow-up Review Notes
+
+- Redis client/library 변경 시 connect/read timeout과 retry policy의 총 대기 시간이 Public deadline보다 길어지지 않는지 검토한다.
+- Runtime Judge에 새 provider attempt 또는 adjudication을 추가하면 같은 guard를 실제 invoke 직전에 호출한다.
+- Public task contract version을 올릴 때 safe legacy sentinel을 완전히 제거할 수 있는 Gateway/Worker rollout 순서를 검토한다.
