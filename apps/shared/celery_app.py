@@ -12,6 +12,10 @@ import os
 from apps.shared.domain.schedule_dispatch import (
     schedule_dispatch_settings_from_environment,
 )
+from apps.shared.services.workflow_task_publisher import (
+    PUBLIC_CHAT_WORKFLOW_QUEUE,
+    PUBLIC_CHAT_WORKFLOW_TASK_NAME,
+)
 from celery import Celery
 
 # Redis 연결 설정 (개별 환경변수로 URL 동적 생성 )
@@ -51,6 +55,9 @@ celery_app.conf.update(
     enable_utc=True,
     # 태스크 라우팅: 큐별로 분리
     task_routes={
+        PUBLIC_CHAT_WORKFLOW_TASK_NAME: {
+            "queue": PUBLIC_CHAT_WORKFLOW_QUEUE
+        },
         "workflow.*": {"queue": "workflow"},
         "log.*": {"queue": "log"},
         "audit.*": {"queue": "log"},  # 감사 로그도 log_system 워커가 소비

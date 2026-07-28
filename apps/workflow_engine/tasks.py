@@ -40,6 +40,7 @@ from apps.shared.services.schedule_dispatch_observability import (
     emit_schedule_dispatch_signal,
 )
 from apps.shared.services.workflow_task_publisher import (
+    PUBLIC_CHAT_WORKFLOW_TASK_NAME,
     RedactedWorkflowTask,
     send_workflow_task,
 )
@@ -99,6 +100,41 @@ def _safe_retry(self, error: Exception):
 def _reject_queued_public_chat_history(execution_context: Dict[str, Any]) -> None:
     if "public_chat_history" in execution_context:
         raise NonRetryableWorkflowError("conversation.history_payload_forbidden")
+
+
+def _is_public_transient_context(execution_context: Dict[str, Any]) -> bool:
+    return (
+        "public_chat_history_ref" in execution_context
+        or execution_context.get("public_chat_stateless_compatibility") is True
+        or execution_context.get("execution_actor") == {"type": "public"}
+    )
+
+
+def _reject_public_context_on_generic_task(
+    execution_context: Dict[str, Any],
+) -> None:
+    if _is_public_transient_context(execution_context):
+        raise NonRetryableWorkflowError("conversation.task_contract_mismatch")
+
+
+def _validate_public_task_contract(
+    execution_context: Dict[str, Any],
+    *,
+    is_deployed: bool,
+) -> None:
+    has_history_reference = "public_chat_history_ref" in execution_context
+    is_stateless = (
+        execution_context.get("public_chat_stateless_compatibility") is True
+    )
+    if (
+        not is_deployed
+        or has_history_reference == is_stateless
+        or execution_context.get("trigger_mode") != "app"
+        or execution_context.get("execution_actor") != {"type": "public"}
+        or execution_context.get("suppress_content_persistence") is not True
+        or execution_context.get("execution_subject") is not None
+    ):
+        raise NonRetryableWorkflowError("conversation.task_contract_mismatch")
 
 
 def _workflow_task_deadline(
@@ -601,7 +637,10 @@ def _graph_requires_frozen_deployment(graph: Dict[str, Any]) -> bool:
 
 
 @celery_app.task(
-    name="workflow.execute", bind=True, max_retries=3, base=RedactedWorkflowTask
+    name="workflow.execute",
+    bind=True,
+    max_retries=3,
+    base=RedactedWorkflowTask,
 )
 def execute_workflow(
     self,
@@ -609,6 +648,53 @@ def execute_workflow(
     user_input: Dict[str, Any],
     execution_context: Dict[str, Any],
     is_deployed: bool = False,
+):
+    queued_context = dict(execution_context or {})
+    _reject_queued_public_chat_history(queued_context)
+    _reject_public_context_on_generic_task(queued_context)
+    return _execute_workflow(
+        self,
+        graph,
+        user_input,
+        queued_context,
+        is_deployed,
+    )
+
+
+@celery_app.task(
+    name=PUBLIC_CHAT_WORKFLOW_TASK_NAME,
+    bind=True,
+    max_retries=3,
+    base=RedactedWorkflowTask,
+)
+def execute_public_chat_workflow(
+    self,
+    graph: Dict[str, Any],
+    user_input: Dict[str, Any],
+    execution_context: Dict[str, Any],
+    is_deployed: bool = False,
+):
+    queued_context = dict(execution_context or {})
+    _reject_queued_public_chat_history(queued_context)
+    _validate_public_task_contract(
+        queued_context,
+        is_deployed=is_deployed,
+    )
+    return _execute_workflow(
+        self,
+        graph,
+        user_input,
+        queued_context,
+        is_deployed,
+    )
+
+
+def _execute_workflow(
+    self,
+    graph: Dict[str, Any],
+    user_input: Dict[str, Any],
+    execution_context: Dict[str, Any],
+    is_deployed: bool,
 ):
     """
     워크플로우 비동기 실행

@@ -11,9 +11,12 @@ logger = logging.getLogger(__name__)
 
 WORKFLOW_ARGS_REPR = "[workflow arguments redacted]"
 WORKFLOW_KWARGS_REPR = "{workflow arguments redacted}"
+PUBLIC_CHAT_WORKFLOW_TASK_NAME = "workflow.execute_public_chat.v1"
+PUBLIC_CHAT_WORKFLOW_QUEUE = "workflow-public-chat-v1"
 
 _EXECUTION_CONTEXT_ARG_INDEX = {
     "workflow.execute": 2,
+    PUBLIC_CHAT_WORKFLOW_TASK_NAME: 2,
     "workflow.execute_deployed": 2,
     "workflow.execute_by_deployment": 2,
     "workflow.stream": 2,

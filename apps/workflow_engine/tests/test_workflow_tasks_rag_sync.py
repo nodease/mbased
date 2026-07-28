@@ -319,7 +319,7 @@ def test_deployed_public_chatbot_rebuilds_consumer_mapping_from_snapshot(
         lambda _ref: (lifecycle_events.append("consumed"), ())[1],
     )
 
-    result = tasks.execute_workflow.run(
+    result = tasks.execute_public_chat_workflow.run(
         graph,
         {"question": "current"},
         {
@@ -330,6 +330,8 @@ def test_deployed_public_chatbot_rebuilds_consumer_mapping_from_snapshot(
             "trigger_mode": "app",
             "public_chat_history_ref": "b" * 32,
             "public_chat_history_consumer_ref": forged_ref,
+            "execution_actor": {"type": "public"},
+            "suppress_content_persistence": True,
             "public_chat_history_token_budget": 4096,
             "public_request_deadline_at": (
                 datetime.now(timezone.utc) + timedelta(minutes=1)
@@ -386,11 +388,14 @@ def test_public_chatbot_execution_rejects_expired_queue_payload_before_db_access
         NonRetryableWorkflowError,
         match="conversation.request_expired",
     ):
-        tasks.execute_workflow.run(
+        tasks.execute_public_chat_workflow.run(
             {"nodes": []},
             {},
             {
                 "public_chat_history_ref": "c" * 32,
+                "trigger_mode": "app",
+                "execution_actor": {"type": "public"},
+                "suppress_content_persistence": True,
                 "public_request_deadline_at": (
                     datetime.now(timezone.utc) - timedelta(seconds=1)
                 ).isoformat(),
@@ -426,11 +431,17 @@ def test_public_chatbot_execution_rejects_raw_history_before_db_access(
         NonRetryableWorkflowError,
         match="conversation.history_payload_forbidden",
     ):
-        tasks.execute_workflow.run(
+        tasks.execute_public_chat_workflow.run(
             {"nodes": []},
             {},
             {
                 **queued_history,
+                "trigger_mode": "app",
+                "execution_actor": {"type": "public"},
+                "suppress_content_persistence": True,
+                "public_chat_stateless_compatibility": (
+                    "public_chat_history_ref" not in queued_history
+                ),
                 "public_request_deadline_at": (
                     datetime.now(timezone.utc) + timedelta(minutes=1)
                 ).isoformat(),
@@ -503,7 +514,7 @@ def test_public_chatbot_does_not_retry_after_one_time_history_is_consumed(
         NonRetryableWorkflowError,
         match="conversation.history_replay_required",
     ):
-        tasks.execute_workflow.run(
+        tasks.execute_public_chat_workflow.run(
             graph,
             {},
             {
@@ -513,6 +524,8 @@ def test_public_chatbot_does_not_retry_after_one_time_history_is_consumed(
                 "workflow_version": FakeSession.deployment.version,
                 "trigger_mode": "app",
                 "public_chat_history_ref": "d" * 32,
+                "execution_actor": {"type": "public"},
+                "suppress_content_persistence": True,
                 "public_request_deadline_at": (
                     datetime.now(timezone.utc) + timedelta(minutes=1)
                 ).isoformat(),
@@ -565,7 +578,7 @@ def test_public_chatbot_retries_when_redis_is_unavailable_before_consume(
     monkeypatch.setattr(tasks, "_safe_retry", schedule_retry)
 
     with pytest.raises(_RetryScheduled):
-        tasks.execute_workflow.run(
+        tasks.execute_public_chat_workflow.run(
             graph,
             {},
             {
@@ -575,6 +588,8 @@ def test_public_chatbot_retries_when_redis_is_unavailable_before_consume(
                 "workflow_version": FakeSession.deployment.version,
                 "trigger_mode": "app",
                 "public_chat_history_ref": "e" * 32,
+                "execution_actor": {"type": "public"},
+                "suppress_content_persistence": True,
                 "public_request_deadline_at": (
                     datetime.now(timezone.utc) + timedelta(minutes=1)
                 ).isoformat(),
@@ -585,6 +600,37 @@ def test_public_chatbot_retries_when_redis_is_unavailable_before_consume(
     assert [error.code for error in retry_errors] == [
         "conversation.history_store_unavailable"
     ]
+    assert FakeWorkflowEngine.calls == []
+
+
+def test_generic_workflow_task_rejects_public_context_before_database_access(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        tasks,
+        "SessionLocal",
+        lambda: pytest.fail("misrouted public task must not access the database"),
+    )
+
+    with pytest.raises(
+        NonRetryableWorkflowError,
+        match="conversation.task_contract_mismatch",
+    ):
+        tasks.execute_workflow.run(
+            {"nodes": []},
+            {},
+            {
+                "public_chat_history_ref": "f" * 32,
+                "trigger_mode": "app",
+                "execution_actor": {"type": "public"},
+                "suppress_content_persistence": True,
+                "public_request_deadline_at": (
+                    datetime.now(timezone.utc) + timedelta(minutes=1)
+                ).isoformat(),
+            },
+            True,
+        )
+
     assert FakeWorkflowEngine.calls == []
 
 

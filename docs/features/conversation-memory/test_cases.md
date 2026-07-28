@@ -436,3 +436,7 @@ Disposable PostgreSQL evidence는 `NODEASE_RUN_DISPOSABLE_DB_TEST=1`인 전용 C
 - MEM-TC-BOUND-016: Redis store unavailable은 consume 전 bounded retry를 사용하지만 invalid/missing/corrupt 또는 응답 유실 뒤 이미 소비된 reference는 provider replay 없이 종료한다.
 - MEM-TC-BOUND-017: Public root와 `/chat`은 조회한 deployment version에 결박되고 mismatch는 transient store/task publish 전 safe 409다.
 - MEM-TC-BOUND-018: 열린 Embed Chat이 `legacy_v0`과 `client_history_v1` 사이에서 재배포되면 info를 no-store로 갱신하고 이전 history를 폐기한 뒤 새 version으로 한 번만 재시도한다.
+- MEM-TC-BOUND-019: current inputs canonical JSON byte 상한과 Public `/chat` HTTP body 상한은 각각 tokenizer와 JSON parsing 전에 거부하며 error body는 원문을 반사하지 않는다.
+- MEM-TC-BOUND-020: sanitizer가 한 message를 빈 값으로 만들면 완료 pair 전체를 제거하고, 정제로 늘어난 internal marker에는 raw message/envelope 상한을 다시 적용하지 않되 final framed projection token 상한을 지킨다.
+- MEM-TC-BOUND-021: Client는 Unicode scalar/message 및 UTF-8 envelope 상한을 넘는 완료 pair를 history에서 제외·oldest-pair 단위 축소하며 oversized 성공 응답은 화면에 유지하고 이후 정상 turn을 막지 않는다.
+- MEM-TC-BOUND-022: Public Gateway는 versioned task/전용 queue에 publish하고 새 Worker entrypoint만 그 queue를 함께 소비한다. 일반 task에 잘못 전달된 public context는 DB·Redis·Engine 전에 fail-closed한다.

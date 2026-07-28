@@ -12,6 +12,7 @@ import {
 } from '@/app/features/workflow/utils/deploymentRunResult';
 import {
   buildPublicConversationRequest,
+  isPublicConversationHistoryContentEligible,
   type PublicConversationContract,
 } from '../publicConversationHistory';
 import './embed-reset.css';
@@ -193,17 +194,20 @@ export default function EmbedChatPage() {
 
       const data = await response.json();
       const preview = getDeploymentRunFinalPreview(activeDeployment, data);
-      const historyEligible = data.status === 'success' && !preview.isEmpty;
-      const assistantContent = historyEligible
+      const successfulResponse = data.status === 'success' && !preview.isEmpty;
+      const assistantContent = successfulResponse
         ? preview.text
         : '응답을 처리할 수 없습니다.';
+      const historyEligible =
+        successfulResponse &&
+        isPublicConversationHistoryContentEligible(assistantContent);
 
       const assistantMessage: Message = {
         id: `assistant-${Date.now()}`,
         role: 'assistant',
         content: assistantContent,
         timestamp: new Date(),
-        citations: historyEligible
+        citations: successfulResponse
           ? getDeploymentRunCitations(data)
           : undefined,
         historyEligible,

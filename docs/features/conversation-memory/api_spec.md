@@ -71,6 +71,8 @@ Public run은 기존 동기 deployment response를 유지한다.
 | deployment_version 형식 오류 | 422 | conversation.deployment_version_invalid |
 | 조회한 version과 active deployment 불일치 | 409 | conversation.deployment_version_changed |
 | 현재 inputs만으로 4,096 token 초과 | 422 | conversation.current_input_too_large |
+| current inputs canonical JSON이 131,072 bytes 초과 | 422 | conversation.inputs_too_large |
+| Public `/chat` HTTP body가 393,216 bytes 초과 | 413 | conversation.request_too_large |
 
 Public history contract는 Conversation bearer token, If-Match와 lifecycle Idempotency-Key를 사용하지 않는다. 대신 Public Client가 public info의 정수 `version`을 request body `deployment_version`으로 보내 active deployment와 결박한다. Authenticated internal session mutation의 status/idempotency 계약은 후속 API activation 전에 확정한다.
 
@@ -118,6 +120,9 @@ Legacy처럼 runtime metadata를 업무 `inputs` 안에 넣지 않는다.
 - 첫 요청은 `history: []`다.
 - message key는 정확히 `role`, `content`만 허용한다.
 - role은 완료된 `user` → `assistant` pair 순서만 허용한다.
+- message content는 Unicode scalar 기준 최대 32,768 characters이고 history JSON은 UTF-8 최대 131,072 bytes다.
+- current `inputs` canonical JSON은 UTF-8 최대 131,072 bytes이며 이 상한은 tokenizer 호출 전에 검증한다.
+- endpoint 전체 HTTP request body는 최대 393,216 bytes이며 JSON parsing 전에 검증한다.
 - 최대 20 turn이며 서버가 현재 inputs와 함께 4,096-token 상한을 다시 적용한다.
 - 오래된 context 제거는 완료 turn 두 message 단위로 수행한다.
 - Authorization, Conversation token, `Idempotency-Key`, `If-Match`는 Public history 계약에 사용하지 않는다.
@@ -434,6 +439,8 @@ Arbitrary SQL/filter, free-form provider options와 user-global scope는 허용�
 | conversation.turn_limit_exceeded | 422 | 20 turn 초과 |
 | conversation.history_too_large | 422 | encoded envelope byte 상한 초과 |
 | conversation.current_input_too_large | 422 | 현재 inputs만으로 token 상한 초과 |
+| conversation.inputs_too_large | 422 | 현재 inputs canonical JSON byte 상한 초과 |
+| conversation.request_too_large | 413 | Public `/chat` HTTP body byte 상한 초과 |
 | conversation.token_count_unavailable | 422 | server token validation 실패 |
 | conversation.history_required | 422 | Public Chatbot envelope 누락 |
 | conversation.legacy_control_forbidden | 422 | legacy Public memory control 사용 |
@@ -473,3 +480,7 @@ Public Chatbot deployment `config`:
 Compatibility mode에서 root public Chatbot 요청은 legacy `memory_mode`/`conversation_id`를 제거한 무상태 실행으로 처리한다. `/chat` 요청의 legacy control은 계속 `422 conversation.legacy_control_forbidden`이다. Strict mode에서 root public Chatbot은 `422 conversation.history_required`다.
 
 Gateway는 raw history를 600초 TTL의 일회성 Redis key에 저장하고 transient public task에는 opaque reference, absolute `public_request_deadline_at`과 Celery `expires`만 전달한다. Worker는 queued raw `public_chat_history`를 DB 접근 전에 거부하고 deadline과 canonical deployment/preflight를 검증한 뒤 Knowledge sync 후 reference를 atomic GET+DELETE로 소비한다. Celery hard deadline은 absolute public deadline을 넘지 않으며 Knowledge/provider 외부 I/O 직전에 다시 확인한다. `conversation.history_store_unavailable`만 소비가 확인되기 전 기존 Celery retry 대상이다. Invalid/missing/corrupt reference와 소비 뒤 오류는 자동 replay하지 않고 각각 내부 `conversation.history_unavailable` 또는 `conversation.history_replay_required`로 종료해 Client가 원래 history로 새 요청을 보내게 한다. Stale task는 `conversation.request_expired`, missing/malformed deadline은 `conversation.request_deadline_invalid`로 외부 I/O 전에 거부한다. 이 내부 code, reference와 deadline 값은 public API response에 반사하지 않는다.
+
+Public transient dispatch는 `workflow.execute_public_chat.v1` task를 `workflow-public-chat-v1` queue로 publish한다. 새 Workflow Worker는 rollout 동안 일반 `workflow` queue와 이 전용 queue를 함께 소비한다. 구 Worker는 전용 queue를 구독하지 않으므로 Public payload를 실행하지 않는다. 일반 `workflow.execute`에 public history reference, stateless compatibility marker 또는 public actor marker가 잘못 도착하면 DB·Redis·Engine 접근 전에 내부 `conversation.task_contract_mismatch`로 종료한다.
+
+History는 raw admission과 sanitizer 이후 final projection을 같은 validator로 중복 검사하지 않는다. Gateway raw request에 message/envelope 상한을 적용하고, Worker 내부 sanitizer가 pair 한쪽을 비우면 완료 pair 전체를 제거한다. Sanitizer가 만든 marker가 raw message 상한을 넘더라도 raw admission을 다시 적용하지 않으며 실제 provider framing을 포함한 final projection token 상한으로 제한한다.

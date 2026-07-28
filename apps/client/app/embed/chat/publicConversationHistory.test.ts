@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  MAX_PUBLIC_CHAT_ENVELOPE_BYTES,
+  MAX_PUBLIC_CHAT_MESSAGE_CHARS,
   buildPublicConversationHistory,
   buildPublicConversationRequest,
   buildPublicConversationRunPath,
+  isPublicConversationHistoryContentEligible,
 } from './publicConversationHistory';
 
 describe('buildPublicConversationRunPath', () => {
@@ -136,5 +139,66 @@ describe('buildPublicConversationHistory', () => {
       { role: 'user', content: 'second question' },
       { role: 'assistant', content: 'actual answer' },
     ]);
+  });
+
+  it('excludes an oversized completed response without poisoning later turns', () => {
+    const history = buildPublicConversationHistory([
+      { id: 'user-1', role: 'user', content: 'first question' },
+      {
+        id: 'assistant-1',
+        role: 'assistant',
+        content: 'x'.repeat(MAX_PUBLIC_CHAT_MESSAGE_CHARS + 1),
+        historyEligible: true,
+      },
+      { id: 'user-2', role: 'user', content: 'second question' },
+      {
+        id: 'assistant-2',
+        role: 'assistant',
+        content: 'second answer',
+        historyEligible: true,
+      },
+    ]);
+
+    expect(history).toEqual([
+      { role: 'user', content: 'second question' },
+      { role: 'assistant', content: 'second answer' },
+    ]);
+  });
+
+  it('drops oldest completed pairs until the UTF-8 envelope is bounded', () => {
+    const largeAnswer = '가'.repeat(16_000);
+    const messages = Array.from({ length: 3 }, (_, index) => [
+      { id: `user-${index}`, role: 'user' as const, content: `q-${index}` },
+      {
+        id: `assistant-${index}`,
+        role: 'assistant' as const,
+        content: largeAnswer,
+        historyEligible: true,
+      },
+    ]).flat();
+
+    const history = buildPublicConversationHistory(messages);
+    const encoded = new TextEncoder().encode(JSON.stringify(history));
+
+    expect(encoded.byteLength).toBeLessThanOrEqual(
+      MAX_PUBLIC_CHAT_ENVELOPE_BYTES,
+    );
+    expect(history).toHaveLength(4);
+    expect(history[0]).toEqual({ role: 'user', content: 'q-1' });
+    expect(history.at(-2)).toEqual({ role: 'user', content: 'q-2' });
+  });
+
+  it('matches server Unicode character admission instead of UTF-16 units', () => {
+    expect(
+      isPublicConversationHistoryContentEligible(
+        '😀'.repeat(MAX_PUBLIC_CHAT_MESSAGE_CHARS),
+      ),
+    ).toBe(true);
+    expect(
+      isPublicConversationHistoryContentEligible(
+        '😀'.repeat(MAX_PUBLIC_CHAT_MESSAGE_CHARS + 1),
+      ),
+    ).toBe(false);
+    expect(isPublicConversationHistoryContentEligible('\ud800')).toBe(false);
   });
 });

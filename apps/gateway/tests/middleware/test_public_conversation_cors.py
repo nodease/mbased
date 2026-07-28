@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.testclient import TestClient
@@ -7,7 +9,9 @@ from pydantic import BaseModel, ConfigDict
 
 from apps.gateway.api.deps import require_json_content_type
 from apps.gateway.middleware.public_conversation_cors import (
+    MAX_PUBLIC_CHAT_REQUEST_BYTES,
     PublicConversationCorsBoundaryMiddleware,
+    _read_bounded_request,
 )
 
 
@@ -113,6 +117,54 @@ def test_trailing_slash_public_chat_run_is_also_a_transport_boundary():
         assert "access-control-allow-credentials" not in response.headers, name
         assert response.headers["cache-control"] == "no-store", name
         assert response.headers["referrer-policy"] == "no-referrer", name
+
+
+def test_public_chat_run_rejects_oversized_body_before_json_parsing():
+    response = _client().post(
+        "/api/v1/run-public/chat/chat",
+        content=b"x" * (MAX_PUBLIC_CHAT_REQUEST_BYTES + 1),
+        headers={
+            "Content-Type": "application/json",
+            "Origin": "https://parent.example",
+        },
+    )
+
+    assert response.status_code == 413
+    assert (
+        response.json()["detail"]["code"]
+        == "conversation.request_too_large"
+    )
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["referrer-policy"] == "no-referrer"
+    assert "access-control-allow-origin" not in response.headers
+
+
+def test_public_chat_body_cap_accumulates_streamed_chunks():
+    chunk_size = MAX_PUBLIC_CHAT_REQUEST_BYTES // 2
+    messages = iter(
+        [
+            {
+                "type": "http.request",
+                "body": b"x" * chunk_size,
+                "more_body": True,
+            },
+            {
+                "type": "http.request",
+                "body": b"x" * (chunk_size + 1),
+                "more_body": False,
+            },
+        ]
+    )
+
+    async def receive():
+        return next(messages)
+
+    assert (
+        asyncio.run(
+            _read_bounded_request(receive, max_bytes=MAX_PUBLIC_CHAT_REQUEST_BYTES)
+        )
+        is None
+    )
 
 
 def test_public_chat_run_framework_failures_never_inherit_global_cors():

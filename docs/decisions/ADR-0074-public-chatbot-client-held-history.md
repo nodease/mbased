@@ -302,3 +302,50 @@ Raw/reference 표현, atomic consume 결과와 active deployment version은 call
 - 새 producer 또는 task envelope revision은 raw public history field를 다시 허용하지 않는다.
 - Redis client/library 변경 시 pre-consume unavailable과 consumed/missing/corrupt 분류가 provider replay를 만들지 않는지 검토한다.
 - Public info capability가 추가되면 slug가 아니라 deployment version을 conversation reset 경계로 유지한다.
+
+## Implementation Decision: Bounded admission stages and versioned public task queue
+
+### Context
+
+Public current inputs는 history와 별도로 크기 상한이 없어 exact tokenizer가 매우 큰 JSON을 처리할 수 있었고, Nginx의 일반 100 MB body 상한도 anonymous `/chat`에 그대로 적용됐다. Client는 turn 수만 제한해 server message/envelope 상한을 넘는 성공 응답을 다음 요청에 반복 전송할 수 있었다. 또한 sanitizer 이후 projection이 raw validator를 다시 사용해 안전 marker 확장이나 empty redaction 결과를 잘못 거부했다. Public context를 기존 `workflow.execute`/`workflow` queue에 실으면 rolling deployment 중 구 Worker가 새 marker를 무시하고 기존 content persistence 경로를 실행할 수 있었다.
+
+### Options Considered
+
+- Token 상한만 유지: tokenizer 전 CPU/memory admission이 없어 선택하지 않는다.
+- Nginx 전역 100 MB 상한만 사용: anonymous Chatbot payload의 실제 계약보다 지나치게 커 선택하지 않는다.
+- Client turn 상한만 적용하고 server 422에서 복구: oversized assistant 응답이 이후 모든 요청을 오염시키므로 선택하지 않는다.
+- Sanitizer 출력에 raw validator 재사용: trusted transformation의 확장과 빈 pair 제거를 raw input 위반으로 오인하므로 선택하지 않는다.
+- Public task를 기존 task/queue에 유지하고 context marker만 추가: rolling 구 Worker가 marker를 이해하지 못해 fail-open할 수 있으므로 선택하지 않는다.
+- 단계별 byte/token 상한, Client 동일 상한, sanitized projection 전용 검사와 versioned task/queue: 각 신뢰 경계에서 비용과 호환성을 직접 제한하므로 선택한다.
+
+### Final Decision
+
+1. Shared raw admission은 current inputs canonical JSON을 UTF-8 131,072 bytes 이하인지 exact tokenizer 전에 확인한다. Gateway transport middleware와 Nginx는 정확한 Public `/chat` POST body를 393,216 bytes 이하로 제한하고 초과 요청은 content-free `413 conversation.request_too_large`로 종료한다.
+2. Browser history builder는 server와 동일하게 content를 Unicode scalar 최대 32,768 characters, encoded history 최대 131,072 bytes로 제한한다. Invalid/oversized 완료 pair는 history에서 제외하되 UI 성공 응답은 유지하고, envelope 초과는 oldest completed pair 단위로 제거한다.
+3. Sanitized projection은 role/order/shape/Unicode 구조만 다시 검증한다. 정제로 한쪽이 빈 pair는 전체 제거하고 sanitizer marker 확장에는 raw message/envelope 상한을 재적용하지 않는다. 실제 framing을 포함한 final exact-token 상한이 consumer 비용을 제한한다.
+4. Gateway는 Public transient context를 versioned `workflow.execute_public_chat.v1` task와 `workflow-public-chat-v1` queue에만 publish한다. 새 Worker는 rollout 동안 일반 queue와 전용 queue를 함께 소비한다. 일반 `workflow.execute`는 public marker가 있으면 DB·Redis·외부 I/O 전에 `conversation.task_contract_mismatch`로 fail-closed한다.
+
+### Rationale
+
+HTTP body, current inputs, raw history와 sanitized final projection은 서로 다른 표현·신뢰 단계이므로 각 단계의 자원 비용과 의미에 맞는 상한을 적용한다. Client는 서버 계약을 선제적으로 지켜 한 번의 oversized 응답이 대화를 영구적으로 중단하지 않게 한다. Task name과 queue를 versioning하면 mixed Worker 배포에서 새 producer가 구 consumer에 도달하는 것을 구조적으로 차단하고, 잘못 라우팅된 payload도 새 일반 Worker가 fail-closed한다.
+
+### Affected Files
+
+- `apps/shared/domain/public_chat_history.py`
+- `apps/gateway/middleware/public_conversation_cors.py`
+- `apps/gateway/api/v1/endpoints/run.py`
+- `apps/shared/services/workflow_task_publisher.py`
+- `apps/shared/celery_app.py`
+- `apps/gateway/services/deployment_service.py`
+- `apps/workflow_engine/tasks.py`
+- `docker/nginx/nginx.conf`
+- `docker/workflow_engine/docker-entrypoint.sh`
+- `scripts/dev.sh`
+- `apps/client/app/embed/chat/*`
+- Conversation Memory requirements, API, component와 test case 문서 및 관련 테스트
+
+### Follow-up Review Notes
+
+- Public input schema가 커지면 상한을 완화하기 전에 anonymous admission 비용과 reverse-proxy 설정을 함께 검토한다.
+- Sanitizer 또는 provider framing이 바뀌면 trusted projection 구조 검사와 final exact-token test를 함께 갱신한다.
+- Public task contract v2는 새 task name/queue와 explicit worker rollout evidence 없이는 기존 queue에 혼합하지 않는다.

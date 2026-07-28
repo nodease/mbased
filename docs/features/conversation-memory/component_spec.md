@@ -443,6 +443,8 @@ Memory controls are saved in graph/deployment snapshot. Canvas local state만으
 
 - Client는 화면의 완료된 user/assistant pair만 골라 최신 20 turn을 전송한다.
 - welcome, error, pending user message와 citation UI metadata는 전송하지 않는다.
+- 완료된 assistant 응답은 화면에는 표시하되 Unicode scalar 32,768-character 상한을 넘거나 invalid surrogate를 포함하면 다음 요청 history에서 제외한다. 이 pair를 제외해 이후 정상 turn이 계속 전송되게 한다.
+- Client는 history JSON의 UTF-8 크기가 131,072 bytes 이하가 될 때까지 가장 오래된 완료 pair를 제거한다.
 - 새 대화/reset은 local message state를 비운다.
 - localStorage/sessionStorage에 대화 원문이나 conversation ID를 저장하지 않는다.
 - server transcript/close/delete/purge 상태 UI는 Public mode에 표시하지 않는다.
@@ -497,3 +499,4 @@ Public transcript는 현재 Client가 렌더링하는 local messages이며 서�
 - strict rollout 전환 뒤에는 모든 active public Chatbot deployment가 versioned consumer config를 가져야 한다.
 - Public audit actor는 authorization subject와 별도다. UI는 history나 actor marker를 권한·신원으로 표시하지 않는다.
 - Gateway는 raw history를 600초 TTL의 일회성 Redis key에 두고 broker에는 opaque reference만 전달한다. Worker는 queued raw history를 거부하고 atomic consume 뒤에만 invocation-local 원문을 만든다. Store unavailable은 소비 전 bounded retry를 사용하지만 invalid/missing/corrupt 또는 소비 뒤 오류는 provider replay 없이 닫는다. Broker expiry와 Worker deadline은 같은 Gateway 생성시각을 사용한다.
+- Public transient task는 `workflow.execute_public_chat.v1`/`workflow-public-chat-v1` 계약으로만 전달한다. 일반 task는 public marker를 fail-closed하고 새 Worker만 전용 queue를 함께 구독한다.

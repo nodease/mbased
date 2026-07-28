@@ -1,6 +1,8 @@
 import pytest
 from apps.shared.domain import public_chat_history as public_chat_history_module
 from apps.shared.domain.public_chat_history import (
+    MAX_PUBLIC_CHAT_INPUT_BYTES,
+    MAX_PUBLIC_CHAT_MESSAGE_CHARS,
     MAX_PUBLIC_CHAT_TURNS,
     PublicChatHistoryError,
     bound_public_chat_history,
@@ -129,6 +131,20 @@ def test_bound_public_chat_history_rejects_current_inputs_that_exceed_budget():
     assert exc_info.value.code == "conversation.current_input_too_large"
 
 
+def test_bound_public_chat_history_rejects_input_bytes_before_tokenization():
+    tokenized = []
+
+    with pytest.raises(PublicChatHistoryError) as exc_info:
+        bound_public_chat_history(
+            [],
+            current_inputs={"question": "x" * (MAX_PUBLIC_CHAT_INPUT_BYTES + 1)},
+            token_counter=lambda text: tokenized.append(text) or 1,
+        )
+
+    assert exc_info.value.code == "conversation.inputs_too_large"
+    assert tokenized == []
+
+
 def test_bound_public_chat_history_does_not_mutate_caller_payload():
     history = [*_turn(1)]
     original = [dict(message) for message in history]
@@ -187,4 +203,40 @@ def test_bound_public_chat_projection_drops_only_oldest_complete_turns():
             token_counter=lambda text: len(text),
         )
         <= 75
+    )
+
+
+def test_bound_public_chat_projection_drops_pairs_emptied_by_sanitization():
+    bounded = bound_public_chat_history_projection(
+        [
+            {"role": "user", "content": ""},
+            {"role": "assistant", "content": "removed pair"},
+            *_turn(2),
+        ],
+        projection=lambda messages: "|".join(
+            f"{message['role']}:{message['content']}" for message in messages
+        ),
+        token_counter=lambda text: len(text),
+        max_projection_tokens=100,
+    )
+
+    assert bounded == tuple(_turn(2))
+
+
+def test_bound_public_chat_projection_does_not_reapply_raw_message_limit():
+    expanded_marker = "x" * (MAX_PUBLIC_CHAT_MESSAGE_CHARS + 1)
+
+    bounded = bound_public_chat_history_projection(
+        [
+            {"role": "user", "content": expanded_marker},
+            {"role": "assistant", "content": expanded_marker},
+        ],
+        projection=lambda _messages: "bounded projection",
+        token_counter=lambda text: len(text),
+        max_projection_tokens=100,
+    )
+
+    assert bounded == (
+        {"role": "user", "content": expanded_marker},
+        {"role": "assistant", "content": expanded_marker},
     )

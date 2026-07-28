@@ -10,6 +10,7 @@ MAX_PUBLIC_CHAT_TURNS = 20
 MAX_PUBLIC_CHAT_CONTEXT_TOKENS = 4096
 MAX_PUBLIC_CHAT_MESSAGE_CHARS = 32_768
 MAX_PUBLIC_CHAT_ENVELOPE_BYTES = 131_072
+MAX_PUBLIC_CHAT_INPUT_BYTES = 131_072
 
 _ALLOWED_ROLES = ("user", "assistant")
 _ALLOWED_MESSAGE_KEYS = frozenset({"role", "content"})
@@ -94,12 +95,10 @@ def remaining_public_chat_history_tokens(
     max_context_tokens: int = MAX_PUBLIC_CHAT_CONTEXT_TOKENS,
 ) -> int:
     """Return the server-authoritative token budget left for history."""
-    if not isinstance(current_inputs, Mapping):
-        raise PublicChatHistoryError("conversation.inputs_invalid")
     if max_context_tokens < 1:
         raise ValueError("max_context_tokens must be positive")
     current_tokens = count_public_chat_tokens(
-        _canonical_json(current_inputs),
+        _canonical_public_chat_inputs(current_inputs),
         token_counter=token_counter,
     )
     if current_tokens > max_context_tokens:
@@ -122,7 +121,7 @@ def bound_public_chat_history_projection(
         or max_projection_tokens > MAX_PUBLIC_CHAT_CONTEXT_TOKENS
     ):
         raise PublicChatHistoryError("conversation.token_count_unavailable")
-    normalized = list(normalize_public_chat_history(list(value)))
+    normalized = list(_normalize_public_chat_history_projection(value))
     while normalized:
         candidate = tuple(dict(message) for message in normalized)
         projected_text = projection(candidate)
@@ -149,13 +148,11 @@ def bound_public_chat_history(
 ) -> tuple[dict[str, str], ...]:
     if token_counter is None:
         token_counter = _strict_count_tokens
-    if not isinstance(current_inputs, Mapping):
-        raise PublicChatHistoryError("conversation.inputs_invalid")
     if max_context_tokens < 1:
         raise ValueError("max_context_tokens must be positive")
 
     normalized = list(normalize_public_chat_history(value))
-    current_text = _canonical_json(current_inputs)
+    current_text = _canonical_public_chat_inputs(current_inputs)
     if _safe_token_count(token_counter, current_text) > max_context_tokens:
         raise PublicChatHistoryError("conversation.current_input_too_large")
 
@@ -188,6 +185,46 @@ def _context_token_count(
     return _safe_token_count(token_counter, combined)
 
 
+def _normalize_public_chat_history_projection(
+    value: Sequence[Mapping[str, str]],
+) -> tuple[dict[str, str], ...]:
+    """Validate trusted sanitizer output without reapplying raw size admission."""
+    if isinstance(value, (str, bytes)) or not isinstance(value, Sequence):
+        raise PublicChatHistoryError("conversation.history_invalid")
+    if len(value) > MAX_PUBLIC_CHAT_TURNS * 2:
+        raise PublicChatHistoryError("conversation.turn_limit_exceeded")
+    if len(value) % 2 != 0:
+        raise PublicChatHistoryError("conversation.history_order_invalid")
+
+    normalized: list[dict[str, str]] = []
+    for index, item in enumerate(value):
+        if not isinstance(item, Mapping) or set(item) != _ALLOWED_MESSAGE_KEYS:
+            raise PublicChatHistoryError("conversation.history_invalid")
+        role = item.get("role")
+        content = item.get("content")
+        if role not in _ALLOWED_ROLES:
+            raise PublicChatHistoryError("conversation.role_invalid")
+        if role != _ALLOWED_ROLES[index % 2]:
+            raise PublicChatHistoryError("conversation.history_order_invalid")
+        if not isinstance(content, str):
+            raise PublicChatHistoryError("conversation.content_invalid")
+        try:
+            content.encode("utf-8")
+        except UnicodeEncodeError:
+            raise PublicChatHistoryError("conversation.content_invalid") from None
+        normalized.append({"role": role, "content": content})
+
+    completed_pairs: list[dict[str, str]] = []
+    for index in range(0, len(normalized), 2):
+        user_message, assistant_message = normalized[index : index + 2]
+        if not user_message["content"].strip() or not assistant_message[
+            "content"
+        ].strip():
+            continue
+        completed_pairs.extend((user_message, assistant_message))
+    return tuple(completed_pairs)
+
+
 def _safe_token_count(token_counter: Callable[[str], int], text: str) -> int:
     try:
         count = token_counter(text)
@@ -198,6 +235,19 @@ def _safe_token_count(token_counter: Callable[[str], int], text: str) -> int:
     return count
 
 
+def _canonical_public_chat_inputs(value: Mapping[str, Any]) -> str:
+    if not isinstance(value, Mapping):
+        raise PublicChatHistoryError("conversation.inputs_invalid")
+    text = _canonical_json(value)
+    try:
+        encoded = text.encode("utf-8")
+    except UnicodeEncodeError:
+        raise PublicChatHistoryError("conversation.inputs_invalid") from None
+    if len(encoded) > MAX_PUBLIC_CHAT_INPUT_BYTES:
+        raise PublicChatHistoryError("conversation.inputs_too_large")
+    return text
+
+
 def _canonical_json(value: Mapping[str, Any]) -> str:
     try:
         return json.dumps(
@@ -206,13 +256,14 @@ def _canonical_json(value: Mapping[str, Any]) -> str:
             sort_keys=True,
             separators=(",", ":"),
         )
-    except (TypeError, ValueError) as error:
+    except (TypeError, ValueError, RecursionError) as error:
         raise PublicChatHistoryError("conversation.inputs_invalid") from error
 
 
 __all__ = [
     "MAX_PUBLIC_CHAT_CONTEXT_TOKENS",
     "MAX_PUBLIC_CHAT_ENVELOPE_BYTES",
+    "MAX_PUBLIC_CHAT_INPUT_BYTES",
     "MAX_PUBLIC_CHAT_MESSAGE_CHARS",
     "MAX_PUBLIC_CHAT_TURNS",
     "PublicChatHistoryError",

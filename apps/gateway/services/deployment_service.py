@@ -67,7 +67,10 @@ from apps.shared.services.workflow_node_secret_service import (
     validate_workflow_node_secret_reference_ownership,
 )
 from apps.shared.services.credential_encryption import CredentialEncryptionError
-from apps.shared.services.workflow_task_publisher import send_workflow_task
+from apps.shared.services.workflow_task_publisher import (
+    PUBLIC_CHAT_WORKFLOW_TASK_NAME,
+    send_workflow_task,
+)
 from apps.shared.services.public_chat_history_transient_store import (
     PublicChatHistoryTransientStoreError,
     store_public_chat_history,
@@ -1417,10 +1420,14 @@ class DeploymentService:
                     "id": str(execution_subject_user_id),
                 }
 
-            # Celery 태스크 호출 (workflow.execute)
+            workflow_task_name = (
+                PUBLIC_CHAT_WORKFLOW_TASK_NAME
+                if public_transient_mode
+                else "workflow.execute"
+            )
             task = send_workflow_task(
                 celery_app,
-                "workflow.execute",
+                workflow_task_name,
                 args=[graph_data, dispatch_inputs, execution_context],
                 kwargs={"is_deployed": True},
                 **(

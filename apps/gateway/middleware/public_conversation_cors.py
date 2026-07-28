@@ -1,8 +1,16 @@
 from __future__ import annotations
 
+import json
+from collections.abc import Sequence
+
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 _PUBLIC_CONVERSATION_BOUNDARY_STATE_KEY = "nodease.public_conversation_transport"
+MAX_PUBLIC_CHAT_REQUEST_BYTES = 393_216
+_PUBLIC_CHAT_REQUEST_TOO_LARGE_BODY = json.dumps(
+    {"detail": {"code": "conversation.request_too_large", "message": "The public conversation request is too large."}},
+    separators=(",", ":"),
+).encode("utf-8")
 
 
 class PublicConversationCorsBoundaryMiddleware:
@@ -33,6 +41,19 @@ class PublicConversationCorsBoundaryMiddleware:
         if not is_conversation_path and not is_public_run_root:
             await self.app(scope, receive, send)
             return
+
+        if (
+            scope.get("method") == "POST"
+            and _is_public_chat_run_path(path)
+        ):
+            buffered_messages = await _read_bounded_request(
+                receive,
+                max_bytes=MAX_PUBLIC_CHAT_REQUEST_BYTES,
+            )
+            if buffered_messages is None:
+                await _send_public_request_too_large(send)
+                return
+            receive = _replay_receive(buffered_messages)
 
         if is_conversation_path and scope["method"] == "OPTIONS":
             await send(
@@ -94,6 +115,72 @@ def _is_public_conversation_path(path: str) -> bool:
     } or suffix.startswith("conversation/")
 
 
+def _is_public_chat_run_path(path: str) -> bool:
+    prefix = "/api/v1/run-public/"
+    if not path.startswith(prefix):
+        return False
+    remainder = path[len(prefix) :]
+    slug, separator, suffix = remainder.partition("/")
+    return bool(slug and separator and suffix in {"chat", "chat/"})
+
+
+async def _read_bounded_request(
+    receive: Receive,
+    *,
+    max_bytes: int,
+) -> list[Message] | None:
+    messages: list[Message] = []
+    size = 0
+    while True:
+        message = await receive()
+        messages.append(message)
+        if message["type"] != "http.request":
+            return messages
+        body = message.get("body", b"")
+        size += len(body)
+        if size > max_bytes:
+            return None
+        if not message.get("more_body", False):
+            return messages
+
+
+def _replay_receive(messages: Sequence[Message]) -> Receive:
+    remaining = iter(messages)
+
+    async def receive() -> Message:
+        try:
+            return next(remaining)
+        except StopIteration:
+            return {"type": "http.disconnect"}
+
+    return receive
+
+
+async def _send_public_request_too_large(send: Send) -> None:
+    headers = _public_response_headers(
+        [
+            (b"content-type", b"application/json"),
+            (
+                b"content-length",
+                str(len(_PUBLIC_CHAT_REQUEST_TOO_LARGE_BODY)).encode("ascii"),
+            ),
+        ]
+    )
+    await send(
+        {
+            "type": "http.response.start",
+            "status": 413,
+            "headers": headers,
+        }
+    )
+    await send(
+        {
+            "type": "http.response.body",
+            "body": _PUBLIC_CHAT_REQUEST_TOO_LARGE_BODY,
+        }
+    )
+
+
 def _public_response_headers(
     headers: list[tuple[bytes, bytes]],
 ) -> list[tuple[bytes, bytes]]:
@@ -124,6 +211,7 @@ def _public_response_headers(
 
 
 __all__ = [
+    "MAX_PUBLIC_CHAT_REQUEST_BYTES",
     "PublicConversationCorsBoundaryMiddleware",
     "mark_public_conversation_transport_boundary",
 ]

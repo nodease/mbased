@@ -24,6 +24,9 @@ from apps.shared.domain.app_auth_secret import (
     APP_AUTH_SECRET_VERIFIER_VERSION,
     app_auth_secret_verifier,
 )
+from apps.shared.services.workflow_task_publisher import (
+    PUBLIC_CHAT_WORKFLOW_TASK_NAME,
+)
 
 
 # --- 실행 헬퍼 ---------------------------------------------------------------
@@ -216,6 +219,7 @@ def test_public_chatbot_threads_client_history_without_server_memory(monkeypatch
     )
 
     ctx = _captured_context(celery)
+    assert celery.captured.name == PUBLIC_CHAT_WORKFLOW_TASK_NAME
     assert ctx["memory_mode"] is False
     assert ctx["conversation_id"] is None
     assert "public_chat_history" not in ctx
@@ -324,6 +328,7 @@ def test_legacy_public_chatbot_route_runs_stateless_without_persistence(monkeypa
     )
 
     ctx = _captured_context(celery)
+    assert celery.captured.name == PUBLIC_CHAT_WORKFLOW_TASK_NAME
     assert result["status"] == "success"
     assert _captured_inputs(celery) == {"question": "x"}
     assert ctx["memory_mode"] is False
@@ -345,6 +350,7 @@ def test_non_chatbot_does_not_force_memory_but_threads_conversation_id(monkeypat
     )
 
     ctx = _captured_context(celery)
+    assert celery.captured.name == "workflow.execute"
     # webapp 등 비챗봇 배포는 기억모드를 강제하지 않는다 (기본 False).
     assert ctx["memory_mode"] is False
     # conversation_id는 배포 타입과 무관하게 그대로 전달된다.

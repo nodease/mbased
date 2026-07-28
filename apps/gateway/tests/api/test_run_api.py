@@ -7,6 +7,10 @@ from apps.gateway.middleware.public_conversation_cors import (
     PublicConversationCorsBoundaryMiddleware,
 )
 from apps.shared.db.models.workflow_deployment import DeploymentType
+from apps.shared.domain import public_chat_history as public_chat_history_module
+from apps.shared.domain.public_chat_history import (
+    MAX_PUBLIC_CHAT_INPUT_BYTES,
+)
 from apps.shared.domain.deployment_runtime_policy import (
     DEFAULT_DEPLOYMENT_RUNTIME_POLICY,
     SURFACE_APP_PUBLIC_RUN,
@@ -266,6 +270,46 @@ def test_public_chatbot_rejects_invalid_deployment_version_before_execution(
         == "conversation.deployment_version_invalid"
     )
     assert "private-current-question" not in response.text
+
+
+def test_public_chatbot_rejects_oversized_inputs_before_tokenization(
+    monkeypatch,
+):
+    tokenized = []
+
+    monkeypatch.setattr(
+        public_chat_history_module,
+        "_strict_count_tokens",
+        lambda text: tokenized.append(text) or 1,
+    )
+
+    async def unexpected_run(**_kwargs):
+        pytest.fail("oversized inputs must be rejected before deployment execution")
+
+    monkeypatch.setattr(
+        run_endpoint.DeploymentService,
+        "run_deployment",
+        unexpected_run,
+    )
+
+    app = FastAPI()
+    app.include_router(run_endpoint.router)
+    app.dependency_overrides[run_endpoint.get_db] = lambda: object()
+    app.dependency_overrides[run_endpoint.get_deployment_runtime_policy] = lambda: (
+        DEFAULT_DEPLOYMENT_RUNTIME_POLICY
+    )
+
+    response = TestClient(app).post(
+        "/run-public/public-chatbot/chat",
+        json={
+            "inputs": {"question": "x" * (MAX_PUBLIC_CHAT_INPUT_BYTES + 1)},
+            "conversation": {"history": []},
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "conversation.inputs_too_large"
+    assert tokenized == []
 
 
 def test_public_chatbot_rejects_isolated_unicode_surrogate_as_safe_422(

@@ -217,5 +217,10 @@ MBA-318은 Public client-held history, legacy Public memory control 차단, cont
 - MEM-REQ-107: Worker는 queued `public_chat_history` 원문을 DB와 external I/O 전에 fail-closed하고, raw history는 validated opaque reference를 atomic consume한 뒤 invocation-local context에만 materialize해야 한다.
 - MEM-REQ-108: Redis consume의 `store_unavailable`은 history 소비가 확인되기 전 기존 bounded Celery retry를 사용하되 invalid/missing/corrupt 또는 소비 후 오류는 자동 replay하지 않아야 한다.
 - MEM-REQ-109: Public Client는 조회한 active deployment version을 root와 `/chat` 요청에 결박해야 한다. Gateway mismatch는 부수효과 전에 safe conflict로 종료하며 Client는 public info를 no-store로 갱신하고 이전 version history를 폐기한 뒤 현재 입력을 한 번만 재시도해야 한다.
+- MEM-REQ-110: Public current `inputs`는 UTF-8 canonical JSON 131,072-byte 상한을 tokenization 전에 검증하고, `/chat` HTTP body는 393,216-byte 상한을 JSON parsing 전에 적용해야 한다.
+- MEM-REQ-111: Raw history admission과 sanitizer 이후 projection validation은 별도 단계여야 한다. 정제로 비게 된 완료 pair는 함께 제거하고 정제로 늘어난 internal marker는 raw message/envelope 상한을 다시 적용하지 않은 채 final projection token 상한으로 제한해야 한다.
+- MEM-REQ-112: Public Client는 완료 응답을 history에 넣기 전에 server와 같은 Unicode scalar/message 32,768-character 상한과 131,072-byte UTF-8 history envelope 상한을 적용해야 한다. 화면에는 표시된 oversized 응답도 이후 요청 history에서는 제외해야 한다.
+- MEM-REQ-113: Public transient execution은 versioned task name과 전용 queue에서만 publish·consume해야 한다. 일반 `workflow.execute`는 public marker가 있는 misrouted task를 DB·Redis·외부 I/O 전에 `conversation.task_contract_mismatch`로 거부해야 한다.
+- MEM-REQ-114: 배포 중 새 Worker는 일반 workflow queue와 Public 전용 queue를 함께 소비하되, 구 Worker가 일반 queue에서 Public payload를 처리할 수 없도록 Gateway가 Public task를 일반 queue에 publish하지 않아야 한다.
 
 `PUBLIC_CHAT_CONVERSATION_ROLLOUT_MODE=compatibility`는 배포 순서용 임시 기본값이다. strict 전환 전 active legacy public Chatbot을 consumer mapping이 있는 새 deployment version으로 교체한다.
