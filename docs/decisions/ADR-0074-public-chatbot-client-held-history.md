@@ -473,3 +473,42 @@ Absolute lifetime과 Public 데이터 격리는 요청 진입 시점의 한 번�
 - Redis client/library 변경 시 connect/read timeout과 retry policy의 총 대기 시간이 Public deadline보다 길어지지 않는지 검토한다.
 - Runtime Judge에 새 provider attempt 또는 adjudication을 추가하면 같은 guard를 실제 invoke 직전에 호출한다.
 - Public task contract version을 올릴 때 safe legacy sentinel을 완전히 제거할 수 있는 Gateway/Worker rollout 순서를 검토한다.
+
+## Implementation Decision: ASGI ingress에서 시작하는 단일 Public request lifetime
+
+### Context
+
+Gateway가 budget admission, legacy secret migration과 runtime preflight를 마친 뒤 600초 deadline을 만들면 reverse proxy의 610초 lifetime은 이미 그만큼 소비된 상태다. Provider와 Worker는 늦게 생성된 deadline을 유효하다고 판단하므로 Client가 504를 받은 뒤에도 외부 I/O를 시작할 수 있다.
+
+### Options Considered
+
+- Task publish 직전에 600초 deadline 생성: pre-dispatch 소요 시간을 포함하지 못하므로 선택하지 않는다.
+- FastAPI endpoint 진입 때 생성: middleware의 request-body buffering과 JSON parsing 시간을 포함하지 못하므로 선택하지 않는다.
+- Reverse proxy timeout을 더 크게 늘림: application lifetime과 edge lifetime의 불일치를 숨길 뿐 동일한 race를 제거하지 못하므로 선택하지 않는다.
+- ASGI middleware가 body buffering 전에 deadline을 한 번 생성하고 이후 모든 경계가 남은 시간만 사용: 전체 요청 lifetime을 동일한 clock boundary로 결박하므로 선택한다.
+
+### Final Decision
+
+1. Public root와 `/chat` POST는 `PublicConversationCorsBoundaryMiddleware`가 request body를 읽기 전에 UTC-aware absolute deadline을 scope state에 기록한다.
+2. Endpoint는 그 값을 `DeploymentService`로 전달하고 Public transient execution은 새 deadline을 생성하지 않는다.
+3. Gateway는 consumer mapping, budget, secret migration, preflight와 publish 경계에서 만료를 재검사한다. 만료되면 content-free 504로 종료하고 이후 부수효과를 시작하지 않는다.
+4. Raw history TTL은 600초와 남은 정수 lifetime 중 더 짧은 값이며 Redis I/O timeout은 2초와 남은 lifetime 중 더 짧은 값이다.
+5. Celery `expires`, execution context, Worker와 Gateway result polling은 모두 같은 absolute deadline을 사용한다.
+
+### Rationale
+
+Public 요청의 실제 lifetime은 task publish가 아니라 edge가 request를 받은 순간 시작한다. 하나의 absolute value를 transport, admission, broker와 Worker에 전달하면 각 단계의 지연이 다음 단계의 실행 예산에서 자동으로 차감되고, proxy 종료 뒤 새 external effect가 시작되는 경로를 닫을 수 있다.
+
+### Affected Files
+
+- `apps/gateway/middleware/public_conversation_cors.py`
+- `apps/gateway/api/v1/endpoints/run.py`
+- `apps/gateway/services/deployment_service.py`
+- Gateway API/service 회귀 테스트
+- Conversation Memory requirements, API, component, test case와 architecture 문서
+
+### Follow-up Review Notes
+
+- Public request body를 처리하는 middleware 순서를 바꿀 때 deadline stamp가 모든 buffering보다 앞서는지 검토한다.
+- 새 Public pre-dispatch I/O 또는 retry를 추가하면 남은 deadline으로 timeout을 제한한다.
+- Reverse proxy timeout은 application deadline보다 길게 유지하되 그 차이를 application lifetime 연장에 사용하지 않는다.

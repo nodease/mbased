@@ -8,6 +8,7 @@ docs/features/conversation-memory/test_cases.md:
 
 import asyncio
 import logging
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -45,8 +46,18 @@ def _run_public(
     async_result_cls=None,
     allow_stateless_public_chatbot_compatibility=False,
     expected_deployment_version=None,
+    public_request_deadline_at=None,
 ):
     from apps.gateway.services import deployment_service as deployment_module
+
+    if public_request_deadline_at is None:
+        service_now = datetime.now(timezone.utc)
+        public_request_deadline_at = service_now + timedelta(seconds=600)
+        monkeypatch.setattr(
+            deployment_module,
+            "_utc_now",
+            lambda: service_now,
+        )
 
     if conversation_history is _UNSET_HISTORY:
         deployment_types = {
@@ -59,9 +70,15 @@ def _run_public(
     celery = _CaptureCelery()
     celery.stored_history = []
 
-    async def store_history(history, *, ttl_seconds):
+    async def store_history(
+        history, *, ttl_seconds, timeout_seconds=None
+    ):
         celery.stored_history.append(
-            {"history": tuple(history), "ttl_seconds": ttl_seconds}
+            {
+                "history": tuple(history),
+                "ttl_seconds": ttl_seconds,
+                "timeout_seconds": timeout_seconds,
+            }
         )
         return "a" * 32
 
@@ -85,6 +102,7 @@ def _run_public(
                 allow_stateless_public_chatbot_compatibility
             ),
             expected_deployment_version=expected_deployment_version,
+            public_request_deadline_at=public_request_deadline_at,
             auth_token=None,
             require_auth=False,
         )
@@ -148,6 +166,8 @@ def test_public_run_blocks_unresolved_external_configuration_before_publish(
                 runtime_policy=DEFAULT_DEPLOYMENT_RUNTIME_POLICY,
                 client_conversation_history=(),
                 require_auth=False,
+                public_request_deadline_at=datetime.now(timezone.utc)
+                + timedelta(seconds=600),
             )
         )
 
@@ -225,7 +245,13 @@ def test_public_chatbot_threads_client_history_without_server_memory(monkeypatch
     assert "public_chat_history" not in ctx
     assert ctx["public_chat_history_ref"] == "a" * 32
     assert "이전 질문" not in repr(celery.captured.args)
-    assert celery.stored_history == [{"history": history, "ttl_seconds": 600}]
+    assert celery.stored_history == [
+        {
+            "history": history,
+            "ttl_seconds": 600,
+            "timeout_seconds": 2.0,
+        }
+    ]
     assert ctx["suppress_content_persistence"] is True
     assert ctx["execution_actor"] == {"type": "public"}
     assert ctx["public_chat_history_consumer_ref"].startswith(
@@ -235,6 +261,109 @@ def test_public_chatbot_threads_client_history_without_server_memory(monkeypatch
     assert _captured_inputs(celery) == {"question": "안녕"}
     assert celery.captured.options["expires"] is not None
     assert result["status"] == "success"
+
+
+def test_public_chatbot_preserves_request_reception_deadline_across_dispatch(
+    monkeypatch,
+):
+    from apps.gateway.services import deployment_service as deployment_module
+
+    request_received_at = datetime(2026, 7, 28, 12, 0, tzinfo=timezone.utc)
+    deadline = request_received_at + timedelta(seconds=600)
+    service_now = request_received_at + timedelta(seconds=17, milliseconds=250)
+    monkeypatch.setattr(deployment_module, "_utc_now", lambda: service_now)
+    app_row, deployment_row = _deployed_app(DeploymentType.CHATBOT)
+    db = _Db(rows=[app_row, deployment_row])
+    history = (
+        {"role": "user", "content": "이전 질문"},
+        {"role": "assistant", "content": "이전 답변"},
+    )
+
+    celery, result = _run_public(
+        db,
+        app_row.url_slug,
+        {"question": "안녕"},
+        monkeypatch,
+        conversation_history=history,
+        public_request_deadline_at=deadline,
+    )
+
+    assert result["status"] == "success"
+    assert _captured_context(celery)["public_request_deadline_at"] == (
+        deadline.isoformat()
+    )
+    assert celery.captured.options["expires"] == deadline
+    assert celery.stored_history == [
+        {
+            "history": history,
+            "ttl_seconds": 582,
+            "timeout_seconds": 2.0,
+        }
+    ]
+
+
+def test_expired_public_request_stops_before_admission_side_effects(monkeypatch):
+    from apps.gateway.services import deployment_service as deployment_module
+
+    now = datetime(2026, 7, 28, 12, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(deployment_module, "_utc_now", lambda: now)
+    app_row, deployment_row = _deployed_app(DeploymentType.CHATBOT)
+    db = _Db(rows=[app_row, deployment_row])
+    side_effects = []
+    monkeypatch.setattr(
+        deployment_module.WorkflowBudgetService,
+        "ensure_workflow_budget_allows_execution",
+        lambda *_args, **_kwargs: side_effects.append("budget"),
+    )
+    monkeypatch.setattr(
+        deployment_module.DeploymentService,
+        "migrate_legacy_node_secrets",
+        lambda *_args, **_kwargs: side_effects.append("migration"),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        _run_public(
+            db,
+            app_row.url_slug,
+            {"question": "안녕"},
+            monkeypatch,
+            public_request_deadline_at=now - timedelta(milliseconds=1),
+        )
+
+    assert exc_info.value.status_code == 504
+    assert exc_info.value.detail == "Workflow execution timed out"
+    assert side_effects == []
+
+
+def test_public_result_polling_uses_only_remaining_request_lifetime(monkeypatch):
+    from apps.gateway.services import deployment_service as deployment_module
+
+    now = datetime(2026, 7, 28, 12, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(deployment_module, "_utc_now", lambda: now)
+    monkeypatch.setattr(
+        "time.time",
+        _TimeSequence(first=0.0, remaining=6.0),
+    )
+
+    async def no_sleep(_seconds):
+        return None
+
+    monkeypatch.setattr("asyncio.sleep", no_sleep)
+    app_row, deployment_row = _deployed_app(DeploymentType.CHATBOT)
+    db = _Db(rows=[app_row, deployment_row])
+
+    with pytest.raises(HTTPException) as exc_info:
+        _run_public(
+            db,
+            app_row.url_slug,
+            {"question": "안녕"},
+            monkeypatch,
+            async_result_cls=_NeverReadyTwiceAsyncResult,
+            public_request_deadline_at=now + timedelta(seconds=5),
+        )
+
+    assert exc_info.value.status_code == 504
+    assert exc_info.value.detail == "Workflow execution timed out"
 
 
 def test_public_chatbot_forgets_consumed_celery_result(monkeypatch):
@@ -1040,6 +1169,31 @@ class _FakeAsyncResult:
             "result": {"answer": "ok"},
             "run_id": "00000000-0000-0000-0000-000000000777",
         }
+
+
+class _NeverReadyTwiceAsyncResult(_FakeAsyncResult):
+    def __init__(self, task_id, app=None):
+        super().__init__(task_id, app=app)
+        self._ready_calls = 0
+
+    def ready(self):
+        self._ready_calls += 1
+        if self._ready_calls > 1:
+            raise AssertionError("polling exceeded the request deadline")
+        return False
+
+
+class _TimeSequence:
+    def __init__(self, *, first, remaining):
+        self._first = first
+        self._remaining = remaining
+        self._used_first = False
+
+    def __call__(self):
+        if not self._used_first:
+            self._used_first = True
+            return self._first
+        return self._remaining
 
 
 class _TrackingForgetAsyncResult(_FakeAsyncResult):

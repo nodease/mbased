@@ -12,7 +12,7 @@ TDD red phase: WorkflowBudgetService.ensure_workflow_budget_allows_execution이
 """
 
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from types import SimpleNamespace
 from uuid import uuid4
@@ -347,6 +347,15 @@ def test_run_deployment_blocks_exceeded_budget_before_dispatch(
                 runtime_policy=DEFAULT_DEPLOYMENT_RUNTIME_POLICY,
                 auth_token=auth_token,
                 require_auth=require_auth,
+                **(
+                    {
+                        "allow_stateless_public_chatbot_compatibility": True,
+                        "public_request_deadline_at": datetime.now(timezone.utc)
+                        + timedelta(seconds=600),
+                    }
+                    if trigger_mode == "app"
+                    else {}
+                ),
             )
         )
 

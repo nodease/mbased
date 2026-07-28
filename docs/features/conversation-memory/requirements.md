@@ -233,5 +233,6 @@ MBA-318은 Public client-held history, legacy Public memory control 차단, cont
 - MEM-REQ-123: Worker의 Redis history atomic consume은 2초와 남은 Public task deadline 중 더 짧은 socket connect/read timeout을 사용해야 하며 absolute deadline 도달 뒤 retry를 예약하지 않아야 한다.
 - MEM-REQ-124: Public model-routing runtime Judge는 최초 호출과 incomplete compact retry를 포함한 각 provider invocation 직전에 공통 absolute deadline을 검사하고 만료 예외를 stored-model fallback으로 흡수하지 않아야 한다.
 - MEM-REQ-125: 전용 Public task는 `memory_mode=true` 또는 non-null `conversation_id`를 DB·Redis·외부 I/O 전에 fail-closed하고, safe false/null sentinel도 canonical execution context에서 제거해야 한다.
+- MEM-REQ-126: Public root와 `/chat`의 600초 absolute deadline은 ASGI 요청 수신 시점에 body buffering·JSON parsing보다 먼저 한 번 생성해야 한다. Gateway admission, transient Redis TTL·I/O timeout, Celery `expires`, 결과 polling과 Worker는 이 값을 새로 계산하지 않고 남은 lifetime만 사용해야 한다.
 
 `PUBLIC_CHAT_CONVERSATION_ROLLOUT_MODE=compatibility`는 배포 순서용 임시 기본값이다. strict 전환 전 active legacy public Chatbot을 consumer mapping이 있는 새 deployment version으로 교체한다.

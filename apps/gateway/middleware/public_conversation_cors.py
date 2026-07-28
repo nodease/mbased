@@ -2,10 +2,16 @@ from __future__ import annotations
 
 import json
 from collections.abc import Sequence
+from datetime import datetime, timedelta, timezone
 
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from apps.shared.domain.public_chat_conversation import (
+    PUBLIC_CHAT_REQUEST_TTL_SECONDS,
+)
+
 _PUBLIC_CONVERSATION_BOUNDARY_STATE_KEY = "nodease.public_conversation_transport"
+_PUBLIC_REQUEST_DEADLINE_STATE_KEY = "nodease.public_request_deadline_at"
 MAX_PUBLIC_CHAT_REQUEST_BYTES = 393_216
 _PUBLIC_CHAT_REQUEST_TOO_LARGE_BODY = json.dumps(
     {"detail": {"code": "conversation.request_too_large", "message": "The public conversation request is too large."}},
@@ -41,6 +47,12 @@ class PublicConversationCorsBoundaryMiddleware:
         if not is_conversation_path and not is_public_run_root:
             await self.app(scope, receive, send)
             return
+
+        if scope.get("method") == "POST" and (
+            is_public_run_root or _is_public_chat_run_path(path)
+        ):
+            # Stamp the lifetime before request-body buffering and JSON parsing.
+            public_conversation_request_deadline(scope)
 
         if (
             scope.get("method") == "POST"
@@ -83,6 +95,22 @@ def mark_public_conversation_transport_boundary(scope: Scope) -> None:
     """Mark a root public-run response as owned by Conversation transport."""
 
     scope.setdefault("state", {})[_PUBLIC_CONVERSATION_BOUNDARY_STATE_KEY] = True
+
+
+def public_conversation_request_deadline(scope: Scope) -> datetime:
+    """Return the immutable Public request deadline stamped at ASGI ingress."""
+
+    state = scope.setdefault("state", {})
+    deadline = state.get(_PUBLIC_REQUEST_DEADLINE_STATE_KEY)
+    if isinstance(deadline, datetime):
+        return deadline
+    deadline = _utc_now() + timedelta(seconds=PUBLIC_CHAT_REQUEST_TTL_SECONDS)
+    state[_PUBLIC_REQUEST_DEADLINE_STATE_KEY] = deadline
+    return deadline
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 def _is_marked_public_conversation_response(scope: Scope) -> bool:
@@ -214,4 +242,5 @@ __all__ = [
     "MAX_PUBLIC_CHAT_REQUEST_BYTES",
     "PublicConversationCorsBoundaryMiddleware",
     "mark_public_conversation_transport_boundary",
+    "public_conversation_request_deadline",
 ]

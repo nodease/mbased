@@ -1,8 +1,11 @@
+from datetime import datetime, timedelta, timezone
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from apps.gateway.api.v1.endpoints import run as run_endpoint
+from apps.gateway.middleware import public_conversation_cors as cors_boundary_module
 from apps.gateway.middleware.public_conversation_cors import (
     PublicConversationCorsBoundaryMiddleware,
 )
@@ -24,6 +27,10 @@ def test_public_run_forwards_injected_runtime_policy_at_fastapi_boundary(
     injected_policy = DEFAULT_DEPLOYMENT_RUNTIME_POLICY.with_surface_allowed_types(
         SURFACE_APP_PUBLIC_RUN,
         {DeploymentType.API},
+    )
+    request_received_at = datetime(2026, 7, 28, 12, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(
+        cors_boundary_module, "_utc_now", lambda: request_received_at
     )
     captured = {}
 
@@ -56,6 +63,7 @@ def test_public_run_forwards_injected_runtime_policy_at_fastapi_boundary(
     )
 
     app = FastAPI()
+    app.add_middleware(PublicConversationCorsBoundaryMiddleware)
     app.include_router(run_endpoint.router)
     app.dependency_overrides[run_endpoint.get_db] = lambda: db
     app.dependency_overrides[run_endpoint.get_deployment_runtime_policy] = lambda: (
@@ -98,6 +106,8 @@ def test_public_run_forwards_injected_runtime_policy_at_fastapi_boundary(
         "client_conversation_history": None,
         "allow_stateless_public_chatbot_compatibility": True,
         "expected_deployment_version": 7,
+        "public_request_deadline_at": request_received_at
+        + timedelta(seconds=600),
         "auth_token": None,
         "require_auth": False,
         "trigger_mode": "app",
@@ -110,6 +120,10 @@ def test_public_run_forwards_bounded_client_history_without_capability_token(
 ):
     db = object()
     captured = {}
+    request_received_at = datetime(2026, 7, 28, 12, 5, tzinfo=timezone.utc)
+    monkeypatch.setattr(
+        cors_boundary_module, "_utc_now", lambda: request_received_at
+    )
 
     async def run_deployment(**kwargs):
         captured.update(kwargs)
@@ -150,6 +164,9 @@ def test_public_run_forwards_bounded_client_history_without_capability_token(
     )
     assert captured["user_inputs"] == {"question": "new question"}
     assert captured["expected_deployment_version"] == 3
+    assert captured["public_request_deadline_at"] == (
+        request_received_at + timedelta(seconds=600)
+    )
     assert response.headers["cache-control"] == "no-store"
     assert response.headers["referrer-policy"] == "no-referrer"
     assert "access-control-allow-origin" not in response.headers

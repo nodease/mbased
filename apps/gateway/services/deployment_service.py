@@ -3,7 +3,7 @@
 import hashlib
 import logging
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException
@@ -72,6 +72,7 @@ from apps.shared.services.workflow_task_publisher import (
     send_workflow_task,
 )
 from apps.shared.services.public_chat_history_transient_store import (
+    PUBLIC_CHAT_HISTORY_TRANSIENT_IO_TIMEOUT_SECONDS,
     PublicChatHistoryTransientStoreError,
     store_public_chat_history,
 )
@@ -92,6 +93,33 @@ _AUTH_SECRET_DEPLOYMENT_TYPES = {
 _LEGACY_CONVERSATION_INPUT = "conversation_id"
 _LEGACY_MEMORY_MODE_INPUT = "memory_mode"
 _MAX_LEGACY_CONVERSATION_ID_LENGTH = 255
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _remaining_public_request_seconds(
+    deadline: datetime | None,
+    *,
+    minimum_seconds: float = 0.0,
+) -> float:
+    if (
+        not isinstance(deadline, datetime)
+        or deadline.tzinfo is None
+        or deadline.utcoffset() is None
+    ):
+        raise HTTPException(
+            status_code=500,
+            detail="Workflow execution failed",
+        )
+    remaining = (deadline.astimezone(timezone.utc) - _utc_now()).total_seconds()
+    if remaining < minimum_seconds or remaining <= 0:
+        raise HTTPException(
+            status_code=504,
+            detail="Workflow execution timed out",
+        )
+    return remaining
 
 
 class DeploymentAuthSecretPreflightError(RuntimeError):
@@ -993,6 +1021,7 @@ class DeploymentService:
         client_conversation_history: tuple[dict[str, str], ...] | None = None,
         allow_stateless_public_chatbot_compatibility: bool = False,
         expected_deployment_version: int | None = None,
+        public_request_deadline_at: datetime | None = None,
         auth_token: Optional[str] = None,
         require_auth: bool = True,  # 인증 필요 여부 (기본값: 필요)
     ) -> Dict[str, Any]:
@@ -1087,6 +1116,7 @@ class DeploymentService:
             allow_stateless_public_chatbot_compatibility=(
                 allow_stateless_public_chatbot_compatibility
             ),
+            public_request_deadline_at=public_request_deadline_at,
         )
 
     @staticmethod
@@ -1204,6 +1234,7 @@ class DeploymentService:
         client_conversation_history: tuple[dict[str, str], ...] | None = None,
         allow_stateless_public_chatbot_compatibility: bool = False,
         separate_conversation_control: bool = False,
+        public_request_deadline_at: datetime | None = None,
         request_id: Optional[str] = None,
         correlation_id: Optional[str] = None,
     ) -> Dict[str, Any]:
@@ -1244,6 +1275,8 @@ class DeploymentService:
         public_transient_mode = (
             public_client_history_mode or public_stateless_compatibility_mode
         )
+        if public_transient_mode:
+            _remaining_public_request_seconds(public_request_deadline_at)
         dispatch_inputs = dict(user_inputs or {})
         if public_client_history_mode and (
             _LEGACY_MEMORY_MODE_INPUT in dispatch_inputs
@@ -1284,6 +1317,9 @@ class DeploymentService:
                     },
                 ) from None
 
+        if public_transient_mode:
+            _remaining_public_request_seconds(public_request_deadline_at)
+
         # 예산 초과 차단 — 아래 dispatch try 블록 밖이어야 429가
         # "Engine Execution failed" 500으로 감싸이지 않는다 (BGT-REQ-030~031).
         WorkflowBudgetService.ensure_workflow_budget_allows_execution(
@@ -1292,6 +1328,8 @@ class DeploymentService:
             trigger_mode=trigger_mode,
             actor_id=actor_user_id,
         )
+        if public_transient_mode:
+            _remaining_public_request_seconds(public_request_deadline_at)
 
         DeploymentService.migrate_legacy_node_secrets(
             db,
@@ -1300,6 +1338,8 @@ class DeploymentService:
                 uuid.UUID(str(actor_user_id)) if actor_user_id is not None else None
             ),
         )
+        if public_transient_mode:
+            _remaining_public_request_seconds(public_request_deadline_at)
         graph_data = deployment.graph_snapshot
         try:
             enforce_workflow_configuration_preflight(graph_data, surface="run")
@@ -1307,6 +1347,9 @@ class DeploymentService:
             raise DeploymentService.workflow_configuration_preflight_blocked(
                 exc
             ) from exc
+
+        if public_transient_mode:
+            _remaining_public_request_seconds(public_request_deadline_at)
 
         try:
             # 로깅을 위한 컨텍스트 주입
@@ -1378,21 +1421,31 @@ class DeploymentService:
                 "memory_mode": memory_mode_enabled,  # 기억 모드 추가
                 "conversation_id": conversation_id,  # 방문자별 대화 격리 키
             }
-            public_request_deadline = None
+            public_request_deadline = (
+                public_request_deadline_at if public_transient_mode else None
+            )
             if public_transient_mode:
-                public_request_deadline = datetime.now(timezone.utc) + timedelta(
-                    seconds=PUBLIC_CHAT_REQUEST_TTL_SECONDS
-                )
                 execution_context["execution_actor"] = {"type": "public"}
                 execution_context["suppress_content_persistence"] = True
                 execution_context["public_request_deadline_at"] = (
                     public_request_deadline.isoformat()
                 )
             if public_client_history_mode:
+                remaining_seconds = _remaining_public_request_seconds(
+                    public_request_deadline,
+                    minimum_seconds=1.0,
+                )
                 try:
                     history_reference = await store_public_chat_history(
                         client_conversation_history,
-                        ttl_seconds=PUBLIC_CHAT_REQUEST_TTL_SECONDS,
+                        ttl_seconds=min(
+                            PUBLIC_CHAT_REQUEST_TTL_SECONDS,
+                            int(remaining_seconds),
+                        ),
+                        timeout_seconds=min(
+                            PUBLIC_CHAT_HISTORY_TRANSIENT_IO_TIMEOUT_SECONDS,
+                            remaining_seconds,
+                        ),
                     )
                 except PublicChatHistoryTransientStoreError:
                     raise HTTPException(
@@ -1420,6 +1473,11 @@ class DeploymentService:
                     "id": str(execution_subject_user_id),
                 }
 
+            if public_transient_mode:
+                _remaining_public_request_seconds(
+                    public_request_deadline,
+                    minimum_seconds=1.0,
+                )
             workflow_task_name = (
                 PUBLIC_CHAT_WORKFLOW_TASK_NAME
                 if public_transient_mode
@@ -1443,7 +1501,7 @@ class DeploymentService:
 
             from celery.result import AsyncResult
 
-            async def wait_for_celery_result(task_id: str, timeout: int = 600):
+            async def wait_for_celery_result(task_id: str, timeout: float = 600):
                 """비동기적으로 Celery 결과 대기 (폴링 방식)"""
                 result = AsyncResult(task_id, app=celery_app)
                 start_time = time.time()
@@ -1478,7 +1536,15 @@ class DeploymentService:
                 forget_public_result()
                 return payload
 
-            result = await wait_for_celery_result(task.id, timeout=600)
+            result_timeout = (
+                _remaining_public_request_seconds(public_request_deadline)
+                if public_transient_mode
+                else 600
+            )
+            result = await wait_for_celery_result(
+                task.id,
+                timeout=result_timeout,
+            )
 
             if result.get("status") == "success":
                 return {

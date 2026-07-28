@@ -498,7 +498,7 @@ Public transcript는 현재 Client가 렌더링하는 local messages이며 서�
 - 새 Gateway의 compatibility adapter는 root 요청을 무상태로 실행하며 server Memory identity를 만들지 않는다.
 - strict rollout 전환 뒤에는 모든 active public Chatbot deployment가 versioned consumer config를 가져야 한다.
 - Public audit actor는 authorization subject와 별도다. UI는 history나 actor marker를 권한·신원으로 표시하지 않는다.
-- Gateway는 raw history를 600초 TTL의 일회성 Redis key에 두고 broker에는 opaque reference만 전달한다. Worker는 queued raw history를 거부하고 atomic consume 뒤에만 invocation-local 원문을 만든다. Store unavailable은 소비 전 bounded retry를 사용하지만 invalid/missing/corrupt 또는 소비 뒤 오류는 provider replay 없이 닫는다. Broker expiry와 Worker deadline은 같은 Gateway 생성시각을 사용한다.
+- Gateway ASGI middleware는 Public root와 `/chat` request lifetime을 body buffering 전에 생성한다. Gateway는 raw history를 그 deadline의 남은 시간 이하 TTL인 일회성 Redis key에 두고 broker에는 opaque reference만 전달한다. Admission, Redis I/O, task expiry, result polling과 Worker는 같은 absolute deadline을 사용한다. Worker는 queued raw history를 거부하고 atomic consume 뒤에만 invocation-local 원문을 만든다. Store unavailable은 소비 전 bounded retry를 사용하지만 invalid/missing/corrupt 또는 소비 뒤 오류는 provider replay 없이 닫는다.
 - Public transient task는 `workflow.execute_public_chat.v1`/`workflow-public-chat-v1` 계약으로만 전달한다. 일반 task는 public marker를 fail-closed하고 새 Worker만 전용 queue를 함께 구독한다.
 - Gateway transient store adapter는 async Redis `SET NX EX`를 bounded timeout 안에서 실행한다. Redis가 지연되면 event loop를 점유하지 않고 safe 503으로 종료한다.
 - `/chat` adapter는 `deployment_version`을 필수 precondition으로 검증하지만 compatibility root adapter는 rolling 전환을 위해 생략을 허용한다.

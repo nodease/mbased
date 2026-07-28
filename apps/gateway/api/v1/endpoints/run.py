@@ -17,6 +17,7 @@ from apps.shared.db.session import get_db
 from apps.gateway.services.deployment_service import DeploymentService
 from apps.gateway.middleware.public_conversation_cors import (
     mark_public_conversation_transport_boundary,
+    public_conversation_request_deadline,
 )
 from apps.shared.domain.deployment_runtime_policy import DeploymentRuntimePolicy
 from apps.shared.domain.public_chat_history import (
@@ -93,6 +94,9 @@ async def run_workflow_public(
                 settings.PUBLIC_CHAT_CONVERSATION_ROLLOUT_MODE == "compatibility"
             ),
             expected_deployment_version=expected_deployment_version,
+            public_request_deadline_at=public_conversation_request_deadline(
+                request.scope
+            ),
             auth_token=None,
             require_auth=False,  # 인증 불필요
             trigger_mode="app",  # 웹 앱/임베딩 호출
@@ -110,6 +114,7 @@ async def run_workflow_public(
 @router.post("/run-public/{url_slug}/chat")
 async def run_public_chatbot(
     url_slug: str,
+    request: Request,
     runtime_policy: Annotated[
         DeploymentRuntimePolicy,
         Depends(get_deployment_runtime_policy),
@@ -140,6 +145,9 @@ async def run_public_chatbot(
         user_inputs=user_inputs,
         client_conversation_history=client_conversation_history,
         expected_deployment_version=expected_deployment_version,
+        public_request_deadline_at=public_conversation_request_deadline(
+            request.scope
+        ),
         auth_token=None,
         require_auth=False,
         trigger_mode="app",

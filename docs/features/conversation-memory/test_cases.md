@@ -451,3 +451,5 @@ Disposable PostgreSQL evidence는 `NODEASE_RUN_DISPOSABLE_DB_TEST=1`인 전용 C
 - MEM-TC-BOUND-031: Redis history consume은 short-lived client에 2초와 남은 task deadline 중 더 짧은 connect/read timeout을 적용하고 client를 닫는다.
 - MEM-TC-BOUND-032: runtime Judge의 최초 provider가 incomplete를 반환한 뒤 deadline guard가 만료되면 compact retry provider를 호출하지 않고 deadline 예외를 전파한다.
 - MEM-TC-BOUND-033: 전용 Public task의 `memory_mode=true` 또는 non-null `conversation_id`는 DB 전에 거부되며 safe false/null sentinel은 canonical engine context에서 제거된다.
+- MEM-TC-BOUND-034: ASGI middleware가 Public root와 `/chat` 요청의 body buffering 전에 생성한 동일 deadline이 Gateway service, execution context와 Celery `expires`까지 보존된다.
+- MEM-TC-BOUND-035: admission 전에 만료된 Public 요청은 budget/secret migration/Redis/task publish를 호출하지 않고 safe 504로 종료하며, Redis TTL·I/O timeout과 Gateway result polling은 고정 600초가 아니라 남은 deadline을 사용한다.
