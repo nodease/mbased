@@ -4787,10 +4787,16 @@ def test_auto_model_routing_prefers_persisted_policy_over_legacy_node_json(monke
     assert metadata["judge_called"] is False
 
 
-def test_deployed_judge_bootstrap_uses_judge_and_queues_safe_learning_label(
+@pytest.mark.parametrize(
+    ("suppress_content_persistence", "expected_learning_queued"),
+    [(False, True), (True, False)],
+)
+def test_deployed_judge_bootstrap_respects_content_persistence_boundary(
     monkeypatch,
+    suppress_content_persistence,
+    expected_learning_queued,
 ):
-    """초기 배포 실행은 Judge 선택을 쓰되 완료 후 학습할 label만 남긴다."""
+    """Public 비저장 실행은 Judge를 쓰되 content-derived label을 남기지 않는다."""
     from apps.workflow_engine.services.model_routing_policy_store import (
         ModelRoutingPolicyStore,
     )
@@ -4879,6 +4885,7 @@ def test_deployed_judge_bootstrap_uses_judge_and_queues_safe_learning_label(
             "deployment_id": str(uuid.uuid4()),
             "workflow_run_id": str(uuid.uuid4()),
             "organization_id": str(uuid.uuid4()),
+            "suppress_content_persistence": suppress_content_persistence,
         },
     )
     monkeypatch.setattr(
@@ -4931,9 +4938,17 @@ def test_deployed_judge_bootstrap_uses_judge_and_queues_safe_learning_label(
     assert metadata["judge"]["reason_short"] == "요구 수준에 맞는 기본 모델 선택"
     assert metadata["judge"]["candidate_model_count"] == 2
     assert metadata["judge"]["usage_log_error"] == "RuntimeError"
-    assert captured["source_policy_id"] == str(policy_id)
-    assert captured["learner_id"] == str(persisted.learner_id)
-    assert captured["selected_model_id"] == "gpt-5-mini"
+    if expected_learning_queued:
+        assert captured["source_policy_id"] == str(policy_id)
+        assert captured["learner_id"] == str(persisted.learner_id)
+        assert captured["selected_model_id"] == "gpt-5-mini"
+        assert metadata["judge"]["learning_status"] == "pending_contract"
+    else:
+        assert captured == {}
+        assert (
+            metadata["judge"]["learning_status"]
+            == "suppressed_content_persistence"
+        )
 
 
 def test_deployed_judge_bootstrap_exposes_learning_queue_failure_reason(monkeypatch):

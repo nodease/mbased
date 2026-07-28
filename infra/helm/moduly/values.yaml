@@ -501,6 +501,9 @@ redis:
 # =============================================================================
 ingress:
   enabled: false
+  # Ingress must not terminate a Public Chatbot request before the Gateway's
+  # 600-second absolute deadline. Operators may override annotations explicitly.
+  publicChatTimeoutSeconds: 610
   
   className: nginx
   

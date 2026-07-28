@@ -1008,9 +1008,16 @@ class LLMNode(Node[LLMNodeData]):
                 policy_id = policy.get("policy_id")
                 learner = policy.get("learner")
                 learner_id = learner.get("id") if isinstance(learner, dict) else None
+                content_persistence_suppressed = bool(
+                    self.execution_context.get("suppress_content_persistence")
+                )
                 # Editor test runs must show the same model selection as a deployed
                 # run, but they must never become deployed learning samples.
-                if (
+                if learner_id and content_persistence_suppressed:
+                    judge_metadata["learning_status"] = (
+                        "suppressed_content_persistence"
+                    )
+                elif (
                     learner_id
                     and not is_policy_preview_node
                     and not requires_safe_fallback

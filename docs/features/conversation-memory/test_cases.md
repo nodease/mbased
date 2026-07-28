@@ -446,3 +446,5 @@ Disposable PostgreSQL evidence는 `NODEASE_RUN_DISPOSABLE_DB_TEST=1`인 전용 C
 - MEM-TC-BOUND-026: Compose와 Helm values→ConfigMap→Gateway env가 `PUBLIC_CHAT_CONVERSATION_ROLLOUT_MODE`를 전달한다.
 - MEM-TC-BOUND-027: Nginx Public `/chat` read/send timeout이 600초 absolute deadline보다 길다.
 - MEM-TC-BOUND-028: Nginx가 oversized Public `/chat`을 차단해도 safe JSON code와 no-store/no-referrer headers를 반환한다.
+- MEM-TC-BOUND-029: Helm default/production values와 Ingress template은 600초보다 긴 Public read/send timeout을 렌더링하고 operator annotations를 보존한다.
+- MEM-TC-BOUND-030: 동일한 deployed judge-first routing은 일반 실행에서 learning label을 queue하지만 `suppress_content_persistence` 실행에서는 queue하지 않고 safe suppression status만 남긴다.

@@ -477,7 +477,7 @@ Public Chatbot deployment `config`:
 
 `GET /api/v1/deployments/public/{url_slug}/info`는 Chatbot에 `public_conversation_contract: "client_history_v1" | "legacy_v0"`와 정수 `version`을 `Cache-Control: no-store`로 반환한다. 필드가 없는 구 Gateway는 Client가 `legacy_v0`로 취급한다. 새 Client는 root와 `/chat` body에 조회한 `deployment_version`을 포함한다. Gateway는 active deployment와 다르면 budget, transient store와 task publish 전에 `409 conversation.deployment_version_changed`로 종료한다. Client는 info를 다시 조회하고 이전 version history를 폐기한 뒤 현재 입력을 한 번만 재시도한다.
 
-전용 `/chat` route는 `deployment_version` 생략을 허용하지 않는다. Reverse proxy가 393,216-byte body 상한을 먼저 적용해도 Gateway와 같은 content-free `413 conversation.request_too_large`와 no-store/no-referrer headers를 반환한다. Proxy read/send timeout은 Public absolute request deadline 600초보다 긴 610초다.
+전용 `/chat` route는 `deployment_version` 생략을 허용하지 않는다. Reverse proxy가 393,216-byte body 상한을 먼저 적용해도 Gateway와 같은 content-free `413 conversation.request_too_large`와 no-store/no-referrer headers를 반환한다. Docker Nginx와 Helm Ingress의 proxy read/send timeout은 Public absolute request deadline 600초보다 긴 610초다.
 
 Compatibility mode에서 root public Chatbot 요청은 legacy `memory_mode`/`conversation_id`를 제거한 무상태 실행으로 처리한다. `/chat` 요청의 legacy control은 계속 `422 conversation.legacy_control_forbidden`이다. Strict mode에서 root public Chatbot은 `422 conversation.history_required`다.
 
@@ -488,3 +488,5 @@ Public transient dispatch는 `workflow.execute_public_chat.v1` task를 `workflow
 History는 raw admission과 sanitizer 이후 final projection을 같은 validator로 중복 검사하지 않는다. Gateway raw request에 message/envelope 상한을 적용하고, Worker 내부 sanitizer가 pair 한쪽을 비우면 완료 pair 전체를 제거한다. Sanitizer가 만든 marker가 raw message 상한을 넘더라도 raw admission을 다시 적용하지 않으며 실제 provider framing을 포함한 final projection token 상한으로 제한한다.
 
 Gateway의 transient history 저장은 async Redis와 bounded 2초 timeout을 사용한다. Query embedding fan-out은 model group마다 provider invoke 직전에 같은 Public absolute deadline guard를 실행하며 `safe_no_result` 정책도 deadline 만료를 provider 실패로 삼켜 다음 호출을 계속하지 않는다. Rollout mode는 Compose 환경변수와 Helm `gateway.env.PUBLIC_CHAT_CONVERSATION_ROLLOUT_MODE`에서 설정한다.
+
+`suppress_content_persistence=true`인 Public execution은 model routing judge의 content-derived learning label을 queue하지 않는다. Model selection과 content-free usage 통계는 실행에 사용할 수 있지만 visitor input의 feature text/vector/hash를 durable learner dataset에 포함하지 않는다.

@@ -393,3 +393,42 @@ Version, lifetime, storage availability와 HTTP admission은 각각 API adapter,
 - Public request lifetime이 바뀌면 Gateway timeout, Celery expires, Worker task deadline과 Nginx read/send timeout을 한 계약으로 갱신한다.
 - Redis library 변경 시 async cancellation과 timeout 예외가 event loop를 막거나 내부 오류를 public response에 노출하지 않는지 검토한다.
 - 새 multi-provider fan-out은 loop 시작 전 검사만으로 만족하지 말고 각 외부 invoke 직전 deadline guard를 호출한다.
+
+## Implementation Decision: Helm lifetime parity and routing-learning suppression
+
+### Context
+
+Docker Nginx에만 610초 timeout을 설정하면 Helm Ingress의 기본 upstream timeout이 Public absolute deadline보다 먼저 끝날 수 있다. 또한 `suppress_content_persistence`는 WorkflowLogger content만 닫고 model-routing judge가 익명 입력에서 만든 feature text/vector/hash learning label은 DB에 계속 저장했다.
+
+### Options Considered
+
+- Helm timeout은 operator 문서에만 맡김: 기본 chart가 비용 발생 중인 Worker보다 먼저 연결을 끊을 수 있어 선택하지 않는다.
+- Public request deadline을 일반 Ingress 기본값 60초로 축소: 기존 동기 RAG/provider 실행 계약을 크게 바꾸므로 선택하지 않는다.
+- Public routing에서 model selection 자체를 끔: content-free selection과 usage 기능까지 불필요하게 잃으므로 선택하지 않는다.
+- Helm에 610초 read/send timeout을 렌더링하고 Public execution에서 content-derived learning label만 억제: lifetime과 비저장 경계를 최소 변경으로 완결하므로 선택한다.
+
+### Final Decision
+
+1. Helm Ingress는 `ingress.publicChatTimeoutSeconds`를 필수로 읽고 600초 이하를 template render 단계에서 거부한다.
+2. 기본·production 값은 610초이며 ingress-nginx read/send timeout annotations로 렌더링한다. 다른 operator annotation은 보존하지만 timeout key는 검증된 chart value가 소유해 더 짧은 arbitrary override를 허용하지 않는다.
+3. `suppress_content_persistence` execution은 model-routing judge와 model selection·content-free usage를 유지하되 `queue_runtime_judge_label`을 호출하지 않는다.
+4. Suppressed learning은 원문 없이 `suppressed_content_persistence` safe status로만 표시한다.
+
+### Rationale
+
+HTTP client lifetime과 durable data minimization은 Docker 단일 경로가 아니라 모든 지원 배포와 모든 content-derived write 경로에 적용해야 한다. Proxy가 먼저 종료된 뒤 외부 비용이 계속되는 상황과 익명 입력 파생 벡터가 학습 데이터로 남는 상황을 각각 Helm render 및 LLM learning write 직전에 차단한다.
+
+### Affected Files
+
+- `infra/helm/moduly/templates/ingress.yaml`
+- `infra/helm/moduly/values.yaml`
+- `infra/helm/moduly/values-production.yaml`
+- `apps/workflow_engine/workflow/nodes/llm/llm_node.py`
+- Gateway architecture 및 Workflow Engine LLM node 회귀 테스트
+- Conversation Memory requirements, API, component와 test case 문서
+
+### Follow-up Review Notes
+
+- ingress-nginx가 아닌 controller는 `ingress.annotations`로 동일하거나 더 긴 controller-specific timeout을 설정하고 rendered manifest를 배포 전에 검증한다.
+- Public request deadline을 변경할 때 Docker Nginx와 Helm Ingress timeout을 함께 갱신한다.
+- 새 model-routing learner write 경로는 `suppress_content_persistence`를 우회하지 않는지 검토한다.

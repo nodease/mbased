@@ -228,5 +228,7 @@ MBA-318은 Public client-held history, legacy Public memory control 차단, cont
 - MEM-REQ-118: `PUBLIC_CHAT_CONVERSATION_ROLLOUT_MODE`는 표준 Docker Compose와 Helm values→ConfigMap→Gateway container env 경로에서 설정 가능해야 한다.
 - MEM-REQ-119: Public `/chat` reverse proxy read/send timeout은 Gateway·Worker absolute request deadline보다 길어야 하며 proxy가 먼저 연결을 끊은 뒤 provider 실행이 계속되는 경로를 만들지 않아야 한다.
 - MEM-REQ-120: Reverse proxy가 Public `/chat` body 상한을 먼저 적용할 때도 `413 conversation.request_too_large`, `Cache-Control: no-store`, `Referrer-Policy: no-referrer`의 content-free 계약을 반환해야 한다.
+- MEM-REQ-121: Helm Ingress는 Public absolute request deadline 600초보다 긴 read/send timeout을 렌더링해야 하며 operator annotation override도 이 최소 lifetime 계약을 훼손하지 않도록 검토해야 한다.
+- MEM-REQ-122: `suppress_content_persistence` Public 실행은 익명 입력에서 파생된 model-routing learning feature text, vector와 hash를 durable learning label로 저장하지 않아야 한다. Content-free model selection·usage metadata는 유지할 수 있다.
 
 `PUBLIC_CHAT_CONVERSATION_ROLLOUT_MODE=compatibility`는 배포 순서용 임시 기본값이다. strict 전환 전 active legacy public Chatbot을 consumer mapping이 있는 새 deployment version으로 교체한다.

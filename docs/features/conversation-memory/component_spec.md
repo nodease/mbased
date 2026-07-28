@@ -505,3 +505,5 @@ Public transcript는 현재 Client가 렌더링하는 local messages이며 서�
 - Query embedding application service는 각 model group provider invoke 직전에 전달받은 deadline guard를 실행한다. Deadline 예외는 `safe_no_result` provider 오류 처리에 흡수하지 않는다.
 - Compose와 Helm ConfigMap은 Public rollout mode를 Gateway container까지 전달한다.
 - Nginx Public `/chat` location은 Gateway lifetime보다 긴 upstream timeout과 Gateway와 동일한 safe 413 응답 계약을 소유한다.
+- Helm Ingress template도 600초 absolute lifetime보다 긴 read/send timeout을 렌더링하고 600초 이하 values를 거부한다.
+- LLMNode model-routing judge는 Public content-persistence suppression을 learning label보다 먼저 확인한다. Suppressed 실행은 selection과 content-free usage만 유지하고 feature text/vector/hash label write를 건너뛴다.

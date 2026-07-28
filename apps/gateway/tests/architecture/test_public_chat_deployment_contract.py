@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 
@@ -51,3 +52,23 @@ def test_public_chat_proxy_owns_timeout_and_safe_oversize_contract():
         in oversize
     )
     assert "return 413" in oversize
+
+
+def test_helm_ingress_timeout_outlives_public_chat_absolute_deadline():
+    values = _read("infra/helm/moduly/values.yaml")
+    production_values = _read("infra/helm/moduly/values-production.yaml")
+    ingress = _read("infra/helm/moduly/templates/ingress.yaml")
+    timeout_match = re.search(
+        r"publicChatTimeoutSeconds:\s*(\d+)",
+        values,
+    )
+
+    assert timeout_match is not None
+    assert int(timeout_match.group(1)) > 600
+    assert "publicChatTimeoutSeconds: 610" in production_values
+    assert "ingress.publicChatTimeoutSeconds is required" in ingress
+    assert "must be greater than the 600 second public request deadline" in ingress
+    assert "nginx.ingress.kubernetes.io/proxy-read-timeout" in ingress
+    assert "nginx.ingress.kubernetes.io/proxy-send-timeout" in ingress
+    assert "mergeOverwrite" in ingress
+    assert "deepCopy (.Values.ingress.annotations | default dict)" in ingress
