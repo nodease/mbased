@@ -120,7 +120,7 @@ Request body:
 
 - 첫 요청은 `history: []`를 보낸다.
 - history item은 정확히 `role`, `content`만 가지며 완료된 `user` → `assistant` pair 순서여야 한다.
-- Gateway는 최대 20 turn, message당 32,768자, UTF-8, envelope 131,072 bytes와 현재 inputs를 포함한 4,096-token 상한을 provider 전에 검증한다. 상한 초과 시 가장 오래된 완료 turn부터 제거한다.
+- Gateway는 최대 20 turn, message당 32,768자, UTF-8, envelope 131,072 bytes와 현재 inputs를 포함한 4,096-token 상한을 provider 전에 검증한다. Worker는 current inputs의 exact-token 잔여 예산을 다시 만들고, 정제·JSON serialization·untrusted framing이 끝난 최종 history projection도 같은 상한 안으로 가장 오래된 완료 turn부터 제거한다.
 - history는 untrusted context로만 사용하고 authorization, system policy와 resource provenance의 근거로 사용하지 않는다.
 - `inputs.memory_mode`, `inputs.conversation_id`와 server-side Public Conversation Session은 허용하지 않는다.
 - 전용 `/chat` 경로의 성공, validation/router failure와 OPTIONS는 모두 CORS grant 없이 `Cache-Control: no-store`, `Referrer-Policy: no-referrer`를 반환한다. 공용 `/run-public/{url_slug}` root의 Web App/Widget CORS 계약은 변경하지 않는다.
@@ -185,7 +185,7 @@ Response: `{"status": "success", "results": { ... }}`.
 
 ## Memory Scoping
 
-- Public `/chat`은 client history의 각 content를 한 번 정제한 projection으로 만든다. 이 projection은 현재 provider prompt 앞의 untrusted block과 RAG 검색어 구성에 함께 사용하고 `_build_memory_summary`의 DB 조회를 사용하지 않는다.
+- Public `/chat`은 client history의 각 content를 한 번 정제하고 JSON/framing이 끝난 최종 projection을 exact token으로 다시 bound한다. 이 projection은 현재 provider prompt 앞의 untrusted block과 RAG 검색어 구성에 함께 사용하고 `_build_memory_summary`의 DB 조회를 사용하지 않는다.
 - RAG 검색어는 현재 질문을 우선하고 전체 1,000자 안에서 가장 최근 완료 user/assistant pair부터 추가한다. 초과한 오래된 pair는 부분 절단하지 않고 제외한다. Client history는 Knowledge candidate 선택, public/private audience 또는 authorization 판단에 사용하지 않는다.
 - authenticated legacy 경로의 `_build_memory_summary`는 기존 호환 범위에만 남는다. Durable internal target은 authenticated session scope, dedicated Memory store, node별 policy와 current source authorization을 사용한다.
 
@@ -210,8 +210,8 @@ Response: `{"status": "success", "results": { ... }}`.
 
 Public Chatbot preflight/create의 `config.public_conversation`은 `public_chat_conversation.v1`과 한 개의 canonical `history_consumer`를 사용한다. 대상 node는 deployment snapshot의 `llmNode`여야 한다. Gateway는 `/chat` 실행 전에 mapping을 검증하고 Worker가 persisted deployment row에서 다시 검증한다.
 
-Public info response의 `public_conversation_contract`는 `client_history_v1` 또는 `legacy_v0`이다. 구 Gateway처럼 필드가 없으면 Client는 legacy로 취급한다. Compatibility rollout에서 legacy root 요청은 새 Gateway가 server Memory 없이 stateless로 실행하고, strict rollout에서는 root Chatbot 요청을 거부한다.
+Public info response의 `public_conversation_contract`는 `client_history_v1` 또는 `legacy_v0`이다. 구 Gateway처럼 필드가 없으면 Client는 legacy로 취급한다. Compatibility rollout에서 legacy root 요청은 새 Gateway가 server Memory 없이 stateless로 실행한다. Strict rollout에서는 root Chatbot 요청과 consumer mapping 없는 legacy deployment의 create/toggle 활성화를 거부하며 toggle 실패는 deployment, App active pointer, schedule과 transaction을 변경하지 않는다.
 
-Public `/chat` raw history는 600초 TTL의 일회성 Redis key에만 저장하고 Celery에는 opaque reference를 전달한다. Execution context는 authorization subject 대신 별도 public audit actor, canonical consumer safe reference, content persistence suppression과 600초 absolute deadline을 포함한다. Celery publish도 같은 시각의 `expires`를 사용한다. Worker는 deadline을 먼저 검사하고 history reference를 atomic GET+DELETE로 소비하며 snapshot에서 consumer ref를 재구성한다.
+Public `/chat` raw history는 600초 TTL의 일회성 Redis key에만 저장하고 Celery에는 opaque reference를 전달한다. Execution context는 authorization subject 대신 별도 public audit actor, canonical consumer safe reference, content persistence suppression과 600초 absolute deadline을 포함한다. Celery publish도 같은 시각의 `expires`를 사용한다. Worker는 deadline을 먼저 검사하고 history reference를 atomic GET+DELETE로 소비하며 snapshot에서 consumer ref를 재구성한다. 공통 external-effect executor는 write/read-only provider I/O 전에 같은 monotonic deadline을 검사하고 만료된 claim은 failed-before-effect/stop으로 종료한다.
 
 추가 safe error code는 `conversation.consumer_mapping_required`, `conversation.consumer_mapping_invalid`, `conversation.consumer_mapping_not_found`, `conversation.consumer_mapping_node_type_invalid`, `conversation.request_deadline_invalid`, `conversation.request_expired`다. Request content와 internal node identity는 error에 반사하지 않는다.

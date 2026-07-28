@@ -16,6 +16,7 @@ Status: Draft
 - MEM-TC-PUB-002: system/developer/tool role, extra field, 빈 content, assistant-first, 연속 role과 미완성 turn을 거부한다.
 - MEM-TC-PUB-003: 20 turn은 허용하고 21 turn은 provider dispatch 전에 거부한다.
 - MEM-TC-PUB-004: 현재 inputs와 history가 4,096 token을 넘으면 가장 오래된 완료 turn만 제거한다.
+- MEM-TC-PUB-004A: 정제 marker, JSON serialization과 untrusted framing까지 완료한 최종 history projection이 current inputs의 잔여 4,096-token 예산을 넘으면 가장 오래된 완료 pair만 제거하고 provider와 RAG가 동일 projection을 사용한다.
 - MEM-TC-PUB-005: 현재 inputs만으로 4,096 token을 넘으면 history를 모두 버리고 진행하지 않고 거부한다.
 - MEM-TC-PUB-006: Gateway는 bounded history를 별도 execution context로 전달하고 workflow business inputs를 오염시키지 않는다.
 - MEM-TC-PUB-007: Public Chatbot은 memory_mode=false, conversation_id=null이며 legacy control을 거부한다.
@@ -301,6 +302,7 @@ Status: Draft
 - MEM-TC-RUN-023: LLM output은 current Memory Context가 상속한 dependency를 새 retrieval/tool dependency와 합산하고 final entry까지 보존한다.
 - MEM-TC-RUN-024: Credential revoke 또는 credential permission decision/verified relation/egress revision 변경 뒤 stale ProviderExecutionCapability는 새 context claim, budget reservation, provider attempt admission과 outbound call 전에 거부된다.
 - MEM-TC-RUN-025: Public absolute deadline이 Celery hard deadline보다 이르면 runtime deadline으로 유지되고 Knowledge/provider 호출 직전 만료를 거부한다.
+- MEM-TC-RUN-025A: 공통 external-effect executor는 claim 전과 invoke 직전 deadline을 검사하고, claim 뒤 만료를 failed-before-effect/stop으로 terminalize하며 write 및 read-only provider를 호출하지 않는다.
 - MEM-TC-RUN-026: Public history reference는 canonical deployment/preflight와 Knowledge sync 뒤 한 번만 소비한다.
 - MEM-TC-RUN-027: Public history를 소비한 뒤 일반 또는 external-effect retry 오류가 발생해도 Celery retry를 예약하지 않는다.
 - MEM-TC-RUN-028: WorkflowNode child는 public actor/suppression/deadline을 유지하되 parent raw history/reference/consumer binding을 상속하지 않는다.
@@ -352,6 +354,7 @@ Status: Draft
 - MEM-TC-MIG-003: WEBAPP/WIDGET와 authenticated internal legacy run은 영향받지 않는다.
 - MEM-TC-MIG-004: Public lifecycle router 제거 후 기존 dormant table/data는 migration에서 파괴하지 않는다.
 - MEM-TC-MIG-005: Public current tree에는 durable Memory runtime 연결이 없고 authenticated internal surface에서만 후속 활성화한다.
+- MEM-TC-MIG-006: Strict rollout은 consumer mapping 없는 legacy Public Chatbot 재활성화를 knowledge/secret/schedule/active-pointer/commit 전에 차단하고 Compatibility rollout은 기존 동작을 유지한다.
 
 ## Performance And Reliability Tests
 

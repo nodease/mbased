@@ -78,6 +78,68 @@ def _strict_count_tokens(text: str) -> int:
     return len(encoding.encode(text))
 
 
+def count_public_chat_tokens(
+    text: str,
+    *,
+    token_counter: Callable[[str], int] | None = None,
+) -> int:
+    """Count public conversation tokens without heuristic fallback."""
+    return _safe_token_count(token_counter or _strict_count_tokens, text)
+
+
+def remaining_public_chat_history_tokens(
+    current_inputs: Mapping[str, Any],
+    *,
+    token_counter: Callable[[str], int] | None = None,
+    max_context_tokens: int = MAX_PUBLIC_CHAT_CONTEXT_TOKENS,
+) -> int:
+    """Return the server-authoritative token budget left for history."""
+    if not isinstance(current_inputs, Mapping):
+        raise PublicChatHistoryError("conversation.inputs_invalid")
+    if max_context_tokens < 1:
+        raise ValueError("max_context_tokens must be positive")
+    current_tokens = count_public_chat_tokens(
+        _canonical_json(current_inputs),
+        token_counter=token_counter,
+    )
+    if current_tokens > max_context_tokens:
+        raise PublicChatHistoryError("conversation.current_input_too_large")
+    return max_context_tokens - current_tokens
+
+
+def bound_public_chat_history_projection(
+    value: Sequence[Mapping[str, str]],
+    *,
+    projection: Callable[[tuple[dict[str, str], ...]], str],
+    token_counter: Callable[[str], int] | None = None,
+    max_projection_tokens: int,
+) -> tuple[dict[str, str], ...]:
+    """Bound the final sanitized/framed history without splitting a turn."""
+    if (
+        isinstance(max_projection_tokens, bool)
+        or not isinstance(max_projection_tokens, int)
+        or max_projection_tokens < 0
+        or max_projection_tokens > MAX_PUBLIC_CHAT_CONTEXT_TOKENS
+    ):
+        raise PublicChatHistoryError("conversation.token_count_unavailable")
+    normalized = list(normalize_public_chat_history(list(value)))
+    while normalized:
+        candidate = tuple(dict(message) for message in normalized)
+        projected_text = projection(candidate)
+        if not isinstance(projected_text, str):
+            raise PublicChatHistoryError("conversation.token_count_unavailable")
+        if (
+            count_public_chat_tokens(
+                projected_text,
+                token_counter=token_counter,
+            )
+            <= max_projection_tokens
+        ):
+            break
+        del normalized[:2]
+    return tuple(dict(message) for message in normalized)
+
+
 def bound_public_chat_history(
     value: Any,
     *,
@@ -155,5 +217,8 @@ __all__ = [
     "MAX_PUBLIC_CHAT_TURNS",
     "PublicChatHistoryError",
     "bound_public_chat_history",
+    "bound_public_chat_history_projection",
+    "count_public_chat_tokens",
     "normalize_public_chat_history",
+    "remaining_public_chat_history_tokens",
 ]

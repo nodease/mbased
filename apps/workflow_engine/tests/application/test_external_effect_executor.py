@@ -1,9 +1,11 @@
 import uuid
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import pytest
 
+from apps.workflow_engine.application import external_effect as external_effect_module
 from apps.workflow_engine.application.external_effect import (
     EffectAttemptSpec,
     ExternalEffectExecutor,
@@ -157,6 +159,102 @@ def test_expired_claim_before_provider_call_uses_external_effect_retry_signal() 
     assert captured.value.code == "external_effect.claim_wait"
     assert captured.value.terminal_code == "external_effect.claim_wait"
     assert adapter.provider.call_count == 0
+
+
+def test_expired_task_deadline_fails_before_effect_attempt(
+    monkeypatch,
+) -> None:
+    repository = InMemoryEffectAttemptRepository()
+    adapter = FakeEffectAdapter()
+    monkeypatch.setattr(
+        external_effect_module,
+        "time",
+        SimpleNamespace(monotonic=lambda: 10.0),
+        raising=False,
+    )
+    executor = ExternalEffectExecutor(
+        repository=repository,
+        keyring={"test-v1": b"process-local-test-secret"},
+        active_key_version="test-v1",
+        task_deadline=lambda: 10.0,
+    )
+
+    with pytest.raises(ExternalEffectError) as captured:
+        executor.execute(
+            context=_context(),
+            adapter=adapter,
+            payload={"value": 1},
+        )
+
+    assert captured.value.code == "external_effect.deadline_exceeded"
+    assert captured.value.retryable is False
+    assert repository._by_slot == {}
+    assert adapter.provider.call_count == 0
+
+
+def test_deadline_expiring_after_claim_terminalizes_before_provider_call(
+    monkeypatch,
+) -> None:
+    repository = InMemoryEffectAttemptRepository()
+    adapter = FakeEffectAdapter()
+    monotonic = {"value": 9.0}
+    original_finalize = adapter.finalize_provider_call
+
+    def finalize_then_expire(prepared, idempotency_key):
+        call = original_finalize(prepared, idempotency_key)
+        monotonic["value"] = 10.0
+        return call
+
+    adapter.finalize_provider_call = finalize_then_expire
+    monkeypatch.setattr(
+        external_effect_module,
+        "time",
+        SimpleNamespace(monotonic=lambda: monotonic["value"]),
+        raising=False,
+    )
+    executor = ExternalEffectExecutor(
+        repository=repository,
+        keyring={"test-v1": b"process-local-test-secret"},
+        active_key_version="test-v1",
+        task_deadline=lambda: 10.0,
+    )
+
+    with pytest.raises(ExternalEffectError) as captured:
+        executor.execute(
+            context=_context(),
+            adapter=adapter,
+            payload={"value": 1},
+        )
+
+    record = next(iter(repository._by_slot.values()))
+    assert captured.value.code == "external_effect.deadline_exceeded"
+    assert record.outcome is EffectOutcome.FAILED_BEFORE_EFFECT
+    assert record.replay_decision is ReplayDecision.STOP
+    assert record.error_code == "deadline_exceeded"
+    assert record.provider_started_at is None
+    assert adapter.provider.call_count == 0
+
+
+def test_expired_task_deadline_blocks_read_only_provider_slot(
+    monkeypatch,
+) -> None:
+    repository = InMemoryEffectAttemptRepository()
+    monkeypatch.setattr(
+        external_effect_module,
+        "time",
+        SimpleNamespace(monotonic=lambda: 10.0),
+        raising=False,
+    )
+    executor = ExternalEffectExecutor(
+        repository=repository,
+        task_deadline=lambda: 10.0,
+    )
+
+    with pytest.raises(ExternalEffectError) as captured:
+        executor.guard_read_only_slot(context=_context())
+
+    assert captured.value.code == "external_effect.deadline_exceeded"
+    assert captured.value.retryable is False
 
 
 def test_repository_lookup_failure_uses_claim_wait_without_provider_call() -> None:

@@ -17,7 +17,9 @@ from apps.shared.domain.workflow_node_location import (
     WorkflowNodeLocationError,
 )
 from apps.shared.domain.public_chat_history import (
+    MAX_PUBLIC_CHAT_CONTEXT_TOKENS,
     PublicChatHistoryError,
+    bound_public_chat_history_projection,
     normalize_public_chat_history,
 )
 from apps.shared.db.models.llm import LLMModel
@@ -2353,7 +2355,7 @@ class LLMNode(Node[LLMNodeData]):
             raise NonRetryableWorkflowError(error.code) from None
 
         sanitized_history: list[dict[str, str]] = []
-        redacted_lines = 0
+        redacted_lines_by_message: list[int] = []
         for message in normalized:
             sanitized_content, message_redacted_lines = sanitize_untrusted_text(
                 message["content"]
@@ -2361,9 +2363,58 @@ class LLMNode(Node[LLMNodeData]):
             sanitized_history.append(
                 {"role": message["role"], "content": sanitized_content}
             )
-            redacted_lines += message_redacted_lines
+            redacted_lines_by_message.append(message_redacted_lines)
+
+        raw_budget = self.execution_context.get(
+            "public_chat_history_token_budget",
+            MAX_PUBLIC_CHAT_CONTEXT_TOKENS,
+        )
+        if (
+            isinstance(raw_budget, bool)
+            or not isinstance(raw_budget, int)
+            or raw_budget < 0
+            or raw_budget > MAX_PUBLIC_CHAT_CONTEXT_TOKENS
+        ):
+            raise NonRetryableWorkflowError("conversation.token_count_unavailable")
+
+        def project(candidate: tuple[dict[str, str], ...]) -> str:
+            dropped_message_count = len(sanitized_history) - len(candidate)
+            return self._frame_client_conversation_history(
+                candidate,
+                redacted_lines=sum(redacted_lines_by_message[dropped_message_count:]),
+            )
+
+        try:
+            bounded_history = bound_public_chat_history_projection(
+                sanitized_history,
+                projection=project,
+                max_projection_tokens=raw_budget,
+            )
+        except PublicChatHistoryError as error:
+            raise NonRetryableWorkflowError(error.code) from None
+
+        dropped_message_count = len(sanitized_history) - len(bounded_history)
         return _SanitizedClientConversation(
-            messages=tuple(sanitized_history),
+            messages=bounded_history,
+            redacted_lines=sum(redacted_lines_by_message[dropped_message_count:]),
+        )
+
+    @staticmethod
+    def _frame_client_conversation_history(
+        messages: tuple[dict[str, str], ...],
+        *,
+        redacted_lines: int,
+    ) -> str:
+        if not messages:
+            return ""
+        history_text = json.dumps(
+            messages,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        return frame_sanitized_untrusted_context_block(
+            history_text,
+            label="CLIENT_CONVERSATION_HISTORY",
             redacted_lines=redacted_lines,
         )
 
@@ -2373,17 +2424,8 @@ class LLMNode(Node[LLMNodeData]):
     ) -> list[dict[str, str]]:
         if client_conversation is None:
             client_conversation = self._sanitized_client_conversation()
-        if not client_conversation.messages:
-            return []
-
-        history_text = json.dumps(
+        history_block = self._frame_client_conversation_history(
             client_conversation.messages,
-            ensure_ascii=False,
-            separators=(",", ":"),
-        )
-        history_block = frame_sanitized_untrusted_context_block(
-            history_text,
-            label="CLIENT_CONVERSATION_HISTORY",
             redacted_lines=client_conversation.redacted_lines,
         )
         if not history_block:

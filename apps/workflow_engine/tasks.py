@@ -23,6 +23,10 @@ from apps.shared.domain.public_chat_conversation import (
     PublicChatConversationContractError,
     resolve_public_chat_conversation_contract,
 )
+from apps.shared.domain.public_chat_history import (
+    PublicChatHistoryError,
+    remaining_public_chat_history_tokens,
+)
 from apps.shared.domain.schedule_dispatch import (
     REASON_EXECUTION_FAILED_AFTER_ADMISSION,
     REASON_EXECUTION_OUTCOME_UNKNOWN,
@@ -545,6 +549,7 @@ def _canonical_deployed_graph_execution_context(
     for key in (
         "execution_actor",
         "public_chat_history_consumer_ref",
+        "public_chat_history_token_budget",
         "public_chat_stateless_compatibility",
         "suppress_content_persistence",
     ):
@@ -655,6 +660,10 @@ def execute_workflow(
 
         history_reference = execution_context.pop("public_chat_history_ref", None)
         if history_reference is not None:
+            try:
+                history_token_budget = remaining_public_chat_history_tokens(user_input)
+            except PublicChatHistoryError as error:
+                raise NonRetryableWorkflowError(error.code) from None
             _enforce_public_request_deadline(execution_context)
             try:
                 public_chat_history = consume_public_chat_history(history_reference)
@@ -668,6 +677,7 @@ def execute_workflow(
             execution_context["public_chat_history"] = [
                 dict(message) for message in public_chat_history
             ]
+            execution_context["public_chat_history_token_budget"] = history_token_budget
 
         _enforce_public_request_deadline(execution_context)
 

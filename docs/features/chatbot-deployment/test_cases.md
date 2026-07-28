@@ -28,6 +28,7 @@ Public Chatbot은 bounded client-held history 계약을 검증한다. `memory_mo
 - Public history는 system message 뒤, 현재 user prompt 앞에 untrusted block으로 삽입되고 legacy `WorkflowRun` memory 조회를 하지 않는다.
 - Gateway가 허용한 4,000자 초과 message도 generic structured-value cutoff로 잘리지 않으며 prompt-injection/secret-like 정제는 유지한다.
 - History content는 한 번 정제한 projection을 provider block과 RAG 검색어에 공유하며, redaction marker 재검사로 정상 turn을 함께 지우지 않는다.
+- 정제 marker와 JSON/untrusted framing이 raw history보다 길어져도 Worker가 current inputs의 exact-token 잔여 예산 안에서 가장 오래된 완료 pair만 제거하며 provider와 RAG가 동일한 최종 projection을 사용한다.
 - RAG follow-up은 현재 질문과 가장 최근 완료 pair를 1,000자 안에서 검색어에 포함하고 오래된 초과 pair를 제외한다. History가 없으면 현재 질문 검색어가 바뀌지 않으며 candidate·authorization 결과도 동일하다.
 - authenticated legacy `conversation_id`가 있으면 `_build_memory_summary`의 기존 격리 query를 유지하고, `memory_mode`가 꺼져 있으면 조회하지 않는다.
 
@@ -63,6 +64,7 @@ Public Chatbot은 bounded client-held history 계약을 검증한다. `memory_mo
 
 - `POST /deployments`에 `type: "chatbot"`으로 배포 생성 → 활성 배포 및 `url_slug` 반환.
 - `POST /deployments`에 `type: "chatbot"`, `is_active=true`, private KB RAG 후보가 있으면 `409 deployment.preflight.blocked`를 반환한다.
+- Strict rollout에서 consumer mapping 없는 legacy Public Chatbot toggle 활성화는 `422 conversation.consumer_mapping_required`로 실패하고 deployment/App/schedule/commit 상태를 바꾸지 않는다. Valid mapping은 활성화되고 Compatibility rollout은 legacy 활성화를 허용한다.
 - `GET /deployments/{deployment_id}/run-info`는 workflow `execute` 권한을 요구하고, active organization scope가 app organization과 다르면 404를 반환한다.
 - `POST /deployments/{deployment_id}/run`은 workflow `execute` 권한을 요구하고, `inputs`가 object가 아니면 400을 반환한다.
 - `POST /deployments/{deployment_id}/run`은 `application/json`만 허용하고 Content-Type 누락, `text/plain`, form-urlencoded, multipart 요청을 415로 거부하며 실행 service를 호출하지 않는다.
@@ -156,3 +158,5 @@ Public Chatbot은 bounded client-held history 계약을 검증한다. `memory_mo
 - Invalid legacy control은 budget/migration/publish 전에 zero-write로 거부한다.
 - Tokenizer failure는 휴리스틱 없이 422로 종료한다.
 - Celery task에는 raw history 대신 opaque reference만 있고 Worker가 600초 TTL history를 한 번만 소비한다. Celery expires와 Worker absolute deadline은 동일 요청 lifetime을 강제하고 stale queue task는 external I/O 전에 종료한다.
+- 공통 external-effect deadline은 HTTP/Slack/GitHub write와 read-only HTTP/GitHub를 모두 provider 호출 전에 차단하며 claim 뒤 만료는 failed-before-effect/stop terminal record를 남긴다.
+- Queue의 forged history token budget은 Worker가 버리고 canonical current inputs로 계산한 exact-token 잔여 예산만 LLM consumer에 전달한다.

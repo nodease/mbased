@@ -1737,6 +1737,7 @@ class DeploymentService:
         *,
         runtime_policy: DeploymentRuntimePolicy,
         user_id: uuid.UUID | str | None = None,
+        require_public_chat_conversation_contract: bool = False,
         auth_secret_lifecycle_mutations_enabled: bool = False,
     ) -> WorkflowDeployment:
         """
@@ -1803,6 +1804,12 @@ class DeploymentService:
                         ),
                     },
                 )
+            DeploymentService.validate_public_chat_conversation_config(
+                deployment_type=deployment.type,
+                config=getattr(deployment, "config", None),
+                graph_snapshot=deployment.graph_snapshot,
+                required=require_public_chat_conversation_contract,
+            )
             try:
                 WorkflowService.validate_mail_credential_references(
                     db,

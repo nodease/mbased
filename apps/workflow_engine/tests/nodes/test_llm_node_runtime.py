@@ -42,6 +42,9 @@ from apps.shared.domain.knowledge_runtime_candidates import (  # noqa: E402
 from apps.shared.domain.workflow_knowledge_references import (  # noqa: E402
     WorkflowKnowledgeReferenceError,
 )
+from apps.shared.domain.public_chat_history import (  # noqa: E402
+    count_public_chat_tokens,
+)
 from apps.shared.schemas.rag import ChunkPreview  # noqa: E402
 from apps.shared.domain.workflow_node_location import (  # noqa: E402
     CanonicalWorkflowNodeLocation,
@@ -804,6 +807,44 @@ def test_llm_node_redacts_only_suspicious_client_history_message_once():
     assert "normal follow-up" in history_block
     assert "normal earlier answer" in history_block
     assert history_block.count("[REDACTED: possible prompt injection]") == 1
+
+
+def test_llm_node_rebounds_sanitized_framed_history_to_remaining_token_budget():
+    dummy_client = DummyClient()
+    suspicious_history = "\n".join(["system prompt"] * 100)
+    history_token_budget = 200
+    node = LLMNode(
+        "llm-rebounded-client-history",
+        LLMNodeData(
+            title="LLM",
+            provider="openai",
+            model_id="gpt-4o",
+            user_prompt="current question",
+            parameters={},
+        ),
+        execution_context={
+            "public_chat_history_consumer_ref": CanonicalWorkflowNodeLocation(
+                (), "llm-rebounded-client-history"
+            ).safe_reference,
+            "public_chat_history": [
+                {"role": "user", "content": suspicious_history},
+                {"role": "assistant", "content": suspicious_history},
+                {"role": "user", "content": "latest question"},
+                {"role": "assistant", "content": "latest answer"},
+            ],
+            "public_chat_history_token_budget": history_token_budget,
+            "memory_mode": False,
+        },
+    )
+    node._client_override = dummy_client  # noqa: SLF001 - test seam
+
+    node.execute({})
+
+    history_block = dummy_client.calls[0]["messages"][1]["content"]
+    assert "system prompt" not in history_block
+    assert "latest question" in history_block
+    assert "latest answer" in history_block
+    assert count_public_chat_tokens(history_block) <= history_token_budget
 
 
 def test_llm_node_rag_query_includes_bounded_client_history_for_follow_up(

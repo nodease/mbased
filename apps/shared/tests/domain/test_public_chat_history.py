@@ -4,7 +4,10 @@ from apps.shared.domain.public_chat_history import (
     MAX_PUBLIC_CHAT_TURNS,
     PublicChatHistoryError,
     bound_public_chat_history,
+    bound_public_chat_history_projection,
+    count_public_chat_tokens,
     normalize_public_chat_history,
+    remaining_public_chat_history_tokens,
 )
 
 
@@ -153,3 +156,35 @@ def test_bound_public_chat_history_rejects_when_strict_tokenizer_is_unavailable(
             [],
             current_inputs={"question": "한국어 질문"},
         )
+
+
+def test_remaining_public_chat_history_tokens_uses_exact_current_input_count():
+    remaining = remaining_public_chat_history_tokens(
+        {"question": "now"},
+        token_counter=lambda text: len(text),
+        max_context_tokens=100,
+    )
+
+    assert remaining == 82
+
+
+def test_bound_public_chat_projection_drops_only_oldest_complete_turns():
+    history = [*_turn(1), *_turn(2), *_turn(3)]
+
+    bounded = bound_public_chat_history_projection(
+        history,
+        projection=lambda messages: "|".join(
+            f"{message['role']}:{message['content']}" for message in messages
+        ),
+        token_counter=lambda text: len(text),
+        max_projection_tokens=75,
+    )
+
+    assert bounded == tuple([*_turn(2), *_turn(3)])
+    assert (
+        count_public_chat_tokens(
+            "|".join(f"{message['role']}:{message['content']}" for message in bounded),
+            token_counter=lambda text: len(text),
+        )
+        <= 75
+    )

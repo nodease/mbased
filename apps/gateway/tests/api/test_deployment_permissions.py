@@ -1,6 +1,7 @@
 import asyncio
 import uuid
 from types import SimpleNamespace
+from unittest.mock import Mock
 
 import pytest
 from fastapi import FastAPI, HTTPException
@@ -182,6 +183,78 @@ def test_get_deployments_accepts_equivalent_workflow_uuid_text(monkeypatch):
     )
 
     assert result == ["deployment"]
+
+
+def test_toggle_deployment_passes_strict_public_conversation_contract(
+    monkeypatch,
+):
+    deployment_id = uuid.uuid4()
+    workflow_id = uuid.uuid4()
+    current_user = SimpleNamespace(id=uuid.uuid4())
+    app = SimpleNamespace(id=uuid.uuid4())
+    deployment = SimpleNamespace(id=deployment_id)
+    captured = {}
+    scheduler = object()
+
+    monkeypatch.setattr(
+        deployment_endpoint,
+        "_deployment_app_and_workflow_id",
+        lambda *_args, **_kwargs: (deployment, app, workflow_id),
+    )
+    monkeypatch.setattr(
+        deployment_endpoint,
+        "ensure_workflow_permission",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        deployment_endpoint,
+        "_deployment_toggle_audit_action",
+        lambda *_args, **_kwargs: "deployment.toggle",
+    )
+    monkeypatch.setattr(
+        deployment_endpoint,
+        "_deployment_audit_actor",
+        lambda *_args, **_kwargs: object(),
+    )
+    monkeypatch.setattr(deployment_endpoint, "set_current_actor", lambda _actor: "t")
+    monkeypatch.setattr(deployment_endpoint, "clear_current_actor", lambda _token: None)
+    monkeypatch.setattr(
+        deployment_endpoint,
+        "_record_deployment_toggle_audit",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        "apps.gateway.services.scheduler_service.get_scheduler_service",
+        lambda: scheduler,
+    )
+    monkeypatch.setattr(
+        deployment_endpoint.settings,
+        "PUBLIC_CHAT_CONVERSATION_ROLLOUT_MODE",
+        "strict",
+    )
+
+    def toggle(*args, **kwargs):
+        captured["args"] = args
+        captured["kwargs"] = kwargs
+        return deployment
+
+    monkeypatch.setattr(
+        deployment_endpoint.DeploymentService,
+        "toggle_deployment",
+        Mock(side_effect=toggle),
+    )
+
+    result = deployment_endpoint.toggle_deployment(
+        str(deployment_id),
+        request=SimpleNamespace(),
+        runtime_policy=DEFAULT_DEPLOYMENT_RUNTIME_POLICY,
+        db=object(),
+        current_user=current_user,
+    )
+
+    assert result is deployment
+    assert captured["args"][2] is scheduler
+    assert captured["kwargs"]["require_public_chat_conversation_contract"] is True
 
 
 def test_preview_deployment_preflight_authorizes_deploy_and_returns_result(monkeypatch):
@@ -498,6 +571,7 @@ def test_public_deployment_info_policy_is_replaceable_at_fastapi_composition_bou
     test_app.dependency_overrides[deployment_endpoint.get_db] = lambda: FilteringModelDb(
         [app, deployment]
     )
+
     test_app.dependency_overrides[get_deployment_runtime_policy] = lambda: injected_policy
 
     response = TestClient(test_app).get(

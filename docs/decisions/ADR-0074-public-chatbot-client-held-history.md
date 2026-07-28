@@ -222,3 +222,44 @@ LLMNode는 Gateway가 검증·bound한 history의 각 content를 정확히 한 �
 - Public provider 호출을 서버에서 자동 replay해야 하는 요구가 생기면 일회성 GET+DELETE를 완화하지 말고 별도 lease/ack, idempotency와 expiry protocol을 ADR로 검토한다.
 - 새 nested container type을 지원할 때 Client 순회와 Shared canonical location parser를 같은 계약 테스트로 확장한다.
 - content suppression과 deadline은 child graph에서도 유지되지만 raw public history가 child provider/RAG에 도달하지 않는지 회귀 테스트한다.
+
+## Implementation Decision: Final projection, common deadline and strict reactivation
+
+### Context
+
+Gateway가 raw history를 4,096 token 안으로 줄여도 prompt-injection 정제 marker와 JSON/untrusted framing이 원문보다 길어질 수 있다. 또한 Public absolute deadline 검사는 LLM/Knowledge 경로에만 있었기 때문에 늦게 실행된 HTTP, Slack, GitHub node는 요청 lifetime 뒤 외부 I/O를 시작할 수 있었다. Strict rollout의 consumer mapping 검증도 create/preflight에는 있었지만 기존 inactive deployment의 toggle 활성화에는 적용되지 않았다.
+
+### Options Considered
+
+- Gateway raw history 검증만 유지: 실제 provider projection이 상한을 넘을 수 있어 선택하지 않는다.
+- LLM과 각 외부 node가 개별 deadline을 구현: node 추가 때 누락과 정책 drift가 반복되므로 선택하지 않는다.
+- Strict 전환 전에 운영자가 legacy deployment를 수동 정리: toggle API가 invalid active state를 만들 수 있어 선택하지 않는다.
+- 최종 projection 재계산, 공통 external-effect deadline guard, activation service의 동일 contract 검증: 기존 정책을 실제 소비·상태 전이 경계에 한 번씩 적용하므로 선택한다.
+
+### Final Decision
+
+1. Worker는 canonical current inputs를 exact tokenizer로 다시 계산해 Public history의 잔여 token budget을 만든다. Queue의 같은 이름 metadata는 신뢰하지 않고 제거한다.
+2. 선택된 LLM consumer는 각 history leaf를 정제한 뒤 JSON serialization과 `CLIENT_CONVERSATION_HISTORY` framing까지 완료한 최종 projection을 exact tokenizer로 계산한다. 잔여 예산을 넘으면 가장 오래된 완료 user/assistant pair를 제거하며 pair를 부분 절단하지 않는다. Provider prompt와 RAG query는 이 동일한 bounded projection을 공유한다.
+3. `ExternalEffectExecutor`는 공통 monotonic task deadline을 effect claim 전과 provider invoke 직전에 검사한다. Claim 뒤 만료는 `FAILED_BEFORE_EFFECT`, `STOP`, safe `external_effect.deadline_exceeded`로 terminalize하고 provider를 호출하지 않는다. Read-only HTTP/GitHub 경로도 공통 guard를 통과한다.
+4. Strict rollout에서 deployment toggle 활성화는 persisted config와 graph snapshot의 `public_chat_conversation.v1` consumer mapping을 knowledge, secret, schedule과 active pointer 변경 전에 검증한다. Legacy/malformed mapping은 content-free `422 conversation.*`로 종료하고 deployment/App/schedule/transaction 상태를 바꾸지 않는다. Compatibility rollout은 legacy 재활성화를 계속 허용한다.
+
+### Rationale
+
+Admission 시점의 raw 표현과 실제 소비 시점의 최종 표현을 같은 것으로 가정하지 않는다. Lifetime과 activation 정책도 특정 node나 create endpoint의 부수 조건이 아니라 공통 외부 I/O 및 deployment lifecycle 불변조건으로 적용한다. 이로써 delayed queue 실행, 정제 확장과 legacy 재활성화가 기존 Public 데이터 최소화·bounded context 계약을 우회하지 못한다.
+
+### Affected Files
+
+- `apps/shared/domain/public_chat_history.py`
+- `apps/shared/domain/external_effect_error.py`
+- `apps/workflow_engine/application/external_effect.py`
+- `apps/workflow_engine/tasks.py`
+- `apps/workflow_engine/workflow/nodes/llm/llm_node.py`
+- `apps/gateway/services/deployment_service.py`
+- `apps/gateway/api/v1/endpoints/deployment.py`
+- 관련 Shared, Workflow Engine, Gateway 테스트와 기능 문서
+
+### Follow-up Review Notes
+
+- 새로운 외부 provider node는 write/read 여부와 무관하게 공통 deadline 경계를 우회하지 않는지 검토한다.
+- history sanitizer/framing 형식이 바뀌면 raw admission뿐 아니라 최종 projection exact-token 회귀 테스트를 함께 갱신한다.
+- Strict rollout 전환 검증은 create, preflight와 inactive deployment reactivation 세 상태 전이를 모두 포함한다.

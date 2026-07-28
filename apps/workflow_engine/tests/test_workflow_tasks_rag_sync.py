@@ -11,6 +11,9 @@ from apps.shared.domain.deployment_runtime_policy import (
     DEFAULT_DEPLOYMENT_RUNTIME_POLICY,
     SURFACE_WEBHOOK_RUN,
 )
+from apps.shared.domain.public_chat_history import (
+    remaining_public_chat_history_tokens,
+)
 from apps.shared.domain.workflow_node_location import (
     CanonicalWorkflowNodeLocation,
 )
@@ -315,7 +318,7 @@ def test_deployed_public_chatbot_rebuilds_consumer_mapping_from_snapshot(
 
     result = tasks.execute_workflow.run(
         graph,
-        {},
+        {"question": "current"},
         {
             "workflow_id": str(FakeSession.workflow.id),
             "execution_id": str(uuid.uuid4()),
@@ -324,6 +327,7 @@ def test_deployed_public_chatbot_rebuilds_consumer_mapping_from_snapshot(
             "trigger_mode": "app",
             "public_chat_history_ref": "b" * 32,
             "public_chat_history_consumer_ref": forged_ref,
+            "public_chat_history_token_budget": 4096,
             "public_request_deadline_at": (
                 datetime.now(timezone.utc) + timedelta(minutes=1)
             ).isoformat(),
@@ -338,6 +342,9 @@ def test_deployed_public_chatbot_rebuilds_consumer_mapping_from_snapshot(
     )
     assert context["execution_actor"] == {"type": "public"}
     assert "public_chat_history_ref" not in context
+    assert context["public_chat_history_token_budget"] == (
+        remaining_public_chat_history_tokens({"question": "current"})
+    )
     assert lifecycle_events == ["validated", "consumed"]
 
 

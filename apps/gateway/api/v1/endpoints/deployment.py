@@ -905,6 +905,9 @@ def toggle_deployment(
             scheduler,
             runtime_policy=runtime_policy,
             user_id=current_user.id,
+            require_public_chat_conversation_contract=(
+                settings.PUBLIC_CHAT_CONVERSATION_ROLLOUT_MODE == "strict"
+            ),
             auth_secret_lifecycle_mutations_enabled=(
                 settings.APP_AUTH_SECRET_LIFECYCLE_MODE == "active"
             ),
