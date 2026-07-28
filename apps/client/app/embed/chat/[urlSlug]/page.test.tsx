@@ -149,4 +149,89 @@ describe('EmbedChatPage deployment transition', () => {
       }
     },
   );
+
+  it('falls back once without history when a mixed Gateway does not support /chat', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        jsonResponse(deploymentInfo(1, 'client_history_v1')),
+      )
+      .mockResolvedValueOnce(jsonResponse({ detail: 'Not Found' }, 404))
+      .mockResolvedValueOnce(
+        jsonResponse({
+          status: 'success',
+          results: { answer: 'Legacy fallback answer' },
+        }),
+      );
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<EmbedChatPage />);
+
+    expect(
+      await screen.findByRole('heading', { name: 'Public chatbot v1' }),
+    ).toBeVisible();
+
+    fireEvent.change(screen.getByRole('textbox'), {
+      target: { value: 'Mixed gateway question' },
+    });
+    fireEvent.click(screen.getByRole('button'));
+
+    expect(await screen.findByText('Legacy fallback answer')).toBeVisible();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(
+      '/api/v1/run-public/public-chat/chat',
+    );
+    expect(fetchMock.mock.calls[2]?.[0]).toBe(
+      '/api/v1/run-public/public-chat',
+    );
+
+    const historyRequestBody = JSON.parse(
+      String(fetchMock.mock.calls[1]?.[1]?.body),
+    ) as Record<string, unknown>;
+    expect(historyRequestBody).toEqual({
+      inputs: { question: 'Mixed gateway question' },
+      deployment_version: 1,
+      conversation: { history: [] },
+    });
+
+    const fallbackRequestBody = JSON.parse(
+      String(fetchMock.mock.calls[2]?.[1]?.body),
+    ) as Record<string, unknown>;
+    expect(fallbackRequestBody).toEqual({
+      inputs: { question: 'Mixed gateway question' },
+      deployment_version: 1,
+    });
+    expect(fallbackRequestBody).not.toHaveProperty('conversation');
+    expect(fallbackRequestBody).not.toHaveProperty('memory_mode');
+    expect(fallbackRequestBody).not.toHaveProperty('conversation_id');
+  });
+
+  it('does not loop when the one legacy fallback also returns 404', async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        jsonResponse(deploymentInfo(1, 'client_history_v1')),
+      )
+      .mockResolvedValueOnce(jsonResponse({ detail: 'Not Found' }, 404))
+      .mockResolvedValueOnce(jsonResponse({ detail: 'Not Found' }, 404));
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<EmbedChatPage />);
+
+    expect(
+      await screen.findByRole('heading', { name: 'Public chatbot v1' }),
+    ).toBeVisible();
+
+    fireEvent.change(screen.getByRole('textbox'), {
+      target: { value: 'Unavailable mixed gateway question' },
+    });
+    fireEvent.click(screen.getByRole('button'));
+
+    expect(
+      await screen.findByText(
+        '요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.',
+      ),
+    ).toBeVisible();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+  });
 });

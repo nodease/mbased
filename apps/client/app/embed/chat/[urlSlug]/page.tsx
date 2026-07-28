@@ -171,13 +171,30 @@ export default function EmbedChatPage() {
           deployment.public_conversation_contract,
           deployment.version,
         );
-        return fetch(publicRequest.path, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(publicRequest.body),
-        });
+        const sendRequest = (request: typeof publicRequest) =>
+          fetch(request.path, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(request.body),
+          });
+        const response = await sendRequest(publicRequest);
+        if (
+          response.status !== 404 ||
+          deployment.public_conversation_contract !== 'client_history_v1'
+        ) {
+          return response;
+        }
+
+        const legacyFallbackRequest = buildPublicConversationRequest(
+          urlSlug,
+          inputs,
+          [],
+          'legacy_v0',
+          deployment.version,
+        );
+        return sendRequest(legacyFallbackRequest);
       };
 
       let activeDeployment = deploymentInfo;

@@ -456,3 +456,4 @@ Disposable PostgreSQL evidence는 `NODEASE_RUN_DISPOSABLE_DB_TEST=1`인 전용 C
 - MEM-TC-BOUND-036: Client는 unsaved LLM consumer와 edge를 포함한 현재 graph의 동일 snapshot을 deployment preflight와 create에 전달한다.
 - MEM-TC-BOUND-037: task deadline이 만료된 File Extraction 진입 노드는 remote fetch를 포함한 node 실행을 시작하지 않고 non-retryable `external_effect.deadline_exceeded`로 종료한다.
 - MEM-TC-BOUND-038: Strict mode의 active browser-access revision은 legacy Public Chatbot consumer mapping을 다른 preflight와 mutation 전에 safe 422로 거부하고 rollback하며, inactive staging은 active 전환 전까지 pointer를 바꾸지 않는다.
+- MEM-TC-BOUND-039: `client_history_v1` info 뒤 구 Gateway가 `/chat`을 404로 거부하면 Embed Chat은 같은 current inputs와 version을 `conversation`·legacy memory control 없이 root로 한 번만 재시도하며, fallback root도 404이면 추가 요청 없이 사용자 오류로 종료한다.

@@ -554,3 +554,39 @@ Public conversation consumer는 현재 편집 graph에서 선택되지만 Client
 - 새로운 deployment UI는 preflight와 create에 서로 다른 graph source를 사용하지 않는지 검토한다.
 - 새 node가 direct network/file/provider I/O를 추가해도 공통 deadline 경계를 우회하지 않아야 한다.
 - Public deployment의 신규 activation/revision lifecycle은 strict consumer contract와 active pointer mutation 순서를 함께 검토한다.
+
+## Implementation Decision: 혼합 Gateway 세대의 Public chat route fallback
+
+### Context
+
+Compatibility rolling deployment에서는 구·신 Gateway Pod가 같은 Service 뒤에 동시에 존재할 수 있다. `/info`가 신 Pod의 `client_history_v1` capability를 반환한 뒤 `/chat` POST가 구 Pod에 도달하면 구 버전에는 route가 없어 404가 발생하며, session affinity가 없는 배포에서는 공개 대화가 간헐적으로 중단된다.
+
+### Options Considered
+
+- Gateway Service에 session affinity 적용: capability 조회와 실행이 같은 세대로 간다는 보장이 rollout 인프라 설정에 결합되고 모든 환경에 동일하게 적용하기 어려워 선택하지 않는다.
+- `/chat` 404를 즉시 사용자 오류로 종료: 정상 rolling deployment에서 높은 확률로 가용성 단절을 만들므로 선택하지 않는다.
+- 모든 `/chat` 실패를 legacy root로 재시도: application error와 과부하까지 중복 요청할 수 있어 선택하지 않는다.
+- `client_history_v1` 요청의 404에만 history-free root를 한 번 시도: 구 route 미지원에 한정해 호환성을 복구하고 반복 실행을 제한하므로 선택한다.
+
+### Final Decision
+
+1. Embed Chat은 `client_history_v1`으로 만든 `/chat` 요청이 404일 때만 legacy root 요청을 정확히 한 번 보낸다.
+2. Fallback은 같은 current inputs와 `deployment_version`을 유지하지만 `conversation`, `memory_mode`, `conversation_id`를 보내지 않는다.
+3. Legacy root의 실패에는 다시 fallback하지 않으며 `/chat`의 404 외 status는 기존 처리 계약을 유지한다.
+4. Deployment version 409는 기존처럼 info를 no-store로 갱신하고 이전 history를 폐기한 뒤 현재 입력을 한 번 재시도한다. 갱신된 capability가 `client_history_v1`이고 그 `/chat`이 구 Pod의 404를 받는 경우에도 동일한 1회 fallback을 적용한다.
+
+### Rationale
+
+404 route mismatch는 rolling deployment 중 transport generation 차이에서 발생한다. Client가 전송하는 fallback을 history-free로 제한하면 구 Gateway 계약과 호환되면서 익명 대화 원문 전체를 legacy 경로에 전달하지 않는다. 비재귀 1회 처리로 실제 deployment/application 404에서도 요청 폭증이나 무한 재시도를 방지한다.
+
+### Affected Files
+
+- `apps/client/app/embed/chat/[urlSlug]/page.tsx`
+- `apps/client/app/embed/chat/[urlSlug]/page.test.tsx`
+- Chatbot Deployment와 Conversation Memory requirements/component/test case 문서
+
+### Follow-up Review Notes
+
+- Compatibility mode 제거 시 active Client cache와 구 Gateway Pod가 모두 사라진 뒤 fallback 제거 여부를 검토한다.
+- Public route status 계약이 바뀌면 404가 route 미지원 외 application 오류를 포함하는지 다시 검토한다.
+- Gateway routing에 capability generation affinity를 도입하면 Client fallback과 중복되지 않는지 확인한다.
