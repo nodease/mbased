@@ -116,6 +116,9 @@ Auth는 보호된 Gateway API가 `auth_token` 쿠키에서 현재 사용자를 �
 - AUTH-REQ-090: 같은 origin/scope의 동일한 rejected token을 사용한 동시 안전 요청은 token cache generation을 한 번만 폐기하고 하나의 refresh bootstrap을 공유해야 한다. 늦게 도착한 동일 token의 `403`이 이미 시작한 refresh를 무효화하거나 정상 요청 하나를 실패시켜서는 안 된다.
 - AUTH-REQ-091: 외부 `X-Request-ID`는 canonical RFC 4122 UUID만 보존하고 다른 값은 서버 생성 UUID로 대체해야 한다. Token, PII 또는 임의 header 원문을 응답, audit와 log의 request ID로 반사하지 않아야 한다.
 - AUTH-REQ-092: CSRF 거부 audit/metric callback의 동기 DB 또는 I/O 작업은 Gateway event loop 밖의 전용 bounded thread 경계에서 수행해야 한다. Callback 실패는 고정 `401/403` 계약을 바꾸지 않아야 한다.
+- AUTH-REQ-093: Workflow 또는 다른 보호 리소스의 authoritative organization을 알고 있는 direct-fetch consumer는 같은 organization ID를 request body와 `X-Organization-Id`에 명시해야 한다. Ambient active organization과 리소스 organization이 다를 때 token scope가 ambient 값으로 대체되어서는 안 된다.
+- AUTH-REQ-094: Bootstrap의 `X-Organization-Id`가 128자를 넘거나 제어 문자를 포함하면 token 발급, DB 접근과 cookie 변경 전에 `organization_scope_invalid` bounded reason의 고정 `403 auth.csrf_validation_failed`로 닫아야 한다.
+- AUTH-REQ-095: Middleware mutation 거부, bootstrap proof/scope 거부와 invalid-session 감사 callback은 하나의 process-shared 전용 capacity limiter를 사용해야 한다. Bootstrap 거부 폭주가 공용 sync worker 또는 DB connection concurrency를 점유해서는 안 된다.
 
 ## Policies And Edge Cases
 

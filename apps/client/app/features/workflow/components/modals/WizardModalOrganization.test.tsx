@@ -35,6 +35,12 @@ const lastPostBody = () => {
   return JSON.parse(String(postCall?.init?.body));
 };
 
+const lastPostOrganizationId = () => {
+  const postCall = fetchCalls().find((call) => call.init?.method === 'POST');
+  expect(postCall).toBeTruthy();
+  return new Headers(postCall?.init?.headers).get('X-Organization-Id');
+};
+
 const createFetchMock = () =>
   vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
     if (init?.method === 'POST') {
@@ -99,6 +105,7 @@ describe('Wizard modals organization scope', () => {
     expect(lastPostBody()).toMatchObject({
       organization_id: activeOrganizationId,
     });
+    expect(lastPostOrganizationId()).toBe(activeOrganizationId);
   });
 
   it('falls back to stored active organization when organizationId prop is omitted', async () => {
@@ -170,6 +177,7 @@ describe('Wizard modals organization scope', () => {
     expect(lastPostBody()).toMatchObject({
       organization_id: activeOrganizationId,
     });
+    expect(lastPostOrganizationId()).toBe(activeOrganizationId);
   });
 
   it('passes organizationId prop to template wizard check and improve requests', async () => {
@@ -202,6 +210,7 @@ describe('Wizard modals organization scope', () => {
     expect(lastPostBody()).toMatchObject({
       organization_id: activeOrganizationId,
     });
+    expect(lastPostOrganizationId()).toBe(activeOrganizationId);
   });
 
   it('rechecks credentials when prompt wizard organizationId changes', async () => {

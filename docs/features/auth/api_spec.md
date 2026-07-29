@@ -29,7 +29,7 @@ Status: Draft
 | `X-CSRF-Bootstrap: 1` | Browser script가 의도적으로 token을 요청했음을 증명한다. 단순 image/navigation GET에는 이 header가 없어 발급 전에 거부된다. |
 | `Origin` / `Sec-Fetch-Site` | 교차 출처 요청은 `CORS_ORIGINS` exact Origin을 요구한다. Origin이 생략된 same-origin GET은 `Sec-Fetch-Site: same-origin`이어야 한다. 존재하는 Fetch Metadata의 `cross-site` 값은 거부한다. |
 | `auth_token` cookie | 존재하면 유효한 활성 사용자 session인지 검증하고 token을 그 cookie에 결박한다. Invalid 또는 inactive session은 `401 auth.invalid`과 삭제 Set-Cookie를 반환하며 anonymous로 같은 응답에서 전환하지 않는다. |
-| `X-Organization-Id` | 존재하면 token MAC의 active organization scope에 포함한다. 없으면 account scope를 사용한다. |
+| `X-Organization-Id` | 존재하면 token MAC의 active organization scope에 포함한다. 없으면 account scope를 사용한다. 128자를 넘거나 제어 문자를 포함하면 발급 전에 거부한다. |
 | `csrf_anon_seed` cookie | auth cookie가 없을 때 유효한 random seed를 재사용하며, 없거나 malformed이면 새 seed를 발급한다. |
 
 성공 응답: `200 OK`.
@@ -41,7 +41,7 @@ Status: Draft
 }
 ```
 
-응답은 같은 token을 host-only HttpOnly `csrf_token` cookie로 설정한다. Anonymous bootstrap은 host-only HttpOnly `csrf_anon_seed`도 설정한다. `Cache-Control: no-store`, `Pragma: no-cache`가 필수다. Token은 ASCII `v1.expiry.nonce.mac` 형식이며 auth cookie, user와 organization 원문을 포함하지 않는다. 비ASCII token은 equality 비교 전에 `token_invalid`로 닫고, equality를 통과한 비정규 token은 canonical parsing에서 `token_invalid`로 닫는다. Header/Origin/Fetch Metadata 검증 실패는 cookie를 설정하거나 회전시키지 않고 `403 auth.csrf_validation_failed`를 반환한다.
+응답은 같은 token을 host-only HttpOnly `csrf_token` cookie로 설정한다. Anonymous bootstrap은 host-only HttpOnly `csrf_anon_seed`도 설정한다. `Cache-Control: no-store`, `Pragma: no-cache`가 필수다. Token은 ASCII `v1.expiry.nonce.mac` 형식이며 auth cookie, user와 organization 원문을 포함하지 않는다. 비ASCII token은 equality 비교 전에 `token_invalid`로 닫고, equality를 통과한 비정규 token은 canonical parsing에서 `token_invalid`로 닫는다. Header/Origin/Fetch Metadata 검증과 organization scope 형식 검증 실패는 cookie를 설정하거나 회전시키지 않고 `403 auth.csrf_validation_failed`를 반환한다. Scope 형식 실패의 내부 reason은 `organization_scope_invalid`이며 원문은 감사에 기록하지 않는다.
 
 `X-Request-ID`는 canonical RFC 4122 UUID만 보존한다. 다른 값은 서버가 생성한 UUID로 대체하며 입력 원문을 응답이나 CSRF 감사 metadata에 복사하지 않는다.
 

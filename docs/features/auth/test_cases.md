@@ -152,6 +152,9 @@ Status: Draft
 | AUTH-TC-CS029 | CSRF 감사 request ID는 token/PII header를 반사하지 않아야 한다. | 유효한 CSRF token 또는 임의 문자열을 `X-Request-ID`에도 넣고 거부를 유도한다. | 응답과 audit에는 새 canonical UUID만 있고 입력 원문은 없음. |
 | AUTH-TC-CS030 | 동기 CSRF 거부 감사 persistence는 event loop를 점유하지 않아야 한다. | Sync callback에서 DB/I/O 대기를 모사하고 callback thread를 기록한다. | Callback은 bounded worker thread에서 실행되고 고정 403 계약 유지. |
 | AUTH-TC-CS031 | Auth API endpoint 행은 endpoint inventory에만 있어야 한다. | `/auth/csrf` endpoint 행을 field/cookie/error table에 중복한다. | 문서 구조 테스트 실패; endpoint 행 정확히 1개. |
+| AUTH-TC-CS032 | Wizard mutation의 리소스 organization과 CSRF scope가 일치해야 한다. | LocalStorage는 조직 A지만 Workflow prop은 조직 B인 상태에서 Code/Prompt/Template 요청을 보낸다. | Body와 `X-Organization-Id`가 모두 조직 B이고 bootstrap/token scope도 B. |
+| AUTH-TC-CS033 | Malformed bootstrap organization scope는 고정 CSRF 오류로 닫혀야 한다. | 129자 scope 또는 제어 문자를 포함한 scope로 bootstrap한다. | Token/cookie/DB effect 0, `organization_scope_invalid` 감사와 fixed 403. |
+| AUTH-TC-CS034 | Bootstrap과 middleware 거부 감사는 같은 bounded 실행 경계를 사용해야 한다. | 동기 callback을 동시에 limiter 초과 실행하고 bootstrap request thread를 기록한다. | 동시 callback 최대 4, bootstrap 검증 thread와 audit worker thread 분리, 고정 오류 유지. |
 
 ## Component And Hook Tests
 

@@ -102,6 +102,25 @@ def test_non_ascii_double_submit_tokens_are_rejected_without_exception(
 
 
 @pytest.mark.parametrize(
+    "organization_scope",
+    [
+        "o" * 129,
+        "organization-a\x1f",
+    ],
+)
+def test_invalid_organization_scope_is_rejected_before_token_issue(
+    service: CsrfTokenService,
+    organization_scope: str,
+):
+    with pytest.raises(ValueError, match="Invalid CSRF organization scope"):
+        service.issue(
+            binding_kind=CsrfBindingKind.PRE_AUTH,
+            binding_secret="anonymous-seed",
+            organization_scope=organization_scope,
+        )
+
+
+@pytest.mark.parametrize(
     ("binding_kind", "binding_secret", "organization_scope"),
     [
         (CsrfBindingKind.AUTHENTICATED, "session-b", "organization-a"),

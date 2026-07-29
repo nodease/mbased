@@ -3,8 +3,10 @@ import os
 import re
 import secrets
 from collections.abc import Mapping
+from functools import partial
 from urllib.parse import urlsplit
 
+from anyio import to_thread
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
@@ -20,11 +22,13 @@ from apps.gateway.application.authentication.models import PasswordLoginCommand
 from apps.gateway.application.csrf.bootstrap import (
     validate_csrf_bootstrap_request,
 )
+from apps.gateway.application.csrf.telemetry import run_bounded_csrf_telemetry
 from apps.gateway.application.csrf.token import (
     CSRF_ANON_COOKIE_NAME,
     CSRF_COOKIE_NAME,
     CSRF_ORGANIZATION_HEADER_NAME,
     CsrfBindingKind,
+    CsrfValidationReason,
 )
 from apps.gateway.auth.oauth import oauth
 from apps.gateway.composition.authentication import (
@@ -203,8 +207,34 @@ def _clear_csrf_cookie_family(request: Request, response: Response) -> None:
         )
 
 
+async def _csrf_bootstrap_denied(
+    request: Request,
+    reason: CsrfValidationReason,
+) -> Response:
+    try:
+        await run_bounded_csrf_telemetry(
+            record_csrf_bootstrap_denial,
+            reason,
+            request_id=getattr(request.state, "request_id", None),
+        )
+    except Exception as exc:
+        logger.error(
+            "CSRF bootstrap denial telemetry failed: error_type=%s",
+            type(exc).__name__,
+        )
+    denied_response = error_response(
+        request,
+        403,
+        "auth.csrf_validation_failed",
+        "CSRF validation failed.",
+    )
+    denied_response.headers["Cache-Control"] = "no-store"
+    denied_response.headers["Pragma"] = "no-cache"
+    return denied_response
+
+
 @router.get("/csrf", response_model=CsrfTokenResponse)
-def bootstrap_csrf_token(
+async def bootstrap_csrf_token(
     request: Request,
     response: Response,
     db: Session = Depends(get_db),
@@ -218,45 +248,46 @@ def bootstrap_csrf_token(
         ),
     )
     if bootstrap_denial is not None:
-        try:
-            record_csrf_bootstrap_denial(
-                bootstrap_denial,
-                request_id=getattr(request.state, "request_id", None),
-            )
-        except Exception as exc:
-            logger.error(
-                "CSRF bootstrap denial telemetry failed: error_type=%s",
-                type(exc).__name__,
-            )
-        denied_response = error_response(
-            request,
-            403,
-            "auth.csrf_validation_failed",
-            "CSRF validation failed.",
-        )
-        denied_response.headers["Cache-Control"] = "no-store"
-        denied_response.headers["Pragma"] = "no-cache"
-        return denied_response
+        return await _csrf_bootstrap_denied(request, bootstrap_denial)
+
+    token_service = csrf_token_service()
+    organization_scope = request.headers.get(CSRF_ORGANIZATION_HEADER_NAME)
+    scope_denial = token_service.validate_organization_scope(organization_scope)
+    if scope_denial is not None:
+        return await _csrf_bootstrap_denied(request, scope_denial)
 
     auth_cookie = request.cookies.get("auth_token")
     anonymous_seed: str | None = None
     if auth_cookie:
         # Invalid authentication must never downgrade to an anonymous binding.
         try:
-            AuthService.get_user_from_token(db, auth_cookie)
+            await to_thread.run_sync(
+                AuthService.get_user_from_token,
+                db,
+                auth_cookie,
+            )
         except HTTPException as exc:
             if exc.status_code not in {401, 403}:
                 raise
-            record_audit(
-                action=AuditAction.AUTH_PERMISSION_DENIED,
-                category="action",
-                actor_type="system",
-                status="failure",
-                metadata={
-                    "reason": "auth.csrf_bootstrap_invalid_session",
-                    **_request_meta(request),
-                },
-            )
+            try:
+                await run_bounded_csrf_telemetry(
+                    partial(
+                        record_audit,
+                        action=AuditAction.AUTH_PERMISSION_DENIED,
+                        category="action",
+                        actor_type="system",
+                        status="failure",
+                        metadata={
+                            "reason": "auth.csrf_bootstrap_invalid_session",
+                            **_request_meta(request),
+                        },
+                    )
+                )
+            except Exception as audit_exc:
+                logger.error(
+                    "CSRF invalid-session telemetry failed: error_type=%s",
+                    type(audit_exc).__name__,
+                )
             invalid_response = error_response(
                 request,
                 401,
@@ -285,17 +316,11 @@ def bootstrap_csrf_token(
         binding_kind = CsrfBindingKind.PRE_AUTH
         binding_secret = anonymous_seed
 
-    try:
-        issued = csrf_token_service().issue(
-            binding_kind=binding_kind,
-            binding_secret=binding_secret,
-            organization_scope=request.headers.get(CSRF_ORGANIZATION_HEADER_NAME),
-        )
-    except ValueError:
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid CSRF request context",
-        ) from None
+    issued = token_service.issue(
+        binding_kind=binding_kind,
+        binding_secret=binding_secret,
+        organization_scope=organization_scope,
+    )
 
     _set_csrf_cookie(
         response,

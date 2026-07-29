@@ -12,7 +12,10 @@ import {
   ChevronDown,
   Code,
 } from 'lucide-react';
-import { getStoredActiveOrganizationId } from '@/lib/activeOrganization';
+import {
+  activeOrganizationHeaders,
+  getStoredActiveOrganizationId,
+} from '@/lib/activeOrganization';
 import { csrfFetch } from '@/lib/csrfToken';
 
 // 템플릿 타입 정의
@@ -143,7 +146,10 @@ export function TemplateWizardModal({
       const resolvedOrganizationId = getWizardOrganizationId();
       const res = await csrfFetch('/api/v1/template-wizard/improve', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...activeOrganizationHeaders(resolvedOrganizationId),
+        },
         credentials: 'include',
         body: JSON.stringify({
           template_type: templateType,

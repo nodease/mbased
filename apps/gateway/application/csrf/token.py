@@ -33,6 +33,7 @@ class CsrfValidationReason(str, Enum):
     TOKEN_MISMATCH = "token_mismatch"
     TOKEN_INVALID = "token_invalid"
     TOKEN_EXPIRED = "token_expired"
+    ORGANIZATION_SCOPE_INVALID = "organization_scope_invalid"
     ORIGIN_INVALID = "origin_invalid"
     FETCH_METADATA_INVALID = "fetch_metadata_invalid"
     CONTENT_TYPE_INVALID = "content_type_invalid"
@@ -162,6 +163,9 @@ class CsrfTokenService:
             return CsrfValidationReason.TOKEN_MISMATCH
         if not binding_secret:
             return CsrfValidationReason.TOKEN_INVALID
+        scope_reason = self.validate_organization_scope(organization_scope)
+        if scope_reason is not None:
+            return scope_reason
 
         try:
             version, raw_expiry, raw_nonce, raw_mac = header_token.split(".")
@@ -232,16 +236,27 @@ class CsrfTokenService:
         return hmac.new(self._signing_key, message, hashlib.sha256).digest()
 
     @staticmethod
+    def validate_organization_scope(
+        organization_scope: str | None,
+    ) -> CsrfValidationReason | None:
+        try:
+            CsrfTokenService._normalize_scope(organization_scope)
+        except ValueError:
+            return CsrfValidationReason.ORGANIZATION_SCOPE_INVALID
+        return None
+
+    @staticmethod
     def _normalize_scope(organization_scope: str | None) -> bytes:
         if organization_scope is None:
             return _ACCOUNT_SCOPE
+        if len(organization_scope) > 128 or any(
+            ord(character) < 32 or ord(character) == 127
+            for character in organization_scope
+        ):
+            raise ValueError("Invalid CSRF organization scope")
         normalized = organization_scope.strip()
         if not normalized:
             return _ACCOUNT_SCOPE
-        if len(normalized) > 128 or any(
-            ord(character) < 32 for character in normalized
-        ):
-            raise ValueError("Invalid CSRF organization scope")
         return normalized.encode("utf-8")
 
     @staticmethod

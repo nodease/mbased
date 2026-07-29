@@ -1,3 +1,5 @@
+import threading
+
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
@@ -6,6 +8,7 @@ from apps.gateway.application.csrf.token import (
     CSRF_ANON_COOKIE_NAME,
     CSRF_COOKIE_NAME,
     CsrfTokenService,
+    CsrfValidationReason,
 )
 from apps.gateway.services.auth_service import AuthService
 from apps.shared.db.session import get_db
@@ -165,6 +168,70 @@ def test_untrusted_bootstrap_requests_cannot_rotate_csrf_cookies(monkeypatch):
         assert response.status_code == 403
         assert response.json()["error"]["code"] == "auth.csrf_validation_failed"
         assert response.headers.get_list("set-cookie") == []
+
+
+def test_invalid_organization_scope_uses_fixed_csrf_denial(monkeypatch):
+    recorded_reasons: list[str] = []
+
+    def record_denial(reason, *, request_id):
+        recorded_reasons.append(reason.value)
+
+    monkeypatch.setattr(
+        auth_endpoint,
+        "csrf_token_service",
+        lambda: CsrfTokenService.from_root_secret("csrf-endpoint-test-secret"),
+    )
+    monkeypatch.setattr(
+        auth_endpoint,
+        "record_csrf_bootstrap_denial",
+        record_denial,
+    )
+
+    with _client() as client:
+        response = client.get(
+            "/auth/csrf",
+            headers={
+                **_bootstrap_headers(),
+                "X-Organization-Id": "o" * 129,
+            },
+        )
+
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "auth.csrf_validation_failed"
+    assert response.json()["error"]["message"] == "CSRF validation failed."
+    assert response.headers.get_list("set-cookie") == []
+    assert recorded_reasons == ["organization_scope_invalid"]
+
+
+def test_bootstrap_denial_audit_runs_outside_request_execution_thread(monkeypatch):
+    request_threads: list[int] = []
+    audit_threads: list[int] = []
+
+    def reject_bootstrap(_headers, *, allowed_origins):
+        request_threads.append(threading.get_ident())
+        return CsrfValidationReason.FETCH_METADATA_INVALID
+
+    def record_denial(_reason, *, request_id):
+        audit_threads.append(threading.get_ident())
+
+    monkeypatch.setattr(
+        auth_endpoint,
+        "validate_csrf_bootstrap_request",
+        reject_bootstrap,
+    )
+    monkeypatch.setattr(
+        auth_endpoint,
+        "record_csrf_bootstrap_denial",
+        record_denial,
+    )
+
+    with _client() as client:
+        response = client.get("/auth/csrf")
+
+    assert response.status_code == 403
+    assert request_threads
+    assert audit_threads
+    assert request_threads[0] != audit_threads[0]
 
 
 def test_logout_clears_auth_and_csrf_cookie_families():

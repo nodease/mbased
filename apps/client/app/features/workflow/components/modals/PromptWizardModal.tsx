@@ -10,7 +10,10 @@ import {
   ArrowRight,
   Info,
 } from 'lucide-react';
-import { getStoredActiveOrganizationId } from '@/lib/activeOrganization';
+import {
+  activeOrganizationHeaders,
+  getStoredActiveOrganizationId,
+} from '@/lib/activeOrganization';
 import { csrfFetch } from '@/lib/csrfToken';
 
 interface PromptWizardModalProps {
@@ -109,7 +112,10 @@ export function PromptWizardModal({
       const resolvedOrganizationId = getWizardOrganizationId();
       const res = await csrfFetch('/api/v1/prompt-wizard/improve', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...activeOrganizationHeaders(resolvedOrganizationId),
+        },
         credentials: 'include',
         body: JSON.stringify({
           prompt_type: promptType,

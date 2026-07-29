@@ -13,7 +13,10 @@ import {
 } from 'lucide-react';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
-import { getStoredActiveOrganizationId } from '@/lib/activeOrganization';
+import {
+  activeOrganizationHeaders,
+  getStoredActiveOrganizationId,
+} from '@/lib/activeOrganization';
 import { csrfFetch } from '@/lib/csrfToken';
 
 // 서버 에러 응답 타입 정의 (개선점 1: 에러 스키마 명확화)
@@ -122,7 +125,10 @@ export function CodeWizardModal({
       const resolvedOrganizationId = getWizardOrganizationId();
       const res = await csrfFetch('/api/v1/code-wizard/generate', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...activeOrganizationHeaders(resolvedOrganizationId),
+        },
         credentials: 'include',
         body: JSON.stringify({
           description: description,
