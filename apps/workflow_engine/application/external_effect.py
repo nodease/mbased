@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -180,6 +181,7 @@ class ExternalEffectExecutor:
         payload: Any,
         effect_sequence: int = 0,
     ) -> Any:
+        self._raise_if_deadline_expired(node_id=context.node_id)
         allow_retry = self.retry_available()
         try:
             existing = self.repository.find_by_slot(
@@ -368,6 +370,21 @@ class ExternalEffectExecutor:
                 node_id=context.node_id,
             ) from None
 
+        if self._deadline_expired():
+            terminal = self._finish_attempt(
+                record,
+                outcome=EffectOutcome.FAILED_BEFORE_EFFECT,
+                replay_decision=ReplayDecision.STOP,
+                replay_result=None,
+                provider_status_code=None,
+                error_code="deadline_exceeded",
+                now=self.clock(),
+                allow_retry=allow_retry,
+                terminal_code="external_effect.deadline_exceeded",
+            )
+            self._attach_terminal_trace(adapter, terminal)
+            return self._terminal_result(terminal)
+
         try:
             record = self.repository.mark_in_flight(record, now=self.clock())
         except Exception:
@@ -376,6 +393,20 @@ class ExternalEffectExecutor:
                 node_id=context.node_id,
                 terminal_code="external_effect.claim_wait",
             )
+        if self._deadline_expired():
+            terminal = self._finish_attempt(
+                record,
+                outcome=EffectOutcome.FAILED_BEFORE_EFFECT,
+                replay_decision=ReplayDecision.STOP,
+                replay_result=None,
+                provider_status_code=None,
+                error_code="deadline_exceeded",
+                now=self.clock(),
+                allow_retry=allow_retry,
+                terminal_code="external_effect.deadline_exceeded",
+            )
+            self._attach_terminal_trace(adapter, terminal)
+            return self._terminal_result(terminal)
         try:
             invocation = adapter.invoke_effect(call)
             if not isinstance(invocation, ProviderInvocationResult):
@@ -611,6 +642,7 @@ class ExternalEffectExecutor:
         context: ExternalEffectContext,
         effect_sequence: int = 0,
     ) -> None:
+        self._raise_if_deadline_expired(node_id=context.node_id)
         guard = getattr(self.repository, "guard_read_only_slot", None)
         if callable(guard):
             try:
@@ -623,6 +655,22 @@ class ExternalEffectExecutor:
                     node_id=context.node_id,
                     terminal_code="external_effect.claim_wait",
                 )
+        self._raise_if_deadline_expired(node_id=context.node_id)
+
+    def _deadline_expired(self) -> bool:
+        deadline = self.task_deadline()
+        if isinstance(deadline, bool) or not isinstance(deadline, (int, float)):
+            return False
+        return time.monotonic() >= float(deadline)
+
+    def _raise_if_deadline_expired(self, *, node_id: str) -> None:
+        if not self._deadline_expired():
+            return
+        raise ExternalEffectError(
+            "external_effect.deadline_exceeded",
+            retryable=False,
+            node_id=node_id,
+        )
 
     def _validated_winner_key(self, record: EffectAttemptRecord) -> str | None:
         profile = record.spec.profile

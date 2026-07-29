@@ -295,7 +295,7 @@ def test_non_conversation_authorization_uses_typed_resource_hidden_contract(
     assert application.close.commands == []
 
 
-def test_legacy_public_run_rejects_target_conversation_envelope_before_runtime():
+def test_public_chat_run_rejects_malformed_conversation_envelope_before_runtime():
     app = FastAPI()
     app.include_router(run.router, prefix="/api/v1")
     app.add_middleware(
@@ -309,13 +309,13 @@ def test_legacy_public_run_rejects_target_conversation_envelope_before_runtime()
     app.dependency_overrides[get_db] = lambda: object()
 
     response = TestClient(app).post(
-        "/api/v1/run-public/public-chatbot",
+        "/api/v1/run-public/public-chatbot/chat",
         json={"conversation": {}},
         headers={"Origin": "https://parent.example"},
     )
 
-    assert response.status_code == 503
-    assert response.json()["detail"]["code"] == "memory.feature_unavailable"
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "conversation.envelope_invalid"
     assert response.headers["cache-control"] == "no-store"
     assert response.headers["referrer-policy"] == "no-referrer"
     assert "access-control-allow-origin" not in response.headers

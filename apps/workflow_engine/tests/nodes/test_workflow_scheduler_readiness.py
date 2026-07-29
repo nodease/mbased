@@ -1,6 +1,7 @@
 import gevent
 import pytest
 
+from apps.workflow_engine.domain.external_effect import ExternalEffectError
 from apps.workflow_engine.workflow.core.workflow_engine import WorkflowEngine
 
 
@@ -326,3 +327,38 @@ def test_workflow_timeout_never_starts_downstream_node():
         engine.execute()
 
     assert _starts(events, "downstream") == []
+
+
+def test_expired_task_deadline_blocks_file_fetch_node_before_execution(
+    monkeypatch,
+) -> None:
+    graph = {
+        "nodes": [
+            _node(
+                "extract",
+                "fileExtractionNode",
+                referenced_variables=[],
+            ),
+        ],
+        "edges": [],
+    }
+    events = []
+    engine = WorkflowEngine(
+        graph=graph,
+        is_subworkflow=True,
+        entry_node_id="extract",
+        task_deadline=10.0,
+    )
+    _install_recording_nodes(engine, events)
+    monkeypatch.setattr(
+        "apps.workflow_engine.workflow.core.workflow_engine.time.monotonic",
+        lambda: 10.0,
+    )
+
+    with pytest.raises(ExternalEffectError) as exc_info:
+        engine.execute()
+
+    assert exc_info.value.code == "external_effect.deadline_exceeded"
+    assert exc_info.value.retryable is False
+    assert exc_info.value.node_id == "extract"
+    assert _starts(events, "extract") == []

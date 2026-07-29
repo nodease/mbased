@@ -1,14 +1,14 @@
-"""챗봇 배포 공개 실행 경로의 conversation_id 관통 + 기억모드 강제 계약 테스트.
+"""Public Chatbot client-held history와 authenticated internal Memory 경계 테스트.
 
-docs/features/chatbot-deployment/test_cases.md:
-- 챗봇 배포(DeploymentType.CHATBOT)는 클라이언트 값과 무관하게 memory_mode를 강제 ON.
-- inputs 안의 conversation_id / memory_mode는 dispatch 전에 pop되어 워크플로우
-  입력을 오염시키지 않고, execution_context로만 전달된다.
-- conversation_id는 방문자별 대화 격리 키로 execution_context에 실린다.
+docs/features/conversation-memory/test_cases.md:
+- 공개 챗봇은 완료된 client history만 transient execution context로 전달한다.
+- 공개 챗봇은 legacy memory_mode/conversation_id와 durable content logging을 사용하지 않는다.
+- 인증형 내부 챗봇은 별도 subject-bound server Memory 계약을 유지한다.
 """
 
 import asyncio
 import logging
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -25,18 +25,70 @@ from apps.shared.domain.app_auth_secret import (
     APP_AUTH_SECRET_VERIFIER_VERSION,
     app_auth_secret_verifier,
 )
+from apps.shared.services.workflow_task_publisher import (
+    PUBLIC_CHAT_WORKFLOW_TASK_NAME,
+)
 
 
 # --- 실행 헬퍼 ---------------------------------------------------------------
 
 
-def _run_public(db, url_slug, user_inputs, monkeypatch, trigger_mode="app"):
+_UNSET_HISTORY = object()
+
+
+def _run_public(
+    db,
+    url_slug,
+    user_inputs,
+    monkeypatch,
+    trigger_mode="app",
+    conversation_history=_UNSET_HISTORY,
+    async_result_cls=None,
+    allow_stateless_public_chatbot_compatibility=False,
+    expected_deployment_version=None,
+    public_request_deadline_at=None,
+):
     from apps.gateway.services import deployment_service as deployment_module
 
+    if public_request_deadline_at is None:
+        service_now = datetime.now(timezone.utc)
+        public_request_deadline_at = service_now + timedelta(seconds=600)
+        monkeypatch.setattr(
+            deployment_module,
+            "_utc_now",
+            lambda: service_now,
+        )
+
+    if conversation_history is _UNSET_HISTORY:
+        deployment_types = {
+            row.type for row in db.rows if isinstance(row, WorkflowDeployment)
+        }
+        conversation_history = (
+            () if DeploymentType.CHATBOT in deployment_types else None
+        )
+
     celery = _CaptureCelery()
+    celery.stored_history = []
+
+    async def store_history(
+        history, *, ttl_seconds, timeout_seconds=None
+    ):
+        celery.stored_history.append(
+            {
+                "history": tuple(history),
+                "ttl_seconds": ttl_seconds,
+                "timeout_seconds": timeout_seconds,
+            }
+        )
+        return "a" * 32
+
+    monkeypatch.setattr(deployment_module, "store_public_chat_history", store_history)
     monkeypatch.setattr(deployment_module, "celery_app", celery)
     # run_deployment 내부의 `from celery.result import AsyncResult`가 가짜를 집도록 패치
-    monkeypatch.setattr("celery.result.AsyncResult", _FakeAsyncResult)
+    monkeypatch.setattr(
+        "celery.result.AsyncResult",
+        async_result_cls or _FakeAsyncResult,
+    )
 
     result = asyncio.run(
         deployment_module.DeploymentService.run_deployment(
@@ -45,6 +97,12 @@ def _run_public(db, url_slug, user_inputs, monkeypatch, trigger_mode="app"):
             user_inputs=user_inputs,
             trigger_mode=trigger_mode,
             runtime_policy=DEFAULT_DEPLOYMENT_RUNTIME_POLICY,
+            client_conversation_history=conversation_history,
+            allow_stateless_public_chatbot_compatibility=(
+                allow_stateless_public_chatbot_compatibility
+            ),
+            expected_deployment_version=expected_deployment_version,
+            public_request_deadline_at=public_request_deadline_at,
             auth_token=None,
             require_auth=False,
         )
@@ -82,10 +140,15 @@ def test_public_run_blocks_unresolved_external_configuration_before_publish(
     deployment_row.graph_snapshot = {
         "nodes": [
             {
+                "id": "answer-llm",
+                "type": "llmNode",
+                "data": {"model_id": "model-1", "user_prompt": "질문에 답변하세요."},
+            },
+            {
                 "id": "slack-1",
                 "type": "slackPostNode",
                 "data": {"title": "Slack"},
-            }
+            },
         ],
         "edges": [],
     }
@@ -101,7 +164,10 @@ def test_public_run_blocks_unresolved_external_configuration_before_publish(
                 user_inputs={},
                 trigger_mode="app",
                 runtime_policy=DEFAULT_DEPLOYMENT_RUNTIME_POLICY,
+                client_conversation_history=(),
                 require_auth=False,
+                public_request_deadline_at=datetime.now(timezone.utc)
+                + timedelta(seconds=600),
             )
         )
 
@@ -156,42 +222,249 @@ def _captured_inputs(celery):
 # --- 테스트 ------------------------------------------------------------------
 
 
-def test_chatbot_forces_memory_mode_and_threads_conversation_id(monkeypatch):
+def test_public_chatbot_threads_client_history_without_server_memory(monkeypatch):
     app_row, deployment_row = _deployed_app(DeploymentType.CHATBOT)
     db = _Db(rows=[app_row, deployment_row])
+    history = (
+        {"role": "user", "content": "이전 질문"},
+        {"role": "assistant", "content": "이전 답변"},
+    )
 
-    # 클라이언트는 memory_mode를 보내지 않았지만 챗봇은 서버가 강제 ON 한다.
     celery, result = _run_public(
         db,
         app_row.url_slug,
-        {"question": "안녕", "conversation_id": "conv-A"},
+        {"question": "안녕"},
         monkeypatch,
+        conversation_history=history,
     )
 
     ctx = _captured_context(celery)
-    sent_inputs = _captured_inputs(celery)
-
-    assert ctx["memory_mode"] is True
-    assert ctx["conversation_id"] == "conv-A"
-    # conversation_id / memory_mode는 워크플로우 입력에서 제거된다.
-    assert sent_inputs == {"question": "안녕"}
+    assert celery.captured.name == PUBLIC_CHAT_WORKFLOW_TASK_NAME
+    assert ctx["memory_mode"] is False
+    assert ctx["conversation_id"] is None
+    assert "public_chat_history" not in ctx
+    assert ctx["public_chat_history_ref"] == "a" * 32
+    assert "이전 질문" not in repr(celery.captured.args)
+    assert celery.stored_history == [
+        {
+            "history": history,
+            "ttl_seconds": 600,
+            "timeout_seconds": 2.0,
+        }
+    ]
+    assert ctx["suppress_content_persistence"] is True
+    assert ctx["execution_actor"] == {"type": "public"}
+    assert ctx["public_chat_history_consumer_ref"].startswith(
+        "workflow-node-location:v1:"
+    )
+    assert ctx["public_request_deadline_at"]
+    assert _captured_inputs(celery) == {"question": "안녕"}
+    assert celery.captured.options["expires"] is not None
     assert result["status"] == "success"
-    assert result["run_id"] == "00000000-0000-0000-0000-000000000777"
 
 
-def test_chatbot_overrides_client_memory_false(monkeypatch):
+def test_public_chatbot_preserves_request_reception_deadline_across_dispatch(
+    monkeypatch,
+):
+    from apps.gateway.services import deployment_service as deployment_module
+
+    request_received_at = datetime(2026, 7, 28, 12, 0, tzinfo=timezone.utc)
+    deadline = request_received_at + timedelta(seconds=600)
+    service_now = request_received_at + timedelta(seconds=17, milliseconds=250)
+    monkeypatch.setattr(deployment_module, "_utc_now", lambda: service_now)
+    app_row, deployment_row = _deployed_app(DeploymentType.CHATBOT)
+    db = _Db(rows=[app_row, deployment_row])
+    history = (
+        {"role": "user", "content": "이전 질문"},
+        {"role": "assistant", "content": "이전 답변"},
+    )
+
+    celery, result = _run_public(
+        db,
+        app_row.url_slug,
+        {"question": "안녕"},
+        monkeypatch,
+        conversation_history=history,
+        public_request_deadline_at=deadline,
+    )
+
+    assert result["status"] == "success"
+    assert _captured_context(celery)["public_request_deadline_at"] == (
+        deadline.isoformat()
+    )
+    assert celery.captured.options["expires"] == deadline
+    assert celery.stored_history == [
+        {
+            "history": history,
+            "ttl_seconds": 582,
+            "timeout_seconds": 2.0,
+        }
+    ]
+
+
+def test_expired_public_request_stops_before_admission_side_effects(monkeypatch):
+    from apps.gateway.services import deployment_service as deployment_module
+
+    now = datetime(2026, 7, 28, 12, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(deployment_module, "_utc_now", lambda: now)
+    app_row, deployment_row = _deployed_app(DeploymentType.CHATBOT)
+    db = _Db(rows=[app_row, deployment_row])
+    side_effects = []
+    monkeypatch.setattr(
+        deployment_module.WorkflowBudgetService,
+        "ensure_workflow_budget_allows_execution",
+        lambda *_args, **_kwargs: side_effects.append("budget"),
+    )
+    monkeypatch.setattr(
+        deployment_module.DeploymentService,
+        "migrate_legacy_node_secrets",
+        lambda *_args, **_kwargs: side_effects.append("migration"),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        _run_public(
+            db,
+            app_row.url_slug,
+            {"question": "안녕"},
+            monkeypatch,
+            public_request_deadline_at=now - timedelta(milliseconds=1),
+        )
+
+    assert exc_info.value.status_code == 504
+    assert exc_info.value.detail == "Workflow execution timed out"
+    assert side_effects == []
+
+
+def test_public_result_polling_uses_only_remaining_request_lifetime(monkeypatch):
+    from apps.gateway.services import deployment_service as deployment_module
+
+    now = datetime(2026, 7, 28, 12, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(deployment_module, "_utc_now", lambda: now)
+    monkeypatch.setattr(
+        "time.time",
+        _TimeSequence(first=0.0, remaining=6.0),
+    )
+
+    async def no_sleep(_seconds):
+        return None
+
+    monkeypatch.setattr("asyncio.sleep", no_sleep)
     app_row, deployment_row = _deployed_app(DeploymentType.CHATBOT)
     db = _Db(rows=[app_row, deployment_row])
 
-    celery, _ = _run_public(
+    with pytest.raises(HTTPException) as exc_info:
+        _run_public(
+            db,
+            app_row.url_slug,
+            {"question": "안녕"},
+            monkeypatch,
+            async_result_cls=_NeverReadyTwiceAsyncResult,
+            public_request_deadline_at=now + timedelta(seconds=5),
+        )
+
+    assert exc_info.value.status_code == 504
+    assert exc_info.value.detail == "Workflow execution timed out"
+
+
+def test_public_chatbot_forgets_consumed_celery_result(monkeypatch):
+    app_row, deployment_row = _deployed_app(DeploymentType.CHATBOT)
+    db = _Db(rows=[app_row, deployment_row])
+    _TrackingForgetAsyncResult.forget_calls = 0
+
+    _, result = _run_public(
         db,
         app_row.url_slug,
-        {"question": "x", "memory_mode": False, "conversation_id": "conv-B"},
+        {"question": "안녕"},
         monkeypatch,
+        async_result_cls=_TrackingForgetAsyncResult,
     )
 
-    # 클라이언트가 false를 보내도 챗봇은 무조건 켠다.
-    assert _captured_context(celery)["memory_mode"] is True
+    assert result["status"] == "success"
+    assert _TrackingForgetAsyncResult.forget_calls == 1
+
+
+def test_public_chatbot_cleanup_failure_does_not_replace_success_or_log_detail(
+    monkeypatch,
+    caplog,
+):
+    app_row, deployment_row = _deployed_app(DeploymentType.CHATBOT)
+    db = _Db(rows=[app_row, deployment_row])
+    caplog.set_level(logging.WARNING, logger="apps.gateway.services.deployment_service")
+
+    _, result = _run_public(
+        db,
+        app_row.url_slug,
+        {"question": "안녕"},
+        monkeypatch,
+        async_result_cls=_ForgetFailureAsyncResult,
+    )
+
+    assert result["status"] == "success"
+    assert "RuntimeError" in caplog.text
+    assert "private-result-backend-detail" not in caplog.text
+
+
+@pytest.mark.parametrize("legacy_key", ["memory_mode", "conversation_id"])
+def test_public_chatbot_rejects_legacy_conversation_controls(
+    monkeypatch,
+    legacy_key,
+):
+    app_row, deployment_row = _deployed_app(DeploymentType.CHATBOT)
+    db = _Db(rows=[app_row, deployment_row])
+    side_effects = []
+    from apps.gateway.services import deployment_service as deployment_module
+
+    monkeypatch.setattr(
+        deployment_module.WorkflowBudgetService,
+        "ensure_workflow_budget_allows_execution",
+        lambda *_args, **_kwargs: side_effects.append("budget"),
+    )
+    monkeypatch.setattr(
+        deployment_module.DeploymentService,
+        "migrate_legacy_node_secrets",
+        lambda *_args, **_kwargs: side_effects.append("migration"),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        _run_public(
+            db,
+            app_row.url_slug,
+            {"question": "x", legacy_key: "legacy-value"},
+            monkeypatch,
+        )
+
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.detail["code"] == "conversation.legacy_control_forbidden"
+    assert side_effects == []
+
+
+def test_legacy_public_chatbot_route_runs_stateless_without_persistence(monkeypatch):
+    app_row, deployment_row = _deployed_app(DeploymentType.CHATBOT)
+    deployment_row.config = {}
+    db = _Db(rows=[app_row, deployment_row])
+
+    celery, result = _run_public(
+        db,
+        app_row.url_slug,
+        {
+            "question": "x",
+            "memory_mode": True,
+            "conversation_id": "legacy-browser-session",
+        },
+        monkeypatch,
+        conversation_history=None,
+        allow_stateless_public_chatbot_compatibility=True,
+    )
+
+    ctx = _captured_context(celery)
+    assert celery.captured.name == PUBLIC_CHAT_WORKFLOW_TASK_NAME
+    assert result["status"] == "success"
+    assert _captured_inputs(celery) == {"question": "x"}
+    assert ctx["memory_mode"] is False
+    assert ctx["conversation_id"] is None
+    assert ctx["suppress_content_persistence"] is True
+    assert ctx["execution_actor"] == {"type": "public"}
+    assert ctx["public_chat_stateless_compatibility"] is True
 
 
 def test_non_chatbot_does_not_force_memory_but_threads_conversation_id(monkeypatch):
@@ -206,19 +479,78 @@ def test_non_chatbot_does_not_force_memory_but_threads_conversation_id(monkeypat
     )
 
     ctx = _captured_context(celery)
+    assert celery.captured.name == "workflow.execute"
     # webapp 등 비챗봇 배포는 기억모드를 강제하지 않는다 (기본 False).
     assert ctx["memory_mode"] is False
     # conversation_id는 배포 타입과 무관하게 그대로 전달된다.
     assert ctx["conversation_id"] == "conv-C"
 
 
-def test_missing_conversation_id_is_none(monkeypatch):
+def test_public_chatbot_requires_client_history_envelope(monkeypatch):
     app_row, deployment_row = _deployed_app(DeploymentType.CHATBOT)
     db = _Db(rows=[app_row, deployment_row])
 
-    celery, _ = _run_public(db, app_row.url_slug, {"question": "x"}, monkeypatch)
+    with pytest.raises(HTTPException) as exc_info:
+        _run_public(
+            db,
+            app_row.url_slug,
+            {"question": "x"},
+            monkeypatch,
+            conversation_history=None,
+        )
 
-    assert _captured_context(celery)["conversation_id"] is None
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.detail["code"] == "conversation.history_required"
+
+
+def test_public_chatbot_rejects_stale_deployment_version_before_side_effects(
+    monkeypatch,
+):
+    from apps.gateway.services import deployment_service as deployment_module
+
+    app_row, deployment_row = _deployed_app(DeploymentType.CHATBOT)
+    deployment_row.version = 2
+    db = _Db(rows=[app_row, deployment_row])
+    side_effects = []
+    celery = _CaptureCelery()
+    monkeypatch.setattr(deployment_module, "celery_app", celery)
+    monkeypatch.setattr(
+        deployment_module,
+        "store_public_chat_history",
+        lambda *_args, **_kwargs: side_effects.append("history_store"),
+    )
+    monkeypatch.setattr(
+        deployment_module.WorkflowBudgetService,
+        "ensure_workflow_budget_allows_execution",
+        lambda *_args, **_kwargs: side_effects.append("budget"),
+    )
+    monkeypatch.setattr(
+        deployment_module.DeploymentService,
+        "migrate_legacy_node_secrets",
+        lambda *_args, **_kwargs: side_effects.append("migration"),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(
+            deployment_module.DeploymentService.run_deployment(
+                db=db,
+                url_slug=app_row.url_slug,
+                user_inputs={"question": "current"},
+                trigger_mode="app",
+                runtime_policy=DEFAULT_DEPLOYMENT_RUNTIME_POLICY,
+                client_conversation_history=(),
+                expected_deployment_version=1,
+                require_auth=False,
+            )
+        )
+
+    assert exc_info.value.status_code == 409
+    assert (
+        exc_info.value.detail["code"]
+        == "conversation.deployment_version_changed"
+    )
+    assert side_effects == []
+    assert celery.captured is None
 
 
 def test_public_run_does_not_fallback_to_owner_execution_subject(monkeypatch):
@@ -237,7 +569,13 @@ def test_public_run_rejects_workflow_node_deployment(monkeypatch):
     db = _Db(rows=[app_row, deployment_row])
 
     with pytest.raises(HTTPException) as exc_info:
-        _run_public(db, app_row.url_slug, {"question": "x"}, monkeypatch)
+        _run_public(
+            db,
+            app_row.url_slug,
+            {"question": "x"},
+            monkeypatch,
+            expected_deployment_version=999,
+        )
 
     assert exc_info.value.status_code == 404
     assert exc_info.value.detail == "Deployment not found."
@@ -378,10 +716,10 @@ def test_authenticated_run_uses_current_user_execution_subject(
     monkeypatch.setattr(
         deployment_module,
         "is_deployment_type_allowed_for_surface",
-        lambda deployment_type, surface, *, policy: evaluated_surfaces.append(
-            (deployment_type, surface)
-        )
-        or evaluate_surface(deployment_type, surface, policy=policy),
+        lambda deployment_type, surface, *, policy: (
+            evaluated_surfaces.append((deployment_type, surface))
+            or evaluate_surface(deployment_type, surface, policy=policy)
+        ),
     )
 
     celery, result = _run_authenticated(
@@ -753,6 +1091,25 @@ def _deployed_app(deployment_type):
     workflow_id = uuid4()
     organization_id = uuid4()
     deployment_id = uuid4()
+    graph_snapshot = {"nodes": [], "edges": []}
+    config = {}
+    if deployment_type is DeploymentType.CHATBOT:
+        graph_snapshot = {
+            "nodes": [
+                {
+                    "id": "answer-llm",
+                    "type": "llmNode",
+                    "data": {"model_id": "model-1", "user_prompt": "질문에 답변하세요."},
+                }
+            ],
+            "edges": [],
+        }
+        config = {
+            "public_conversation": {
+                "contract_version": "public_chat_conversation.v1",
+                "history_consumer": {"node_id": "answer-llm", "container_path": []},
+            }
+        }
     app_row = App(
         id=uuid4(),
         name="챗봇 앱",
@@ -771,7 +1128,8 @@ def _deployed_app(deployment_type):
         app_id=app_row.id,
         version=1,
         type=deployment_type,
-        graph_snapshot={"nodes": [], "edges": []},
+        graph_snapshot=graph_snapshot,
+        config=config,
         is_active=True,
         created_by=uuid4(),
     )
@@ -785,7 +1143,12 @@ class _CaptureCelery:
         self.captured = None
 
     def send_task(self, name, args=None, kwargs=None, **options):
-        self.captured = SimpleNamespace(name=name, args=args, kwargs=kwargs)
+        self.captured = SimpleNamespace(
+            name=name,
+            args=args,
+            kwargs=kwargs,
+            options=options,
+        )
         return SimpleNamespace(id="fake-task-id")
 
 
@@ -806,6 +1169,43 @@ class _FakeAsyncResult:
             "result": {"answer": "ok"},
             "run_id": "00000000-0000-0000-0000-000000000777",
         }
+
+
+class _NeverReadyTwiceAsyncResult(_FakeAsyncResult):
+    def __init__(self, task_id, app=None):
+        super().__init__(task_id, app=app)
+        self._ready_calls = 0
+
+    def ready(self):
+        self._ready_calls += 1
+        if self._ready_calls > 1:
+            raise AssertionError("polling exceeded the request deadline")
+        return False
+
+
+class _TimeSequence:
+    def __init__(self, *, first, remaining):
+        self._first = first
+        self._remaining = remaining
+        self._used_first = False
+
+    def __call__(self):
+        if not self._used_first:
+            self._used_first = True
+            return self._first
+        return self._remaining
+
+
+class _TrackingForgetAsyncResult(_FakeAsyncResult):
+    forget_calls = 0
+
+    def forget(self):
+        type(self).forget_calls += 1
+
+
+class _ForgetFailureAsyncResult(_FakeAsyncResult):
+    def forget(self):
+        raise RuntimeError("private-result-backend-detail")
 
 
 class _SecretFailureAsyncResult:

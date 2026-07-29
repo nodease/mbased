@@ -3,6 +3,7 @@
 import hashlib
 import logging
 import uuid
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from fastapi import HTTPException
@@ -39,6 +40,11 @@ from apps.shared.domain.deployment_runtime_policy import (
     is_deployment_type_allowed_for_surface,
     is_deployment_type_allowed_for_trigger,
 )
+from apps.shared.domain.public_chat_conversation import (
+    PUBLIC_CHAT_REQUEST_TTL_SECONDS,
+    PublicChatConversationContractError,
+    resolve_public_chat_conversation_contract,
+)
 from apps.shared.domain.external_effect_error import (
     safe_external_effect_error_payload,
 )
@@ -61,7 +67,15 @@ from apps.shared.services.workflow_node_secret_service import (
     validate_workflow_node_secret_reference_ownership,
 )
 from apps.shared.services.credential_encryption import CredentialEncryptionError
-from apps.shared.services.workflow_task_publisher import send_workflow_task
+from apps.shared.services.workflow_task_publisher import (
+    PUBLIC_CHAT_WORKFLOW_TASK_NAME,
+    send_workflow_task,
+)
+from apps.shared.services.public_chat_history_transient_store import (
+    PUBLIC_CHAT_HISTORY_TRANSIENT_IO_TIMEOUT_SECONDS,
+    PublicChatHistoryTransientStoreError,
+    store_public_chat_history,
+)
 from apps.workflow_engine.services.model_routing_policy_store import (
     ModelRoutingPolicyStore,
 )
@@ -79,6 +93,33 @@ _AUTH_SECRET_DEPLOYMENT_TYPES = {
 _LEGACY_CONVERSATION_INPUT = "conversation_id"
 _LEGACY_MEMORY_MODE_INPUT = "memory_mode"
 _MAX_LEGACY_CONVERSATION_ID_LENGTH = 255
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _remaining_public_request_seconds(
+    deadline: datetime | None,
+    *,
+    minimum_seconds: float = 0.0,
+) -> float:
+    if (
+        not isinstance(deadline, datetime)
+        or deadline.tzinfo is None
+        or deadline.utcoffset() is None
+    ):
+        raise HTTPException(
+            status_code=500,
+            detail="Workflow execution failed",
+        )
+    remaining = (deadline.astimezone(timezone.utc) - _utc_now()).total_seconds()
+    if remaining < minimum_seconds or remaining <= 0:
+        raise HTTPException(
+            status_code=504,
+            detail="Workflow execution timed out",
+        )
+    return remaining
 
 
 class DeploymentAuthSecretPreflightError(RuntimeError):
@@ -129,6 +170,7 @@ class DeploymentService:
         observed_workflow_id: uuid.UUID,
         runtime_policy: DeploymentRuntimePolicy,
         auth_secret_lifecycle_mutations_enabled: bool = False,
+        require_public_chat_conversation_contract: bool = False,
     ) -> WorkflowDeployment:
         """
         워크플로우를 배포합니다.
@@ -191,6 +233,12 @@ class DeploymentService:
             db,
             workflow.id,
             deployment_in.graph_snapshot,
+        )
+        DeploymentService.validate_public_chat_conversation_config(
+            deployment_type=deployment_in.type,
+            config=deployment_in.config,
+            graph_snapshot=graph_snapshot,
+            required=(require_public_chat_conversation_contract),
         )
         DeploymentService._enforce_graph_structure_before_binding(
             db,
@@ -259,7 +307,9 @@ class DeploymentService:
                     surface="deployment",
                 )
             except WorkflowConfigurationPreflightError as exc:
-                raise DeploymentService.workflow_configuration_preflight_blocked(exc) from exc
+                raise DeploymentService.workflow_configuration_preflight_blocked(
+                    exc
+                ) from exc
 
         DeploymentService._enforce_deployment_configuration_preflight(
             db,
@@ -439,9 +489,7 @@ class DeploymentService:
                 app,
                 deployment_type=deployment_type,
                 is_active=is_active,
-                lifecycle_mutations_enabled=(
-                    auth_secret_lifecycle_mutations_enabled
-                ),
+                lifecycle_mutations_enabled=(auth_secret_lifecycle_mutations_enabled),
             )
         return result
 
@@ -927,12 +975,53 @@ class DeploymentService:
         return nodes
 
     @staticmethod
+    def validate_public_chat_conversation_config(
+        *,
+        deployment_type: DeploymentType,
+        config: Dict[str, Any] | None,
+        graph_snapshot: Dict[str, Any],
+        required: bool,
+    ) -> None:
+        has_contract = isinstance(config, dict) and "public_conversation" in config
+        if deployment_type is not DeploymentType.CHATBOT:
+            if has_contract:
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "code": "conversation.consumer_mapping_invalid",
+                        "message": (
+                            "Public conversation configuration is only "
+                            "supported for public chatbot deployments."
+                        ),
+                    },
+                )
+            return
+        try:
+            resolve_public_chat_conversation_contract(
+                config,
+                graph_snapshot,
+                required=required,
+            )
+        except PublicChatConversationContractError as error:
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": error.code,
+                    "message": "The public conversation consumer mapping is invalid.",
+                },
+            ) from None
+
+    @staticmethod
     async def run_deployment(
         db: Session,
         url_slug: str,
         user_inputs: Dict[str, Any],
         trigger_mode: str,
         runtime_policy: DeploymentRuntimePolicy,
+        client_conversation_history: tuple[dict[str, str], ...] | None = None,
+        allow_stateless_public_chatbot_compatibility: bool = False,
+        expected_deployment_version: int | None = None,
+        public_request_deadline_at: datetime | None = None,
         auth_token: Optional[str] = None,
         require_auth: bool = True,  # 인증 필요 여부 (기본값: 필요)
     ) -> Dict[str, Any]:
@@ -975,6 +1064,7 @@ class DeploymentService:
         if not deployment:
             raise HTTPException(status_code=404, detail="Deployment data not found.")
 
+
         # 3. 활성상태 체크
         if not deployment.is_active:
             raise HTTPException(status_code=404, detail="Deployment is inactive")
@@ -984,6 +1074,27 @@ class DeploymentService:
             runtime_policy=runtime_policy,
         ):
             raise HTTPException(status_code=404, detail="Deployment not found.")
+        if expected_deployment_version is not None:
+            if (
+                isinstance(expected_deployment_version, bool)
+                or not isinstance(expected_deployment_version, int)
+                or expected_deployment_version < 1
+            ):
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "code": "conversation.deployment_version_invalid",
+                        "message": "The public deployment version is invalid.",
+                    },
+                )
+            if deployment.version != expected_deployment_version:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "conversation.deployment_version_changed",
+                        "message": "The active public deployment changed.",
+                    },
+                )
 
         # 4. 인증 검증은 verifier lifecycle 경계를 사용한다.
         if require_auth:
@@ -1001,6 +1112,11 @@ class DeploymentService:
             trigger_mode=trigger_mode,
             actor_user_id=None,
             execution_subject_user_id=None,
+            client_conversation_history=client_conversation_history,
+            allow_stateless_public_chatbot_compatibility=(
+                allow_stateless_public_chatbot_compatibility
+            ),
+            public_request_deadline_at=public_request_deadline_at,
         )
 
     @staticmethod
@@ -1115,10 +1231,95 @@ class DeploymentService:
         actor_user_id: uuid.UUID | str | None,
         execution_subject_user_id: uuid.UUID | str | None,
         client_conversation_id: Optional[str] = None,
+        client_conversation_history: tuple[dict[str, str], ...] | None = None,
+        allow_stateless_public_chatbot_compatibility: bool = False,
         separate_conversation_control: bool = False,
+        public_request_deadline_at: datetime | None = None,
         request_id: Optional[str] = None,
         correlation_id: Optional[str] = None,
     ) -> Dict[str, Any]:
+        public_client_history_mode = client_conversation_history is not None
+        public_stateless_compatibility_mode = False
+        if public_client_history_mode and (
+            deployment.type is not DeploymentType.CHATBOT
+            or trigger_mode != "app"
+            or execution_subject_user_id is not None
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Client-held conversation history is only supported for "
+                    "public chatbot deployments"
+                ),
+            )
+        is_public_chatbot = (
+            deployment.type is DeploymentType.CHATBOT
+            and trigger_mode == "app"
+            and execution_subject_user_id is None
+        )
+        if is_public_chatbot and not public_client_history_mode:
+            if allow_stateless_public_chatbot_compatibility:
+                public_stateless_compatibility_mode = True
+            else:
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "code": "conversation.history_required",
+                        "message": (
+                            "Public chatbot requests require a conversation "
+                            "history envelope."
+                        ),
+                    },
+                )
+
+        public_transient_mode = (
+            public_client_history_mode or public_stateless_compatibility_mode
+        )
+        if public_transient_mode:
+            _remaining_public_request_seconds(public_request_deadline_at)
+        dispatch_inputs = dict(user_inputs or {})
+        if public_client_history_mode and (
+            _LEGACY_MEMORY_MODE_INPUT in dispatch_inputs
+            or _LEGACY_CONVERSATION_INPUT in dispatch_inputs
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "conversation.legacy_control_forbidden",
+                    "message": (
+                        "Legacy public conversation controls are not supported."
+                    ),
+                },
+            )
+        if public_stateless_compatibility_mode:
+            dispatch_inputs.pop(_LEGACY_MEMORY_MODE_INPUT, None)
+            dispatch_inputs.pop(_LEGACY_CONVERSATION_INPUT, None)
+
+        public_conversation_contract = None
+        if public_client_history_mode:
+            try:
+                public_conversation_contract = (
+                    resolve_public_chat_conversation_contract(
+                        deployment.config,
+                        deployment.graph_snapshot,
+                        required=True,
+                    )
+                )
+            except PublicChatConversationContractError as error:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": error.code,
+                        "message": (
+                            "The deployed public conversation consumer "
+                            "mapping is unavailable."
+                        ),
+                    },
+                ) from None
+
+        if public_transient_mode:
+            _remaining_public_request_seconds(public_request_deadline_at)
+
         # 예산 초과 차단 — 아래 dispatch try 블록 밖이어야 429가
         # "Engine Execution failed" 500으로 감싸이지 않는다 (BGT-REQ-030~031).
         WorkflowBudgetService.ensure_workflow_budget_allows_execution(
@@ -1127,26 +1328,32 @@ class DeploymentService:
             trigger_mode=trigger_mode,
             actor_id=actor_user_id,
         )
+        if public_transient_mode:
+            _remaining_public_request_seconds(public_request_deadline_at)
 
         DeploymentService.migrate_legacy_node_secrets(
             db,
             deployment,
             actor_id=(
-                uuid.UUID(str(actor_user_id))
-                if actor_user_id is not None
-                else None
+                uuid.UUID(str(actor_user_id)) if actor_user_id is not None else None
             ),
         )
+        if public_transient_mode:
+            _remaining_public_request_seconds(public_request_deadline_at)
         graph_data = deployment.graph_snapshot
         try:
             enforce_workflow_configuration_preflight(graph_data, surface="run")
         except WorkflowConfigurationPreflightError as exc:
-            raise DeploymentService.workflow_configuration_preflight_blocked(exc) from exc
+            raise DeploymentService.workflow_configuration_preflight_blocked(
+                exc
+            ) from exc
+
+        if public_transient_mode:
+            _remaining_public_request_seconds(public_request_deadline_at)
 
         try:
             # 로깅을 위한 컨텍스트 주입
             # memory_mode 추가 (챗봇 기억 모드 지원)
-            dispatch_inputs = dict(user_inputs or {})
             declared_inputs = DeploymentService._declared_input_names(deployment)
             legacy_memory_is_business_input = (
                 separate_conversation_control
@@ -1169,7 +1376,7 @@ class DeploymentService:
 
             memory_mode_enabled = (
                 False
-                if legacy_memory_is_business_input
+                if public_transient_mode or legacy_memory_is_business_input
                 else dispatch_inputs.pop(_LEGACY_MEMORY_MODE_INPUT, False)
             )
             if isinstance(memory_mode_enabled, str):
@@ -1177,7 +1384,7 @@ class DeploymentService:
 
             # 방문자별 대화 격리용 conversation_id (챗봇 멀티턴 기억).
             # memory_mode와 동일하게 dispatch 전에 pop하여 워크플로우 입력 오염을 막는다.
-            conversation_id = client_conversation_id
+            conversation_id = None if public_transient_mode else client_conversation_id
             if conversation_id is None and not legacy_conversation_is_business_input:
                 conversation_id = dispatch_inputs.pop(
                     _LEGACY_CONVERSATION_INPUT,
@@ -1195,7 +1402,10 @@ class DeploymentService:
                     )
 
             # 챗봇 배포는 기억모드가 항상 켜져 있어야 한다 (클라이언트 값과 무관하게 서버가 강제).
-            if deployment.type in _CHATBOT_DEPLOYMENT_TYPES:
+            if (
+                deployment.type in _CHATBOT_DEPLOYMENT_TYPES
+                and not public_transient_mode
+            ):
                 memory_mode_enabled = True
 
             execution_context = {
@@ -1211,6 +1421,48 @@ class DeploymentService:
                 "memory_mode": memory_mode_enabled,  # 기억 모드 추가
                 "conversation_id": conversation_id,  # 방문자별 대화 격리 키
             }
+            public_request_deadline = (
+                public_request_deadline_at if public_transient_mode else None
+            )
+            if public_transient_mode:
+                execution_context["execution_actor"] = {"type": "public"}
+                execution_context["suppress_content_persistence"] = True
+                execution_context["public_request_deadline_at"] = (
+                    public_request_deadline.isoformat()
+                )
+            if public_client_history_mode:
+                remaining_seconds = _remaining_public_request_seconds(
+                    public_request_deadline,
+                    minimum_seconds=1.0,
+                )
+                try:
+                    history_reference = await store_public_chat_history(
+                        client_conversation_history,
+                        ttl_seconds=min(
+                            PUBLIC_CHAT_REQUEST_TTL_SECONDS,
+                            int(remaining_seconds),
+                        ),
+                        timeout_seconds=min(
+                            PUBLIC_CHAT_HISTORY_TRANSIENT_IO_TIMEOUT_SECONDS,
+                            remaining_seconds,
+                        ),
+                    )
+                except PublicChatHistoryTransientStoreError:
+                    raise HTTPException(
+                        status_code=503,
+                        detail={
+                            "code": "conversation.history_store_unavailable",
+                            "message": (
+                                "The public conversation transport is unavailable."
+                            ),
+                        },
+                    ) from None
+                execution_context["public_chat_history_ref"] = history_reference
+                execution_context["public_chat_history_consumer_ref"] = (
+                    public_conversation_contract.history_consumer_ref
+                )
+            if public_stateless_compatibility_mode:
+                execution_context["public_chat_stateless_compatibility"] = True
             if request_id:
                 execution_context["request_id"] = request_id
             if correlation_id:
@@ -1221,12 +1473,26 @@ class DeploymentService:
                     "id": str(execution_subject_user_id),
                 }
 
-            # Celery 태스크 호출 (workflow.execute)
+            if public_transient_mode:
+                _remaining_public_request_seconds(
+                    public_request_deadline,
+                    minimum_seconds=1.0,
+                )
+            workflow_task_name = (
+                PUBLIC_CHAT_WORKFLOW_TASK_NAME
+                if public_transient_mode
+                else "workflow.execute"
+            )
             task = send_workflow_task(
                 celery_app,
-                "workflow.execute",
+                workflow_task_name,
                 args=[graph_data, dispatch_inputs, execution_context],
                 kwargs={"is_deployed": True},
+                **(
+                    {"expires": public_request_deadline}
+                    if public_request_deadline is not None
+                    else {}
+                ),
             )
 
             # 비동기 폴링 패턴으로 결과 대기 (스레드 풀 고갈 방지)
@@ -1235,10 +1501,24 @@ class DeploymentService:
 
             from celery.result import AsyncResult
 
-            async def wait_for_celery_result(task_id: str, timeout: int = 600):
+            async def wait_for_celery_result(task_id: str, timeout: float = 600):
                 """비동기적으로 Celery 결과 대기 (폴링 방식)"""
                 result = AsyncResult(task_id, app=celery_app)
                 start_time = time.time()
+
+                def forget_public_result() -> None:
+                    if not public_transient_mode:
+                        return
+                    forget = getattr(result, "forget", None)
+                    if not callable(forget):
+                        return
+                    try:
+                        forget()
+                    except Exception as error:
+                        logger.warning(
+                            "Public workflow result cleanup failed: error_type=%s",
+                            type(error).__name__,
+                        )
 
                 while not result.ready():
                     elapsed = time.time() - start_time
@@ -1249,10 +1529,22 @@ class DeploymentService:
                     await asyncio.sleep(0.5)  # 비동기 대기 (이벤트 루프 블로킹 방지)
 
                 if result.failed():
-                    raise result.result  # 예외 다시 발생
-                return result.result
+                    failure = result.result
+                    forget_public_result()
+                    raise failure
+                payload = result.result
+                forget_public_result()
+                return payload
 
-            result = await wait_for_celery_result(task.id, timeout=600)
+            result_timeout = (
+                _remaining_public_request_seconds(public_request_deadline)
+                if public_transient_mode
+                else 600
+            )
+            result = await wait_for_celery_result(
+                task.id,
+                timeout=result_timeout,
+            )
 
             if result.get("status") == "success":
                 return {
@@ -1541,6 +1833,7 @@ class DeploymentService:
         *,
         runtime_policy: DeploymentRuntimePolicy,
         user_id: uuid.UUID | str | None = None,
+        require_public_chat_conversation_contract: bool = False,
         auth_secret_lifecycle_mutations_enabled: bool = False,
     ) -> WorkflowDeployment:
         """
@@ -1607,6 +1900,12 @@ class DeploymentService:
                         ),
                     },
                 )
+            DeploymentService.validate_public_chat_conversation_config(
+                deployment_type=deployment.type,
+                config=getattr(deployment, "config", None),
+                graph_snapshot=deployment.graph_snapshot,
+                required=require_public_chat_conversation_contract,
+            )
             try:
                 WorkflowService.validate_mail_credential_references(
                     db,
@@ -1634,7 +1933,9 @@ class DeploymentService:
                     surface="deployment",
                 )
             except WorkflowConfigurationPreflightError as exc:
-                raise DeploymentService.workflow_configuration_preflight_blocked(exc) from exc
+                raise DeploymentService.workflow_configuration_preflight_blocked(
+                    exc
+                ) from exc
             DeploymentService._enforce_knowledge_preflight(
                 db,
                 app=app,
@@ -1650,9 +1951,7 @@ class DeploymentService:
                 app,
                 deployment_type=deployment.type,
                 is_active=True,
-                lifecycle_mutations_enabled=(
-                    auth_secret_lifecycle_mutations_enabled
-                ),
+                lifecycle_mutations_enabled=(auth_secret_lifecycle_mutations_enabled),
             )
 
         deployment.is_active = new_state

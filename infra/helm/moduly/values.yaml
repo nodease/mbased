@@ -139,6 +139,7 @@ gateway:
     AUTH_LOGIN_FINGERPRINT_PRIMARY_VERSION: "v1"
     AUTH_LOGIN_TRUSTED_PROXY_CIDRS: ""
     APP_AUTH_SECRET_LIFECYCLE_MODE: "disabled"
+    PUBLIC_CHAT_CONVERSATION_ROLLOUT_MODE: "compatibility"
     
     # CORS and Security
     CORS_ORIGINS: "http://localhost:3000,http://127.0.0.1:3000"
@@ -500,6 +501,9 @@ redis:
 # =============================================================================
 ingress:
   enabled: false
+  # Ingress must not terminate a Public Chatbot request before the Gateway's
+  # 600-second absolute deadline. Operators may override annotations explicitly.
+  publicChatTimeoutSeconds: 610
   
   className: nginx
   

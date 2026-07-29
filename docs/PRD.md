@@ -69,7 +69,9 @@ Nodease는 기존 Moduly 코드를 리팩토링해 만드는 기업 내부 AI �
 
 ### 3.4 Conversation Memory 목표 범위
 
-Conversation Memory는 현재 4개 데모 축의 완료 조건이 아니라 후속 제품 목표다. 현재 `memory_mode`, browser-generated conversation ID와 execution-log 기반 history는 legacy 동작이다. 목표 구조는 public Chatbot에서 deployment version에 고정된 session/turn을 안전하게 이어가고, 사용자가 transcript를 조회·close·reset·delete할 수 있게 한다. Private source에서 파생된 기억은 현재 권한과 값·제어 provenance를 다시 검증하며 credential revoke나 Access Grant revoke 뒤 stale context를 새 LLM 호출에 사용하지 않는다. 초기 session surface는 public Chatbot으로 제한하고 authenticated internal Chatbot과 Workflow Editor test session은 별도 계약 후 도입한다.
+Public Chatbot의 MBA-318 범위는 Client가 완료된 최근 대화 이력을 매 요청에 전달하는 bounded history다. 서버는 익명 Conversation Session·Turn·Entry·Transcript·Access Grant를 영구 저장하지 않으며 Public WorkflowRun/NodeRun/Trace에도 대화 원문을 남기지 않는다. 최대 20 turn과 4,096-token context를 서버가 다시 검증한다.
+
+인증된 조직 내부 Chatbot의 durable Conversation Memory는 후속 제품 목표다. 이 surface는 deployment version, organization과 execution subject에 고정된 Session, current authorization/provenance, retention, transcript와 lifecycle을 제공하며 Public stateless history와 자동 병합하지 않는다.
 
 ## 4. 사용자 시나리오
 
@@ -257,10 +259,10 @@ Nodease는 단순히 AI 답변을 생성하는 도구가 아니다. 조직 내 �
 
 ### Conversation Memory — [features/conversation-memory/](features/conversation-memory/requirements.md)
 
-- FR-061: Public Chatbot 사용자가 deployment version에 고정된 대화를 이어가고 bounded transcript를 조회하며 close/reset/delete lifecycle을 명시적으로 제어한다.
+- FR-061: Public Chatbot Client는 완료된 최근 20 turn을 매 요청에 전달하고 서버는 4,096-token context 상한을 재검증하며 익명 transcript를 영구 저장하지 않는다.
 - FR-062: Memory Context와 저장 entry는 현재 session subject/audience 권한, 값 dependency와 활성 control dependency provenance, privacy/retention 정책을 모두 통과해야 한다.
 - FR-063: LLM provider 호출은 LLM Credentials가 발급한 short-lived Provider Execution Capability를 사용하고 credential/grant revoke 뒤 stale capability/context를 새 호출에 사용하지 않는다.
-- FR-064: Conversation Memory는 독립 bounded context를 목표로 하며 현재 legacy `memory_mode`와 execution-log history가 이 기능을 충족한다고 간주하지 않는다.
+- FR-064: Public Chatbot은 legacy `memory_mode`, browser-generated `conversation_id`와 execution-log history를 사용하지 않는다. 인증형 내부 Chatbot의 durable Memory는 별도 후속 이슈다.
 
 ## 6. 비기능 요구사항
 
@@ -274,7 +276,7 @@ Nodease는 단순히 AI 답변을 생성하는 도구가 아니다. 조직 내 �
 | NFR-006 | 성능 목표 | TBD (데모 환경 기준 목표치 확정 필요) |
 | NFR-007 | RAG 권한 경계 | 모든 RAG 검색 모드는 권한 검사를 통과한 문서만 검색 후보로 사용한다. 권한 없는 문서는 검색 후보, prompt, citation, trace 어디에도 포함되지 않는다. 권한/정책상 제외된 문서를 화면에 표시할 때는 문서명과 정확한 건수를 노출하지 않는 안전한 요약(bucketed summary)으로만 표시한다. |
 | NFR-008 | Security Alert 반영 | 정상 worker와 notification 경로에서 eligible event가 임계값에 도달한 뒤 관리자 UI에 1분 이내 반영한다. 탐지 실패는 원래 authorization 결과나 사용자 응답을 변경하지 않는다. |
-| NFR-009 | Conversation Memory 격리 | Target Memory session은 deployment version, organization과 subject/audience에 고정한다. Access Grant, execution subject, credential principal, billing principal과 audit actor를 서로 대체하지 않으며 raw token/content를 audit·trace·log에 저장하지 않는다. |
+| NFR-009 | Conversation Memory 격리 | Public Chatbot history는 Client request에만 존재하고 권한 근거가 아니며 server run/node/trace에 원문을 저장하지 않는다. 인증형 내부 Memory session은 deployment version, organization과 execution subject에 고정하고 credential/billing principal 및 audit actor와 분리한다. |
 | NFR-010 | Password login 남용 방지 | Email/password login은 credential 검증 전에 account, trusted source network와 account+network 기준의 분산 admission을 적용한다. Counter는 versioned HMAC identity만 사용하고 raw account/IP를 저장하지 않으며, limiter 장애는 credential 검증 전 fail-closed한다 ([ADR-0047](decisions/ADR-0047-password-login-abuse-prevention-boundary.md)). |
 
 ## 7. 성공 지표

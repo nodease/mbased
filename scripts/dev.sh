@@ -287,7 +287,7 @@ echo -e "${GREEN}⚙️ Workflow-Engine Celery Worker 시작...${NC}"
         VENV_PYTHON="apps/workflow_engine/.venv/bin/python"
     fi
     export OBJC_DISABLE_INITIALIZE_FORK_SAFETY=YES
-    PYTHONPATH="$PROJECT_ROOT" $VENV_PYTHON -m celery -A apps.workflow_engine.main worker -n workflow@%h -Q workflow -l info -P gevent --concurrency="${WORKFLOW_CELERY_CONCURRENCY:-100}" --without-gossip --without-mingle --without-heartbeat
+    PYTHONPATH="$PROJECT_ROOT" $VENV_PYTHON -m celery -A apps.workflow_engine.main worker -n workflow@%h -Q workflow,workflow-public-chat-v1 -l info -P gevent --concurrency="${WORKFLOW_CELERY_CONCURRENCY:-100}" --without-gossip --without-mingle --without-heartbeat
 ) &
 WORKFLOW_CELERY_PID=$!
 

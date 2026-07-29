@@ -5,6 +5,7 @@ from collections.abc import Mapping
 ALLOWED_EFFECT_ERROR_CODES = frozenset(
     {
         "connection_failed",
+        "deadline_exceeded",
         "invalid_prepared_request",
         "provider_call_failed",
         "provider_call_finalize_failed",

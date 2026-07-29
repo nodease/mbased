@@ -204,11 +204,29 @@ def build_untrusted_context_block(
     LLM에게 전달할 컨텍스트 블록을 안전하게 구성합니다.
     """
     sanitized, redacted_lines = sanitize_untrusted_text(text, max_chars=max_chars)
-    if not sanitized.strip():
+    return frame_sanitized_untrusted_context_block(
+        sanitized,
+        label=label,
+        redacted_lines=redacted_lines,
+    )
+
+
+def frame_sanitized_untrusted_context_block(
+    sanitized_text: str,
+    label: str = "CONTEXT",
+    *,
+    redacted_lines: int = 0,
+) -> str:
+    """이미 정제한 텍스트를 재검사하지 않고 untrusted 경계로 감싼다.
+
+    호출자는 구조화된 leaf 값을 먼저 ``sanitize_untrusted_text``로 정제해야 한다.
+    정제 결과의 redaction marker를 다시 검사하면 정상 형제 데이터까지 지워질 수 있다.
+    """
+    if not sanitized_text.strip():
         return ""
 
     header = f"[BEGIN {label} - UNTRUSTED]"
     if redacted_lines:
         header += f" (redacted {redacted_lines} line(s))"
 
-    return f"{header}\n{sanitized}\n[END {label}]"
+    return f"{header}\n{sanitized_text}\n[END {label}]"

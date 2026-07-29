@@ -1,9 +1,11 @@
 import { act, renderHook } from '@testing-library/react';
+import type { Edge } from '@xyflow/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { workflowApi } from '@/app/features/workflow/api/workflowApi';
 import { useWorkflowStore } from '@/app/features/workflow/store/useWorkflowStore';
 import type { DeploymentParameterOptimizationConfig } from '@/app/features/workflow/types/Deployment';
+import type { AppNode } from '@/app/features/workflow/types/Nodes';
 import { useDeployment } from './useDeployment';
 
 vi.mock('@/app/features/workflow/api/workflowApi', () => ({
@@ -22,10 +24,11 @@ const disabledParameterOptimization: DeploymentParameterOptimizationConfig = {
   monthly_validation_budget_usd: 3,
 };
 
-const renderDeploymentHook = () =>
+const renderDeploymentHook = (nodes: AppNode[] = [], edges: Edge[] = []) =>
   renderHook(() =>
     useDeployment({
-      nodes: [],
+      nodes,
+      edges,
       isSettingsOpen: false,
       toggleSettings: vi.fn(),
       isVersionHistoryOpen: false,
@@ -97,11 +100,15 @@ describe('useDeployment', () => {
       ReturnType<typeof result.current.handleDeploy>
     >;
     await act(async () => {
-      deploymentResult =
-        await result.current.handleDeploy(
-          '사내 문서 질문 응답 봇',
-          disabledParameterOptimization,
-        );
+      deploymentResult = await result.current.handleDeploy(
+        '사내 문서 질문 응답 봇',
+        disabledParameterOptimization,
+        undefined,
+        {
+          contract_version: 'public_chat_conversation.v1',
+          history_consumer: { node_id: 'answer', container_path: [] },
+        },
+      );
     });
 
     expect(mockedWorkflowApi.createDeployment).toHaveBeenCalledWith(
@@ -113,10 +120,60 @@ describe('useDeployment', () => {
           contract_version: 'deployment_browser_access.v1',
           embedding: { enabled: false, parent_origins: [] },
         },
+        config: {
+          public_conversation: {
+            contract_version: 'public_chat_conversation.v1',
+            history_consumer: { node_id: 'answer', container_path: [] },
+          },
+        },
       }),
     );
     expect(deploymentResult!.webAppUrl).toContain('/embed/chat/onboarding-bot');
     expect(deploymentResult!.internalRunUrl).toBeUndefined();
+  });
+
+  it('uses the current unsaved graph for public preflight and deployment', async () => {
+    const nodes = [
+      {
+        id: 'answer',
+        type: 'llmNode',
+        position: { x: 320, y: 40 },
+        data: { title: 'Answer' },
+      },
+    ] as AppNode[];
+    const edges: Edge[] = [
+      {
+        id: 'start-answer',
+        source: 'start',
+        target: 'answer',
+      },
+    ];
+    const { result } = renderDeploymentHook(nodes, edges);
+    act(() => result.current.handlePublishAsChatbot());
+
+    await act(async () => {
+      await result.current.handleDeploy(
+        'unsaved public chatbot',
+        disabledParameterOptimization,
+        undefined,
+        {
+          contract_version: 'public_chat_conversation.v1',
+          history_consumer: { node_id: 'answer', container_path: [] },
+        },
+      );
+    });
+
+    const expectedSnapshot = { nodes, edges };
+    expect(mockedWorkflowApi.preflightDeployment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        graph_snapshot: expectedSnapshot,
+      }),
+    );
+    expect(mockedWorkflowApi.createDeployment).toHaveBeenCalledWith(
+      expect.objectContaining({
+        graph_snapshot: expectedSnapshot,
+      }),
+    );
   });
 
   it('uses the server-normalized policy for the create request', async () => {
@@ -204,11 +261,10 @@ describe('useDeployment', () => {
       ReturnType<typeof result.current.handleDeploy>
     >;
     await act(async () => {
-      deploymentResult =
-        await result.current.handleDeploy(
-          '사내 문서 질문 응답 봇',
-          disabledParameterOptimization,
-        );
+      deploymentResult = await result.current.handleDeploy(
+        '사내 문서 질문 응답 봇',
+        disabledParameterOptimization,
+      );
     });
 
     expect(mockedWorkflowApi.preflightDeployment).toHaveBeenCalledWith(

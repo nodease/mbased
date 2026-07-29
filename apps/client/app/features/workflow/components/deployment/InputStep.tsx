@@ -14,6 +14,7 @@ import type {
 } from '../../types/Deployment';
 import { buildBrowserAccessPolicyDraft } from '../../utils/browserAccessPolicy';
 import { BrowserAccessPolicyEditor } from './BrowserAccessPolicyEditor';
+import type { DeploymentOptimizationNode } from './types';
 
 interface InputStepProps {
   appId?: string;
@@ -25,6 +26,9 @@ interface InputStepProps {
   deploymentTypeLabel: string;
   description: string;
   onDescriptionChange: (value: string) => void;
+  llmNodes: DeploymentOptimizationNode[];
+  conversationHistoryConsumerSelection: string;
+  onConversationHistoryConsumerSelectionChange: (selectionKey: string) => void;
   embeddingEnabled: boolean;
   parentOrigins: string[];
   onEmbeddingEnabledChange: (enabled: boolean) => void;
@@ -47,6 +51,9 @@ export function InputStep({
   deploymentTypeLabel,
   description,
   onDescriptionChange,
+  llmNodes,
+  conversationHistoryConsumerSelection,
+  onConversationHistoryConsumerSelectionChange,
   embeddingEnabled,
   parentOrigins,
   onEmbeddingEnabledChange,
@@ -64,6 +71,8 @@ export function InputStep({
   const requiresAppAuthSecret = ['api', 'webhook'].includes(deploymentType);
   const appAuthSecretBlocked =
     requiresAppAuthSecret && (!appId || appAuthSecretReadiness !== 'ready');
+  const conversationConsumerBlocked =
+    deploymentType === 'chatbot' && !conversationHistoryConsumerSelection;
   const policyResult = supportsEmbeddingPolicy
     ? buildBrowserAccessPolicyDraft(embeddingEnabled, parentOrigins)
     : null;
@@ -113,6 +122,36 @@ export function InputStep({
           />
         </div>
 
+        {deploymentType === 'chatbot' && (
+          <div>
+            <label
+              className="mb-2 block text-sm font-medium text-gray-700"
+              htmlFor="public-chat-history-consumer"
+            >
+              대화 기록을 사용할 LLM 노드
+            </label>
+            <select
+              id="public-chat-history-consumer"
+              className="w-full rounded-md border border-gray-300 px-3 py-2"
+              value={conversationHistoryConsumerSelection}
+              onChange={(event) =>
+                onConversationHistoryConsumerSelectionChange(event.target.value)
+              }
+              disabled={isDeploying}
+            >
+              <option value="">LLM 노드를 선택하세요</option>
+              {llmNodes.map((node) => (
+                <option key={node.selectionKey} value={node.selectionKey}>
+                  {node.title}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1 text-xs text-gray-500">
+              이전 대화는 선택한 노드 한 곳에만 전달됩니다.
+            </p>
+          </div>
+        )}
+
         {supportsEmbeddingPolicy && (
           <BrowserAccessPolicyEditor
             headingId="deployment-browser-access-heading"
@@ -141,7 +180,10 @@ export function InputStep({
           type="button"
           onClick={() => onSubmit(policyResult?.policy || undefined)}
           disabled={
-            isDeploying || Boolean(validationError) || appAuthSecretBlocked
+            isDeploying ||
+            Boolean(validationError) ||
+            appAuthSecretBlocked ||
+            conversationConsumerBlocked
           }
           className="inline-flex items-center gap-2 rounded-md bg-blue-600 px-4 py-2 text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-blue-400"
         >

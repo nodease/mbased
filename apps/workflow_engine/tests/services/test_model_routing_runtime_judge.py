@@ -184,6 +184,29 @@ def test_requirement_judge_retries_incomplete_response_without_changing_contract
     assert "selected_model_id" not in compact_prompt
 
 
+def test_requirement_judge_checks_deadline_before_every_provider_attempt():
+    client = _IncompleteThenCompactJudgeClient("")
+    guard_calls = []
+
+    class _DeadlineExpired(ValueError):
+        pass
+
+    def deadline_guard():
+        guard_calls.append(len(client.calls))
+        if len(guard_calls) == 2:
+            raise _DeadlineExpired("expired before compact retry")
+
+    with pytest.raises(_DeadlineExpired, match="expired before compact retry"):
+        ModelRoutingRuntimeJudge.assess_requirements(
+            client=client,
+            routing_feature_text="승인 전 예외 조항을 다시 검토해 주세요.",
+            deadline_guard=deadline_guard,
+        )
+
+    assert guard_calls == [0, 1]
+    assert len(client.calls) == 1
+
+
 def test_requirement_judge_records_provider_latency(monkeypatch):
     timestamps = iter((10.0, 10.125))
     monkeypatch.setattr(

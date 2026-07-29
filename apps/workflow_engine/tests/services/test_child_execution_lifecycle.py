@@ -195,6 +195,31 @@ def test_child_factory_forces_child_lifecycle_and_preserves_runtime_control() ->
         child.cleanup()
 
 
+def test_child_factory_propagates_public_content_suppression() -> None:
+    run_id = uuid.uuid4()
+    workflow_id = uuid.uuid4()
+    context = _execution_context(run_id=run_id, workflow_id=workflow_id)
+    context["suppress_content_persistence"] = True
+
+    child = WorkflowEngine.create_child(
+        _body_graph(),
+        {"item": "private child input"},
+        execution_context=context,
+        runtime_control=_runtime_control(
+            execution_id=uuid.uuid4(),
+            workflow_id=workflow_id,
+        ),
+        invocation_segment=InvocationSegment("loop", "loop", "0"),
+        parent_run_id=str(run_id),
+        entry_node_id="body",
+    )
+
+    try:
+        assert child.logger.content_persistence_suppressed is True
+    finally:
+        child.cleanup()
+
+
 def test_multiple_loop_iterations_finalize_root_lifecycle_once(monkeypatch) -> None:
     logger, published = _capture_lifecycle(monkeypatch)
     run_id = uuid.uuid4()

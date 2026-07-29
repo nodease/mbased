@@ -39,6 +39,64 @@ from apps.workflow_engine.workflow.errors import NonRetryableWorkflowError
 
 logger = logging.getLogger(__name__)
 
+_PUBLIC_CONTENT_FREE_LLM_METADATA_FIELDS = frozenset(
+    {
+        "provider",
+        "model",
+        "prompt_tokens",
+        "completion_tokens",
+        "total_tokens",
+        "total_cost",
+        "latency_ms",
+        "retry_count",
+        "policy_id",
+        "policy_version",
+        "selected_model",
+        "fallback_model",
+        "fallback_from_model",
+        "fallback_reason_code",
+        "fallback_provider_error_code",
+        "fallback_provider_error_type",
+        "fallback_provider_status_code",
+        "fallback_provider_response_status",
+        "fallback_used",
+        "decision_source",
+        "matched_rule_id",
+        "strategy_id",
+        "reason_code",
+        "judge_called",
+        "finish_reason",
+        "schema_status",
+        "repetition_rate",
+        "customer_facing",
+        "knowledge_enabled",
+        "output_format",
+        "schema_required",
+        "has_file_input",
+        "input_length_bucket",
+        "prompt_length_bucket",
+        "node_task",
+    }
+)
+
+
+def _public_content_free_trace_metadata(
+    node_type: Optional[str],
+    metadata: Dict[str, Any],
+) -> Dict[str, Any]:
+    if node_type != "llmNode":
+        return {}
+    llm_metadata = metadata.get("llm")
+    if not isinstance(llm_metadata, dict):
+        return {}
+    safe_llm_metadata = {
+        key: value
+        for key, value in llm_metadata.items()
+        if key in _PUBLIC_CONTENT_FREE_LLM_METADATA_FIELDS
+        and isinstance(value, (bool, int, float, str))
+    }
+    return {"llm": safe_llm_metadata} if safe_llm_metadata else {}
+
 
 class WorkflowLogger:
     """
@@ -63,6 +121,15 @@ class WorkflowLogger:
         self.workflow_run_id: Optional[uuid.UUID] = None
         self.app_id: Optional[str] = None
         self._policy_cache: Dict[str, Any] = {}
+        self._content_persistence_suppressed = False
+
+    @property
+    def content_persistence_suppressed(self) -> bool:
+        return self._content_persistence_suppressed
+
+    def suppress_content_persistence(self) -> None:
+        """Disable content-bearing logs for this logger and all child activity."""
+        self._content_persistence_suppressed = True
 
     def _serialize_for_celery(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """Celery 태스크용 데이터 직렬화 (UUID, datetime 변환)"""
@@ -130,6 +197,8 @@ class WorkflowLogger:
         default_node_run_id: Optional[uuid.UUID] = None,
     ):
         context = self._policy_context(app_id)
+        if self._content_persistence_suppressed:
+            return [], TracePayloadService.summarize_payload_records([]), context
         if not context.get("payload_capture_enabled", True):
             # 실행은 유지하되 추적 페이로드 행은 만들지 않는 보수적 차단 경로입니다.
             return [], TracePayloadService.summarize_payload_records([]), context
@@ -149,6 +218,12 @@ class WorkflowLogger:
         payload_kind: str,
         app_id: Optional[str] = None,
     ) -> Any:
+        if self._content_persistence_suppressed:
+            if isinstance(value, dict):
+                return {}
+            if isinstance(value, (list, tuple)):
+                return []
+            return "[content omitted]"
         policy = self._policy_context(app_id)["redaction"]
         return TraceRedactionService.redact_payload(
             value, policy=policy, payload_kind=payload_kind
@@ -262,6 +337,8 @@ class WorkflowLogger:
             run_id = uuid.uuid4()
         self.workflow_run_id = run_id
         self.app_id = execution_context.get("app_id")
+        if execution_context.get("suppress_content_persistence"):
+            self.suppress_content_persistence()
 
         payload_records, summary, policy_context = self._prepare_payloads(
             [{"payload_kind": "input", "payload": user_input, "scope": "trace"}],
@@ -293,7 +370,9 @@ class WorkflowLogger:
             "workflow_task_id": execution_context.get("workflow_task_id"),
             "trace_payloads": payload_records,
             "trace_metadata": TraceMetadataSanitizer.sanitize_run_metadata(
-                execution_context.get("trace_metadata") or {}
+                {}
+                if self._content_persistence_suppressed
+                else execution_context.get("trace_metadata") or {}
             ),
             "redaction_applied": summary["redaction_applied"],
             "pii_detected": summary["pii_detected"],
@@ -455,6 +534,9 @@ class WorkflowLogger:
         if not self.workflow_run_id or not log_id:
             return
 
+        if self._content_persistence_suppressed:
+            process_data = {}
+            trace_payloads = []
         provider_summary = durable_provider_summary(
             node_type=node_type,
             process_data=process_data,
@@ -534,6 +616,11 @@ class WorkflowLogger:
         sanitized_metadata = TraceMetadataSanitizer.sanitize_span_metadata(
             node_type, enriched_metadata
         )
+        if self._content_persistence_suppressed:
+            sanitized_metadata = _public_content_free_trace_metadata(
+                node_type,
+                sanitized_metadata,
+            )
         if metadata_only:
             sanitized_metadata["external_effect_output"] = {"sensitive": True}
 
@@ -581,6 +668,8 @@ class WorkflowLogger:
         if not self.workflow_run_id or not log_id:
             return
 
+        if self._content_persistence_suppressed:
+            process_data = {}
         sensitive_output = uses_metadata_only_provider_capture(
             node_type,
             process_data,
@@ -610,6 +699,11 @@ class WorkflowLogger:
         sanitized_metadata = TraceMetadataSanitizer.sanitize_span_metadata(
             node_type, trace_metadata or {}
         )
+        if self._content_persistence_suppressed:
+            sanitized_metadata = _public_content_free_trace_metadata(
+                node_type,
+                sanitized_metadata,
+            )
         if sensitive_output:
             sanitized_metadata["external_effect_output"] = {"sensitive": True}
 

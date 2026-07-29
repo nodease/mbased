@@ -1,5 +1,6 @@
 import uuid
 import sys
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -9,6 +10,15 @@ from apps.shared.db.models.workflow_deployment import DeploymentType
 from apps.shared.domain.deployment_runtime_policy import (
     DEFAULT_DEPLOYMENT_RUNTIME_POLICY,
     SURFACE_WEBHOOK_RUN,
+)
+from apps.shared.domain.public_chat_history import (
+    remaining_public_chat_history_tokens,
+)
+from apps.shared.domain.workflow_node_location import (
+    CanonicalWorkflowNodeLocation,
+)
+from apps.shared.services.public_chat_history_transient_store import (
+    PublicChatHistoryTransientStoreError,
 )
 from apps.workflow_engine.workflow.errors import NonRetryableWorkflowError
 
@@ -97,6 +107,7 @@ def _active_deployment_pair(
         is_active=True,
         created_by=created_by,
         graph_snapshot=graph_snapshot or {"nodes": []},
+        config={},
     )
     FakeSession.app = SimpleNamespace(
         id=app_id,
@@ -178,6 +189,10 @@ def patch_task_dependencies(monkeypatch):
         is_active=True,
         created_by=FakeSession.app.created_by,
         graph_snapshot={"nodes": []},
+        config={},
+    )
+    monkeypatch.setattr(
+        tasks, "consume_public_chat_history", lambda _ref, **_kwargs: ()
     )
     monkeypatch.setattr(tasks, "SessionLocal", lambda: FakeSession())
     monkeypatch.setitem(
@@ -261,6 +276,95 @@ def test_deployed_graph_execution_revalidates_exact_snapshot():
     assert context["workflow_version"] == FakeSession.deployment.version
 
 
+def test_deployed_public_chatbot_rebuilds_consumer_mapping_from_snapshot(
+    monkeypatch,
+):
+    lifecycle_events = []
+    graph = {
+        "nodes": [
+            {
+                "id": "classifier",
+                "type": "llmNode",
+                "data": {"model_id": "model-1", "user_prompt": "분류하세요."},
+            },
+            {
+                "id": "answer",
+                "type": "llmNode",
+                "data": {"model_id": "model-1", "user_prompt": "질문에 답변하세요."},
+            },
+        ],
+        "edges": [],
+    }
+    FakeSession.deployment.type = DeploymentType.CHATBOT
+    FakeSession.deployment.graph_snapshot = graph
+    FakeSession.deployment.config = {
+        "public_conversation": {
+            "contract_version": "public_chat_conversation.v1",
+            "history_consumer": {
+                "node_id": "answer",
+                "container_path": [],
+            },
+        }
+    }
+    forged_ref = CanonicalWorkflowNodeLocation((), "classifier").safe_reference
+    consume_timeouts = []
+    monkeypatch.setattr(
+        tasks,
+        "_sync_knowledge_bases_for_execution_subject",
+        lambda *_args, **_kwargs: (
+            lifecycle_events.append("validated"),
+            {"synced_count": 0, "failed": []},
+        )[1],
+    )
+    monkeypatch.setattr(
+        tasks,
+        "consume_public_chat_history",
+        lambda _ref, *, timeout_seconds: (
+            lifecycle_events.append("consumed"),
+            consume_timeouts.append(timeout_seconds),
+            (),
+        )[2],
+    )
+
+    result = tasks.execute_public_chat_workflow.run(
+        graph,
+        {"question": "current"},
+        {
+            "workflow_id": str(FakeSession.workflow.id),
+            "execution_id": str(uuid.uuid4()),
+            "deployment_id": str(FakeSession.deployment.id),
+            "workflow_version": FakeSession.deployment.version,
+            "trigger_mode": "app",
+            "public_chat_history_ref": "b" * 32,
+            "public_chat_history_consumer_ref": forged_ref,
+            "execution_actor": {"type": "public"},
+            "suppress_content_persistence": True,
+            "public_chat_history_token_budget": 4096,
+            "memory_mode": False,
+            "conversation_id": None,
+            "public_request_deadline_at": (
+                datetime.now(timezone.utc) + timedelta(minutes=1)
+            ).isoformat(),
+        },
+        True,
+    )
+
+    context = FakeWorkflowEngine.calls[0]["kwargs"]["execution_context"]
+    assert result["status"] == "success"
+    assert context["public_chat_history_consumer_ref"] == (
+        CanonicalWorkflowNodeLocation((), "answer").safe_reference
+    )
+    assert context["execution_actor"] == {"type": "public"}
+    assert "public_chat_history_ref" not in context
+    assert context["public_chat_history_token_budget"] == (
+        remaining_public_chat_history_tokens({"question": "current"})
+    )
+    assert "memory_mode" not in context
+    assert "conversation_id" not in context
+    assert lifecycle_events == ["validated", "consumed"]
+    assert 0 < consume_timeouts[0] <= 2.0
+
+
 def test_deployed_graph_execution_rejects_snapshot_drift():
     FakeSession.deployment.graph_snapshot = {"nodes": [], "edges": []}
 
@@ -276,6 +380,324 @@ def test_deployed_graph_execution_rejects_snapshot_drift():
                 "execution_id": str(uuid.uuid4()),
                 "deployment_id": str(FakeSession.deployment.id),
                 "workflow_version": FakeSession.deployment.version,
+            },
+            True,
+        )
+
+    assert FakeWorkflowEngine.calls == []
+
+
+def test_public_chatbot_execution_rejects_expired_queue_payload_before_db_access(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        tasks,
+        "SessionLocal",
+        lambda: pytest.fail("expired public payload must not access the database"),
+    )
+
+    with pytest.raises(
+        NonRetryableWorkflowError,
+        match="conversation.request_expired",
+    ):
+        tasks.execute_public_chat_workflow.run(
+            {"nodes": []},
+            {},
+            {
+                "public_chat_history_ref": "c" * 32,
+                "trigger_mode": "app",
+                "execution_actor": {"type": "public"},
+                "suppress_content_persistence": True,
+                "public_request_deadline_at": (
+                    datetime.now(timezone.utc) - timedelta(seconds=1)
+                ).isoformat(),
+            },
+            True,
+        )
+
+    assert FakeWorkflowEngine.calls == []
+    assert FakeSyncService.calls == []
+
+
+@pytest.mark.parametrize(
+    "queued_history",
+    [
+        {"public_chat_history": [{"role": "user", "content": "raw"}]},
+        {
+            "public_chat_history_ref": "c" * 32,
+            "public_chat_history": [{"role": "user", "content": "raw"}],
+        },
+    ],
+)
+def test_public_chatbot_execution_rejects_raw_history_before_db_access(
+    monkeypatch,
+    queued_history,
+):
+    monkeypatch.setattr(
+        tasks,
+        "SessionLocal",
+        lambda: pytest.fail("raw public history must be rejected before database access"),
+    )
+
+    with pytest.raises(
+        NonRetryableWorkflowError,
+        match="conversation.history_payload_forbidden",
+    ):
+        tasks.execute_public_chat_workflow.run(
+            {"nodes": []},
+            {},
+            {
+                **queued_history,
+                "trigger_mode": "app",
+                "execution_actor": {"type": "public"},
+                "suppress_content_persistence": True,
+                "public_chat_stateless_compatibility": (
+                    "public_chat_history_ref" not in queued_history
+                ),
+                "public_request_deadline_at": (
+                    datetime.now(timezone.utc) + timedelta(minutes=1)
+                ).isoformat(),
+            },
+            True,
+        )
+
+    assert FakeWorkflowEngine.calls == []
+    assert FakeSyncService.calls == []
+
+
+@pytest.mark.parametrize(
+    "legacy_controls",
+    [
+        {"memory_mode": True, "conversation_id": None},
+        {"memory_mode": False, "conversation_id": "forged-public-session"},
+    ],
+)
+def test_public_chatbot_task_rejects_unsafe_legacy_memory_controls_before_db(
+    monkeypatch,
+    legacy_controls,
+):
+    monkeypatch.setattr(
+        tasks,
+        "SessionLocal",
+        lambda: pytest.fail(
+            "unsafe public memory controls must be rejected before database access"
+        ),
+    )
+
+    with pytest.raises(
+        NonRetryableWorkflowError,
+        match="conversation.task_contract_mismatch",
+    ):
+        tasks.execute_public_chat_workflow.run(
+            {"nodes": []},
+            {},
+            {
+                "public_chat_stateless_compatibility": True,
+                "trigger_mode": "app",
+                "execution_actor": {"type": "public"},
+                "suppress_content_persistence": True,
+                "public_request_deadline_at": (
+                    datetime.now(timezone.utc) + timedelta(minutes=1)
+                ).isoformat(),
+                **legacy_controls,
+            },
+            True,
+        )
+
+    assert FakeWorkflowEngine.calls == []
+
+
+def test_public_history_consume_timeout_is_capped_by_remaining_task_deadline(
+    monkeypatch,
+):
+    monkeypatch.setattr(tasks.time, "monotonic", lambda: 50.0)
+
+    assert tasks._public_history_consume_timeout_seconds(55.0) == 2.0
+    assert tasks._public_history_consume_timeout_seconds(50.125) == pytest.approx(
+        0.125
+    )
+
+    with pytest.raises(
+        NonRetryableWorkflowError,
+        match="conversation.request_expired",
+    ):
+        tasks._public_history_consume_timeout_seconds(50.0)
+
+
+def test_public_task_deadline_never_exceeds_absolute_request_deadline():
+    current = datetime(2026, 1, 1, tzinfo=timezone.utc)
+
+    deadline = tasks._workflow_task_deadline(
+        current + timedelta(seconds=1),
+        now=current,
+        monotonic_now=50.0,
+    )
+
+    assert deadline == pytest.approx(51.0)
+
+
+def test_public_chatbot_does_not_retry_after_one_time_history_is_consumed(
+    monkeypatch,
+):
+    graph = {
+        "nodes": [
+            {
+                "id": "answer",
+                "type": "llmNode",
+                "data": {"model_id": "model-1", "user_prompt": "질문에 답변하세요."},
+            }
+        ],
+        "edges": [],
+    }
+    FakeSession.deployment.type = DeploymentType.CHATBOT
+    FakeSession.deployment.graph_snapshot = graph
+    FakeSession.deployment.config = {
+        "public_conversation": {
+            "contract_version": "public_chat_conversation.v1",
+            "history_consumer": {
+                "node_id": "answer",
+                "container_path": [],
+            },
+        }
+    }
+    consumed = []
+    monkeypatch.setattr(
+        tasks,
+        "consume_public_chat_history",
+        lambda reference, **_kwargs: (
+            consumed.append(reference),
+            (
+                {"role": "user", "content": "이전 질문"},
+                {"role": "assistant", "content": "이전 답변"},
+            ),
+        )[1],
+    )
+    monkeypatch.setattr(
+        tasks,
+        "_safe_retry",
+        lambda *_args, **_kwargs: pytest.fail(
+            "consumed one-time history must not schedule a Celery retry"
+        ),
+    )
+    FakeWorkflowEngine.execute_error = RuntimeError("provider unavailable")
+
+    with pytest.raises(
+        NonRetryableWorkflowError,
+        match="conversation.history_replay_required",
+    ):
+        tasks.execute_public_chat_workflow.run(
+            graph,
+            {},
+            {
+                "workflow_id": str(FakeSession.workflow.id),
+                "execution_id": str(uuid.uuid4()),
+                "deployment_id": str(FakeSession.deployment.id),
+                "workflow_version": FakeSession.deployment.version,
+                "trigger_mode": "app",
+                "public_chat_history_ref": "d" * 32,
+                "execution_actor": {"type": "public"},
+                "suppress_content_persistence": True,
+                "public_request_deadline_at": (
+                    datetime.now(timezone.utc) + timedelta(minutes=1)
+                ).isoformat(),
+            },
+            True,
+        )
+
+    assert consumed == ["d" * 32]
+
+
+def test_public_chatbot_retries_when_redis_is_unavailable_before_consume(
+    monkeypatch,
+):
+    graph = {
+        "nodes": [
+            {
+                "id": "answer",
+                "type": "llmNode",
+                "data": {"model_id": "model-1", "user_prompt": "answer"},
+            }
+        ],
+        "edges": [],
+    }
+    FakeSession.deployment.type = DeploymentType.CHATBOT
+    FakeSession.deployment.graph_snapshot = graph
+    FakeSession.deployment.config = {
+        "public_conversation": {
+            "contract_version": "public_chat_conversation.v1",
+            "history_consumer": {
+                "node_id": "answer",
+                "container_path": [],
+            },
+        }
+    }
+    retry_errors = []
+
+    class _RetryScheduled(Exception):
+        pass
+
+    def unavailable(_reference, **_kwargs):
+        raise PublicChatHistoryTransientStoreError(
+            "conversation.history_store_unavailable"
+        )
+
+    def schedule_retry(_task, error):
+        retry_errors.append(error)
+        raise _RetryScheduled()
+
+    monkeypatch.setattr(tasks, "consume_public_chat_history", unavailable)
+    monkeypatch.setattr(tasks, "_safe_retry", schedule_retry)
+
+    with pytest.raises(_RetryScheduled):
+        tasks.execute_public_chat_workflow.run(
+            graph,
+            {},
+            {
+                "workflow_id": str(FakeSession.workflow.id),
+                "execution_id": str(uuid.uuid4()),
+                "deployment_id": str(FakeSession.deployment.id),
+                "workflow_version": FakeSession.deployment.version,
+                "trigger_mode": "app",
+                "public_chat_history_ref": "e" * 32,
+                "execution_actor": {"type": "public"},
+                "suppress_content_persistence": True,
+                "public_request_deadline_at": (
+                    datetime.now(timezone.utc) + timedelta(minutes=1)
+                ).isoformat(),
+            },
+            True,
+        )
+
+    assert [error.code for error in retry_errors] == [
+        "conversation.history_store_unavailable"
+    ]
+    assert FakeWorkflowEngine.calls == []
+
+
+def test_generic_workflow_task_rejects_public_context_before_database_access(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        tasks,
+        "SessionLocal",
+        lambda: pytest.fail("misrouted public task must not access the database"),
+    )
+
+    with pytest.raises(
+        NonRetryableWorkflowError,
+        match="conversation.task_contract_mismatch",
+    ):
+        tasks.execute_workflow.run(
+            {"nodes": []},
+            {},
+            {
+                "public_chat_history_ref": "f" * 32,
+                "trigger_mode": "app",
+                "execution_actor": {"type": "public"},
+                "suppress_content_persistence": True,
+                "public_request_deadline_at": (
+                    datetime.now(timezone.utc) + timedelta(minutes=1)
+                ).isoformat(),
             },
             True,
         )
@@ -318,7 +740,9 @@ def test_draft_execution_rejects_unresolved_external_action_before_engine(task_n
         "execution_id": str(uuid.uuid4()),
     }
 
-    with pytest.raises(NonRetryableWorkflowError, match="workflow_configuration_unresolved"):
+    with pytest.raises(
+        NonRetryableWorkflowError, match="workflow_configuration_unresolved"
+    ):
         if task_name == "execute_workflow":
             tasks.execute_workflow.run(graph, {}, execution_context, False)
         else:
@@ -765,7 +1189,9 @@ def test_deployed_execution_rejects_unresolved_external_action_before_engine():
         graph_snapshot=graph_snapshot
     )
 
-    with pytest.raises(NonRetryableWorkflowError, match="workflow_configuration_unresolved"):
+    with pytest.raises(
+        NonRetryableWorkflowError, match="workflow_configuration_unresolved"
+    ):
         tasks.execute_by_deployment.run(
             str(deployment.id),
             {},

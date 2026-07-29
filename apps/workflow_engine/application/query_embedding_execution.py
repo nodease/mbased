@@ -6,7 +6,7 @@ import math
 import uuid
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Any, Mapping, Protocol
+from typing import Any, Callable, Mapping, Protocol
 
 from apps.shared.domain.embedding_model_binding import EmbeddingModelBinding
 from apps.workflow_engine.domain.execution import NodeExecutionControl
@@ -79,6 +79,9 @@ class QueryEmbeddingExecutionRequest:
     knowledge_base_ids: tuple[str, ...] = field(repr=False)
     failure_policy: str
     query: str = field(repr=False)
+    deadline_guard: Callable[[], None] | None = field(
+        default=None, repr=False, compare=False
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -171,6 +174,10 @@ class QueryEmbeddingExecutionService:
         ):
             raise QueryEmbeddingConfigurationError()
 
+        if request.deadline_guard is not None and not callable(
+            request.deadline_guard
+        ):
+            raise QueryEmbeddingConfigurationError()
         canonical_ids: list[uuid.UUID] = []
         seen: set[uuid.UUID] = set()
         invalid_count = 0
@@ -213,6 +220,8 @@ class QueryEmbeddingExecutionService:
         vectors: dict[str, tuple[float, ...]] = {}
         bindings: dict[str, EmbeddingModelBinding] = {}
         for binding, knowledge_base_ids in groups.items():
+            if request.deadline_guard is not None:
+                request.deadline_guard()
             try:
                 result = self._provider_runtime.invoke(
                     QueryEmbeddingProviderRequest(

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -129,6 +130,7 @@ class ModelRoutingRuntimeJudge:
         routing_feature_text: str,
         structural_facts: dict[str, Any] | None = None,
         rag_context: dict[str, Any] | None = None,
+        deadline_guard: Callable[[], None] | None = None,
     ) -> RuntimeRequirementAssessment:
         """후보 모델을 보지 않고 3축 요구 수준만 판정한다."""
 
@@ -137,6 +139,7 @@ class ModelRoutingRuntimeJudge:
             routing_feature_text=routing_feature_text,
             structural_facts=structural_facts,
             rag_context=rag_context,
+            deadline_guard=deadline_guard,
         )
         try:
             payload = json.loads(cls._response_content(response))
@@ -180,12 +183,15 @@ class ModelRoutingRuntimeJudge:
         routing_feature_text: str,
         structural_facts: dict[str, Any] | None,
         rag_context: dict[str, Any] | None,
+        deadline_guard: Callable[[], None] | None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Provider incomplete만 같은 Judge 계약으로 한 번 짧게 재시도한다."""
 
         attempts: list[dict[str, Any]] = []
         started_at = time.perf_counter()
         try:
+            if deadline_guard is not None:
+                deadline_guard()
             response = client.invoke_sync(
                 messages=cls._requirement_messages(
                     routing_feature_text=routing_feature_text,
@@ -200,6 +206,8 @@ class ModelRoutingRuntimeJudge:
             if str(getattr(exc, "reason_code", "")) not in cls._RETRYABLE_PROVIDER_REASON_CODES:
                 raise
             attempts.append(cls._safe_usage(getattr(exc, "usage", None)))
+            if deadline_guard is not None:
+                deadline_guard()
             response = client.invoke_sync(
                 messages=cls._requirement_messages(
                     routing_feature_text=routing_feature_text,

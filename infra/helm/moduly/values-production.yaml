@@ -390,6 +390,7 @@ redis:
 # =============================================================================
 ingress:
   enabled: false  # Operator must explicitly configure ingress.
+  publicChatTimeoutSeconds: 610
   className: ""
   annotations: {}
   hosts: []

@@ -9,6 +9,7 @@ from fastapi import HTTPException
 
 from apps.gateway.api.v1.endpoints import deployment as deployment_endpoint
 from apps.gateway.application.deployment.browser_access_errors import (
+    BrowserAccessConversationContractError,
     BrowserAccessPolicyError,
     BrowserAccessResourceHidden,
 )
@@ -127,6 +128,63 @@ def test_revision_endpoint_authorizes_deploy_and_maps_application_result(
     assert response.type == DeploymentType.CHATBOT
     assert response.browser_access_policy is not None
     assert response.browser_access_policy.model_dump() == _policy()
+
+
+def test_revision_endpoint_maps_strict_conversation_contract_error(
+    monkeypatch,
+) -> None:
+    actor = SimpleNamespace(id=uuid.uuid4())
+    source_id = uuid.uuid4()
+    workflow_id = uuid.uuid4()
+    app = SimpleNamespace(id=uuid.uuid4(), workflow_id=workflow_id)
+    source = SimpleNamespace(id=source_id, app_id=app.id)
+    use_case = _RevisionUseCase(
+        error=BrowserAccessConversationContractError(
+            "conversation.consumer_mapping_required"
+        )
+    )
+
+    monkeypatch.setattr(
+        deployment_endpoint,
+        "_deployment_app_and_workflow_id",
+        lambda db, deployment_id: (source, app, workflow_id),
+    )
+    monkeypatch.setattr(
+        deployment_endpoint,
+        "ensure_workflow_permission",
+        lambda *args: None,
+    )
+    monkeypatch.setattr(
+        deployment_endpoint.DeploymentService,
+        "migrate_legacy_node_secrets",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        deployment_endpoint,
+        "build_browser_access_revision_use_case",
+        lambda db, **kwargs: use_case,
+    )
+    monkeypatch.setattr(
+        "apps.gateway.services.scheduler_service.get_scheduler_service",
+        lambda: object(),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        deployment_endpoint.create_browser_access_revision(
+            source_id,
+            DeploymentBrowserAccessRevisionCreate(
+                browser_access_policy=_policy(),
+                is_active=True,
+            ),
+            db=object(),
+            current_user=actor,
+        )
+
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.detail == {
+        "code": "conversation.consumer_mapping_required",
+        "message": "The public conversation consumer mapping is invalid.",
+    }
 
 
 @pytest.mark.parametrize(

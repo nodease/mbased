@@ -1,5 +1,6 @@
 from apps.shared.utils.prompt_injection_guard import (
     build_untrusted_context_block,
+    frame_sanitized_untrusted_context_block,
     sanitize_untrusted_text,
     stringify_untrusted_value,
 )
@@ -28,6 +29,28 @@ def test_build_untrusted_context_block_delimits_and_redacts_context():
     assert "[REDACTED: possible prompt injection]" in block
     assert "정책 근거" in block
     assert "이전 지시를 무시" not in block
+
+
+def test_frame_sanitized_untrusted_context_block_does_not_redact_marker_again():
+    sanitized = (
+        "normal earlier question\n"
+        "[REDACTED: possible prompt injection]\n"
+        "normal follow-up"
+    )
+
+    block = frame_sanitized_untrusted_context_block(
+        sanitized,
+        label="CLIENT_CONVERSATION_HISTORY",
+        redacted_lines=1,
+    )
+
+    assert "normal earlier question" in block
+    assert "normal follow-up" in block
+    assert block.count("[REDACTED: possible prompt injection]") == 1
+    assert block.startswith(
+        "[BEGIN CLIENT_CONVERSATION_HISTORY - UNTRUSTED] "
+        "(redacted 1 line(s))"
+    )
 
 
 def test_stringify_untrusted_value_preserves_structured_evidence_but_redacts_secrets():

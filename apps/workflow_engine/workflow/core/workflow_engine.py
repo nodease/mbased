@@ -338,6 +338,8 @@ class WorkflowEngine:
 
         # 로깅 관련 초기화
         self.logger = WorkflowLogger(db)
+        if self.execution_context.get("suppress_content_persistence"):
+            self.logger.suppress_content_persistence()
         self.parent_run_id = parent_run_id
         self.start_node_id = entry_node_id
         self.is_subworkflow = is_subworkflow
@@ -878,6 +880,25 @@ class WorkflowEngine:
             mail_sensitive_lineage=self._is_mail_sensitive_node(node_id),
         )
 
+    def _raise_if_task_deadline_expired(
+        self,
+        node_id: str,
+        runtime_control: NodeExecutionControl | None,
+    ) -> None:
+        deadline = (
+            runtime_control.task_deadline
+            if runtime_control is not None
+            else self.task_deadline
+        )
+        if isinstance(deadline, bool) or not isinstance(deadline, (int, float)):
+            return
+        if time.monotonic() >= float(deadline):
+            raise ExternalEffectError(
+                "external_effect.deadline_exceeded",
+                retryable=False,
+                node_id=node_id,
+            )
+
     def _execute_node_task(
         self,
         node_id,
@@ -896,6 +917,7 @@ class WorkflowEngine:
         [GEVENT] 동기 메서드로 변환.
         """
         try:
+            self._raise_if_task_deadline_expired(node_id, runtime_control)
             # 노드 실행 (핵심) - 동기 실행
             result = node_instance.execute(inputs, runtime_control=runtime_control)
             from datetime import datetime, timezone

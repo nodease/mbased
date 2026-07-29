@@ -2004,6 +2004,172 @@ def test_toggle_blocks_reactivation_when_deployment_workflow_is_ambiguous(monkey
     assert db.committed is False
 
 
+def test_strict_toggle_blocks_legacy_public_chatbot_without_mutating_state(
+    monkeypatch,
+):
+    app_id = uuid.uuid4()
+    deployment_id = uuid.uuid4()
+    app = _row(
+        id=app_id,
+        organization_id=uuid.uuid4(),
+        active_deployment_id=None,
+    )
+    deployment = _row(
+        id=deployment_id,
+        app_id=app_id,
+        type=DeploymentType.CHATBOT,
+        is_active=False,
+        config=None,
+        graph_snapshot={
+            "nodes": [
+                _node("start", "startNode"),
+                _node("answer", "llmNode"),
+            ],
+            "edges": [_edge("start", "answer", "start-answer")],
+        },
+    )
+    db = _Db({App: [app], WorkflowDeployment: [deployment], Schedule: []})
+    scheduler = _Scheduler()
+    monkeypatch.setattr(
+        DeploymentService,
+        "_enforce_knowledge_preflight",
+        lambda *_args, **_kwargs: pytest.fail(
+            "strict conversation validation must run before knowledge preflight"
+        ),
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        DeploymentService.toggle_deployment(
+            db,
+            deployment_id,
+            scheduler,
+            runtime_policy=DEFAULT_DEPLOYMENT_RUNTIME_POLICY,
+            require_public_chat_conversation_contract=True,
+        )
+
+    assert exc_info.value.status_code == 422
+    assert exc_info.value.detail["code"] == "conversation.consumer_mapping_required"
+    assert deployment.is_active is False
+    assert app.active_deployment_id is None
+    assert scheduler.added == []
+    assert scheduler.removed == []
+    assert db.committed is False
+
+
+def test_strict_toggle_allows_valid_public_chatbot_consumer_mapping(monkeypatch):
+    app_id = uuid.uuid4()
+    deployment_id = uuid.uuid4()
+    app = _row(
+        id=app_id,
+        organization_id=uuid.uuid4(),
+        active_deployment_id=None,
+    )
+    graph_snapshot = {
+        "nodes": [
+            _node("start", "startNode"),
+            _node(
+                "loop",
+                "loopNode",
+                {
+                    "subGraph": {
+                        "nodes": [_node("answer", "llmNode")],
+                        "edges": [],
+                    }
+                },
+            ),
+        ],
+        "edges": [_edge("start", "loop", "start-loop")],
+    }
+    deployment = _row(
+        id=deployment_id,
+        app_id=app_id,
+        type=DeploymentType.CHATBOT,
+        is_active=False,
+        config={
+            "public_conversation": {
+                "contract_version": "public_chat_conversation.v1",
+                "history_consumer": {
+                    "node_id": "answer",
+                    "container_path": [
+                        {"kind": "loop", "node_id": "loop"}
+                    ],
+                },
+            }
+        },
+        graph_snapshot=graph_snapshot,
+    )
+    db = _Db({App: [app], WorkflowDeployment: [deployment], Schedule: []})
+    monkeypatch.setattr(
+        DeploymentService,
+        "_enforce_knowledge_preflight",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        deployment_module,
+        "enforce_workflow_configuration_preflight",
+        lambda *_args, **_kwargs: None,
+    )
+
+    DeploymentService.toggle_deployment(
+        db,
+        deployment_id,
+        _Scheduler(),
+        runtime_policy=DEFAULT_DEPLOYMENT_RUNTIME_POLICY,
+        require_public_chat_conversation_contract=True,
+    )
+
+    assert deployment.is_active is True
+    assert app.active_deployment_id == deployment_id
+    assert db.committed is True
+
+
+def test_compatibility_toggle_allows_legacy_public_chatbot(monkeypatch):
+    app_id = uuid.uuid4()
+    deployment_id = uuid.uuid4()
+    app = _row(
+        id=app_id,
+        organization_id=uuid.uuid4(),
+        active_deployment_id=None,
+    )
+    deployment = _row(
+        id=deployment_id,
+        app_id=app_id,
+        type=DeploymentType.CHATBOT,
+        is_active=False,
+        config=None,
+        graph_snapshot={
+            "nodes": [
+                _node("start", "startNode"),
+                _node("answer", "llmNode"),
+            ],
+            "edges": [_edge("start", "answer", "start-answer")],
+        },
+    )
+    db = _Db({App: [app], WorkflowDeployment: [deployment], Schedule: []})
+    monkeypatch.setattr(
+        DeploymentService,
+        "_enforce_knowledge_preflight",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        deployment_module,
+        "enforce_workflow_configuration_preflight",
+        lambda *_args, **_kwargs: None,
+    )
+
+    DeploymentService.toggle_deployment(
+        db,
+        deployment_id,
+        _Scheduler(),
+        runtime_policy=DEFAULT_DEPLOYMENT_RUNTIME_POLICY,
+        require_public_chat_conversation_contract=False,
+    )
+
+    assert deployment.is_active is True
+    assert app.active_deployment_id == deployment_id
+    assert db.committed is True
+
+
 def test_toggle_rejects_legacy_mail_inline_secret_with_common_preflight_error():
     app_id = uuid.uuid4()
     deployment_id = uuid.uuid4()

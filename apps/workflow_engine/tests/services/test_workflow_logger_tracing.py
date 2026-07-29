@@ -8,6 +8,102 @@ from apps.workflow_engine.workflow.core.workflow_logger import WorkflowLogger
 from apps.workflow_engine.workflow.errors import NonRetryableWorkflowError
 
 
+def test_public_client_history_mode_persists_only_content_free_run_and_node_logs(
+    monkeypatch,
+):
+    submitted = []
+
+    monkeypatch.setattr(
+        WorkflowLogger,
+        "_submit_log",
+        lambda self, task_name, data, countdown=0: submitted.append(
+            (task_name, data)
+        )
+        or True,
+    )
+
+    logger = WorkflowLogger()
+    run_id = logger.create_run_log(
+        workflow_id=str(uuid.uuid4()),
+        user_id=str(uuid.uuid4()),
+        user_input={"question": "private-current-question"},
+        is_deployed=True,
+        execution_context={
+            "trigger_mode": "app",
+            "suppress_content_persistence": True,
+        },
+    )
+    logger.update_run_log_finish({"answer": "private-current-answer"})
+    node_id = logger.create_node_log(
+        node_id="llm-1",
+        node_type="llmNode",
+        inputs={"history": "private-history"},
+        process_data={"prompt": "private-prompt"},
+    )
+    logger.update_node_log_finish(
+        node_id,
+        "llm-1",
+        {"text": "private-node-answer"},
+        node_type="llmNode",
+        inputs={"history": "private-history"},
+        process_data={"prompt": "private-prompt"},
+        trace_metadata={
+            "llm": {
+                "prompt": "private-prompt",
+                "credential_id": "private-credential-id",
+                "provider": "openai",
+                "selected_model": "gpt-4o-mini",
+                "fallback_used": True,
+                "prompt_tokens": 12,
+                "completion_tokens": 7,
+                "latency_ms": 31,
+                "decision_factors": {"private": "routing-input"},
+            }
+        },
+    )
+
+    assert run_id is not None
+    serialized = str(submitted)
+    for marker in (
+        "private-current-question",
+        "private-current-answer",
+        "private-history",
+        "private-prompt",
+        "private-node-answer",
+        "private-credential-id",
+        "routing-input",
+    ):
+        assert marker not in serialized
+
+    create_run = next(data for name, data in submitted if name == "log.create_run")
+    finish_run = next(
+        data for name, data in submitted if name == "log.update_run_finish"
+    )
+    create_node = next(data for name, data in submitted if name == "log.create_node")
+    finish_node = next(
+        data for name, data in submitted if name == "log.update_node_finish"
+    )
+    assert create_run["user_input"] == {}
+    assert create_run["trace_payloads"] == []
+    assert finish_run["outputs"] == {}
+    assert finish_run["trace_payloads"] == []
+    assert create_node["inputs"] == {}
+    assert create_node["process_data"] == {}
+    assert finish_node["inputs"] == {}
+    assert finish_node["outputs"] == {}
+    assert finish_node["process_data"] == {}
+    assert finish_node["trace_metadata"] == {
+        "llm": {
+            "provider": "openai",
+            "prompt_tokens": 12,
+            "completion_tokens": 7,
+            "latency_ms": 31,
+            "selected_model": "gpt-4o-mini",
+            "fallback_used": True,
+        }
+    }
+
+
 @pytest.mark.parametrize("failure_stage", ["serialize", "publish"])
 def test_submit_log_failure_does_not_escape_or_expose_raw_error(
     monkeypatch,

@@ -21,7 +21,7 @@ Status: Draft
 | 권한 | `team_workflow_permissions`, `team_knowledge_permissions`, `team_knowledge_collection_permissions`, `team_knowledge_domain_permissions`, `team_llm_permissions`, `team_mail_credential_permissions`, `team_audit_permissions`, `user_workflow_permissions`, `user_knowledge_permissions`, `user_knowledge_collection_permissions`, `user_knowledge_domain_permissions`, `user_llm_permissions`, `user_mail_credential_permissions`, `permission_requests`, `user_app_creation_permissions` |
 | 앱/워크플로우 | `apps`, `workflows`, `workflow_budgets`, `workflow_deployments`, `schedules`, `schedule_dispatch_claims`, `workflow_runs`, `workflow_node_runs`, `workflow_node_effect_attempts`, `workflow_node_secrets`, `llm_node_versions`, `deployment_parameter_optimization_plans` |
 | Agent Builder | `agent_builder_sessions`, `agent_builder_requests`, `agent_builder_drafts` |
-| Conversation Memory | `conversation_sessions`, `conversation_access_grants`, `conversation_turns`, `conversation_memory_entries`, `conversation_memory_summaries`, `memory_data_dependencies`, `memory_entry_dependencies`, `memory_summary_dependencies`, `memory_turn_dispatch_jobs`, `memory_summary_generation_jobs`, `memory_context_plans`, `memory_context_leases`, `memory_context_provider_attempts`, `conversation_purge_jobs`, `conversation_idempotency_records`, `conversation_secret_replays` |
+| Conversation Memory (authenticated target/dormant foundation) | `conversation_sessions`, `conversation_access_grants`, `conversation_turns`, `conversation_memory_entries`, `conversation_memory_summaries`, `memory_data_dependencies`, `memory_entry_dependencies`, `memory_summary_dependencies`, `memory_turn_dispatch_jobs`, `memory_summary_generation_jobs`, `memory_context_plans`, `memory_context_leases`, `memory_context_provider_attempts`, `conversation_purge_jobs`, `conversation_idempotency_records`, `conversation_secret_replays` |
 | 추적/감사 | `trace_payloads`, `trace_payload_access_events`, `trace_redaction_policies`, `trace_retention_policies`, `trace_visibility_policies`, `audit_logs`, `audit_event_outbox` |
 | 보안 알림 | `security_alerts`, `security_alert_audit_events`, `security_alert_reconciliation_watermarks`, `security_alert_reconciliation_receipts`, `security_alert_notification_outbox` |
 | Knowledge/RAG | `knowledge_bases`, `documents`, `document_versions`, `document_chunks`, `rag_answer_runs`, `knowledge_collections`, `knowledge_collection_items`, `knowledge_collection_sync_jobs`, `knowledge_collection_sync_job_items`, `knowledge_ingestion_outbox`, `knowledge_document_ingestion_jobs`, `knowledge_source_identities`, `source_authorization_provenance`, `source_policy_kb_use_grants` |
@@ -441,7 +441,7 @@ workflow 실행 이력. usage/trace/dashboard raw query의 원천이다.
 | duration | FLOAT | NULL |
 | meta_info | JSONB | NULL |
 | correlation_id / request_id | VARCHAR(255) | NULL, INDEX |
-| conversation_id | VARCHAR(255) | NULL, INDEX — **Legacy Current Implementation**의 browser-provided 챗봇 대화 격리 키. Target Conversation Memory session/access capability source of truth가 아님 ([chatbot-deployment](features/chatbot-deployment/requirements.md), [ADR-0030](decisions/ADR-0030-memory-bounded-context.md)) |
+| conversation_id | VARCHAR(255) | NULL, INDEX — authenticated internal legacy conversation namespace용. Public Chatbot은 browser conversation ID를 보내거나 저장하지 않음 ([ADR-0074](decisions/ADR-0074-public-chatbot-client-held-history.md)) |
 | workflow_task_id | VARCHAR(255) | NULL — Celery task id |
 | trace_metadata | JSONB | NULL — redaction-safe summary만 |
 | redaction_applied / pii_detected | BOOLEAN | NOT NULL |
@@ -558,12 +558,14 @@ ADR-0032의 `mail_message_processings`와 `mail_draft_effects`는 이미 구현�
 
 ### Target Conversation Memory Logical Model
 
+> Public Chatbot은 [ADR-0074](decisions/ADR-0074-public-chatbot-client-held-history.md)에 따라 아래 table을 생성·조회하지 않는다. Public 대화 이력은 Client request에만 존재하며 WorkflowRun/NodeRun/Trace payload에도 원문을 저장하지 않는다. 아래 logical/physical model은 authenticated internal Chatbot 후속 target과 기존 dormant foundation 설명이다.
+
 아래 항목은 [ADR-0030](decisions/ADR-0030-memory-bounded-context.md)과 [ADR-0033](decisions/ADR-0033-conversation-memory-contract-completion.md)의 logical model이다. MBA-316은 이를 15개 additive table과 `apps/memory/` persistence adapter로 물리화했지만 Gateway, Workflow Runtime, Client 또는 legacy `memory_mode`에는 연결하지 않은 dormant foundation이다. Public grant 발급, summary/provider 실행, context materialization, purge worker와 production composition은 각 후속 이슈가 소유한다.
 
 | Logical record | 핵심 binding과 제약 |
 | --- | --- |
-| Conversation Session | organization/app/workflow, deployment ID와 immutable version 또는 snapshot hash, conversation mapping/Memory policy version, execution subject 또는 public audience, lifecycle/content revision, active turn, contract/storage generation |
-| Conversation Access Grant | Public session, deployment ID/version/audience, verifier hash, expiry와 `active`, `transcript_only`, `revoked`, `expired` state. Raw token과 identity/subject를 저장하지 않으며 V1은 rotation chain/grace state를 두지 않음 |
+| Conversation Session | organization/app/workflow, deployment ID와 immutable version 또는 snapshot hash, conversation mapping/Memory policy version, authenticated execution subject, lifecycle/content revision, active turn, contract/storage generation |
+| Conversation Access Grant | MBA-317의 dormant Public foundation. ADR-0074 이후 active Public API/runtime에서 생성·조회하지 않으며 authenticated internal target은 현재 authentication과 subject binding을 사용 |
 | Conversation Turn | Session, canonical request/fingerprint, sequence/version, dispatch/execution reference, bounded display/Memory projection, terminal state |
 | Conversation Memory Entry | Final 또는 provisional projection, channel, content revision, privacy classification과 server-derived dependency set. Provisional entry는 CompleteTurn 전 다음 turn에서 조회하지 않음 |
 | Conversation Memory Summary | Source entry/revision과 dependency 합집합, summarizer capability/model policy version, generation/usage reconciliation state |
@@ -574,7 +576,7 @@ ADR-0032의 `mail_message_processings`와 `mail_draft_effects`는 이미 구현�
 | Conversation Purge Job / Receipt | Delete tombstone, session/access/content/operational record purge progress, legal-hold isolation, terminal status와 verifier-hash receipt expiry. Session subject/audience binding과 Conversation grant verifier를 제거한 뒤에도 organization/deployment ID·version/audience scope snapshot이 있는 최소 opaque tombstone만 receipt expiry까지 유지 |
 | Idempotency / secret replay record | Scope/fingerprint/status와 bounded encrypted response replay. Memory-owned periodic cleanup이 live database ciphertext를 TTL 뒤 물리 삭제하며 backup irrecoverability는 별도 승인된 crypto-erasure/no-backup activation contract가 소유 |
 
-Session의 deployment binding은 active deployment pointer 변경으로 자동 갱신하지 않는다. Audit/usage는 Memory content record가 아니며 각 소유 도메인의 retention을 따르되 raw transcript, token/hash, prompt와 private source identity를 포함하지 않는다. `completed_with_hold`는 public purge의 compliance 격리 terminal 상태이고 실제 physical erasure 완료를 뜻하지 않는다. Hold 해제 erasure는 별도 compliance process가 소유하며 public terminal row를 `completed`로 되돌리지 않는다.
+Session의 deployment binding은 active deployment pointer 변경으로 자동 갱신하지 않는다. Audit/usage는 Memory content record가 아니며 각 소유 도메인의 retention을 따르되 raw transcript, token/hash, prompt와 private source identity를 포함하지 않는다. 기존 Public purge 상태와 receipt column은 dormant foundation이며 ADR-0074의 Public request path에서 읽거나 쓰지 않는다. Authenticated internal erasure와 legal-hold 상태는 후속 governance 계약이 소유한다.
 
 #### MBA-316 physical foundation
 

@@ -8,6 +8,7 @@ import {
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { DeploymentFlowModal } from './DeploymentFlowModal';
+import { publicChatConsumerSelectionKey } from '../../utils/publicChatConversationConsumers';
 
 vi.mock('@/app/features/app/components/AppAuthSecretControl', () => ({
   AppAuthSecretControl: ({
@@ -18,7 +19,9 @@ vi.mock('@/app/features/app/components/AppAuthSecretControl', () => ({
   }: {
     appId: string;
     issuedSecret?: { value: string; version: number } | null;
-    onSecretAvailable?: (secret: { value: string; version: number } | null) => void;
+    onSecretAvailable?: (
+      secret: { value: string; version: number } | null,
+    ) => void;
     onReadinessChange?: (readiness: 'ready') => void;
   }) => (
     <div>
@@ -52,7 +55,14 @@ describe('DeploymentFlowModal', () => {
         onClose={vi.fn()}
         appId="app-1"
         deploymentType="api"
-        llmNodes={[{ id: 'llm-1', title: '티켓 분류' }]}
+        llmNodes={[
+          {
+            id: 'llm-1',
+            title: '티켓 분류',
+            containerPath: [],
+            selectionKey: publicChatConsumerSelectionKey('llm-1', []),
+          },
+        ]}
         onDeploy={onDeploy}
       />,
     );
@@ -110,5 +120,60 @@ describe('DeploymentFlowModal', () => {
     rerender(renderModal(false));
     rerender(renderModal(true));
     expect(await screen.findByText('현재 Secret: 없음')).toBeVisible();
+  });
+
+  it('requires an explicit history consumer when a chatbot has multiple LLM nodes', async () => {
+    const onDeploy = vi.fn().mockResolvedValue({ success: true, version: 1 });
+
+    render(
+      <DeploymentFlowModal
+        isOpen
+        onClose={vi.fn()}
+        appId="app-1"
+        deploymentType="chatbot"
+        llmNodes={[
+          {
+            id: 'classifier',
+            title: '분류기',
+            containerPath: [],
+            selectionKey: publicChatConsumerSelectionKey('classifier', []),
+          },
+          {
+            id: 'answer',
+            title: '항목 반복 / 최종 답변',
+            containerPath: [{ kind: 'loop', node_id: 'loop-1' }],
+            selectionKey: publicChatConsumerSelectionKey('answer', [
+              { kind: 'loop', node_id: 'loop-1' },
+            ]),
+          },
+        ]}
+        onDeploy={onDeploy}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: '배포' })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('대화 기록을 사용할 LLM 노드'), {
+      target: {
+        value: publicChatConsumerSelectionKey('answer', [
+          { kind: 'loop', node_id: 'loop-1' },
+        ]),
+      },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '배포' }));
+
+    await waitFor(() =>
+      expect(onDeploy).toHaveBeenCalledWith(
+        '',
+        expect.any(Object),
+        expect.any(Object),
+        {
+          contract_version: 'public_chat_conversation.v1',
+          history_consumer: {
+            node_id: 'answer',
+            container_path: [{ kind: 'loop', node_id: 'loop-1' }],
+          },
+        },
+      ),
+    );
   });
 });

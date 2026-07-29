@@ -2,8 +2,13 @@ from __future__ import annotations
 
 import uuid
 
+import pytest
+
 from apps.gateway.adapters.deployment_browser_access_activation import (
     DeploymentBrowserAccessActivationGuard,
+)
+from apps.gateway.application.deployment.browser_access_errors import (
+    BrowserAccessConversationContractError,
 )
 from apps.gateway.composition import deployment as deployment_composition
 from apps.gateway.application.deployment.browser_access_models import (
@@ -79,6 +84,55 @@ def test_activation_guard_revalidates_mail_credentials_and_runtime_preflight(
     )
 
 
+def test_activation_guard_blocks_strict_legacy_public_chat_before_preflight(
+    monkeypatch,
+) -> None:
+    source = BrowserAccessSourceSnapshot(
+        id=uuid.uuid4(),
+        app_id=uuid.uuid4(),
+        workflow_id=uuid.uuid4(),
+        organization_id=uuid.uuid4(),
+        version=2,
+        deployment_type="chatbot",
+        graph_snapshot={
+            "nodes": [
+                {
+                    "id": "answer",
+                    "type": "llmNode",
+                    "position": {"x": 0, "y": 0},
+                    "data": {"title": "Answer"},
+                }
+            ],
+            "edges": [],
+        },
+        config={},
+        input_schema=None,
+        output_schema=None,
+        description=None,
+        url_slug="legacy-chatbot",
+    )
+
+    monkeypatch.setattr(
+        "apps.gateway.adapters.deployment_browser_access_activation."
+        "WorkflowService.validate_mail_credential_references",
+        lambda *args, **kwargs: pytest.fail(
+            "conversation contract must fail before mail validation"
+        ),
+    )
+    guard = DeploymentBrowserAccessActivationGuard(
+        object(),
+        preflight_factory=lambda *args: pytest.fail(
+            "conversation contract must fail before runtime preflight"
+        ),
+        require_public_chat_conversation_contract=True,
+    )
+
+    with pytest.raises(BrowserAccessConversationContractError) as exc_info:
+        guard.enforce(source, actor_id=uuid.uuid4())
+
+    assert exc_info.value.code == "conversation.consumer_mapping_required"
+
+
 def test_composition_builds_activation_preflight_with_actor_and_candidate(
     monkeypatch,
 ) -> None:
@@ -110,6 +164,11 @@ def test_composition_builds_activation_preflight_with_actor_and_candidate(
         "build_deployment_preflight_use_case",
         build_preflight,
     )
+    monkeypatch.setattr(
+        deployment_composition.settings,
+        "PUBLIC_CHAT_CONVERSATION_ROLLOUT_MODE",
+        "strict",
+    )
 
     use_case = deployment_composition.build_browser_access_revision_use_case(
         db,
@@ -117,6 +176,9 @@ def test_composition_builds_activation_preflight_with_actor_and_candidate(
     )
     result = use_case.activation_guard.preflight_factory(source, actor_id)
 
+    assert (
+        use_case.activation_guard.require_public_chat_conversation_contract is True
+    )
     assert result is expected
     assert captured == {
         "db": db,

@@ -294,6 +294,14 @@ def test_workflow_node_execution_with_input_mapping():
             "user_id": "user-1",
             "organization_id": "org-current",
             "app_id": "parent-app",
+            "public_chat_history": [
+                {"role": "user", "content": "private parent question"}
+            ],
+            "public_chat_history_ref": "e" * 32,
+            "public_chat_history_consumer_ref": "node-location:v1:parent",
+            "execution_actor": {"type": "public"},
+            "suppress_content_persistence": True,
+            "public_request_deadline_at": "2026-01-02T00:10:00+00:00",
         }
 
         # Input from previous nodes
@@ -335,6 +343,16 @@ def test_workflow_node_execution_with_input_mapping():
             "parent-app",
             "app-xyz",
         }
+        assert "public_chat_history" not in sub_context
+        assert "public_chat_history_ref" not in sub_context
+        assert "public_chat_history_consumer_ref" not in sub_context
+        assert sub_context["execution_actor"] == {"type": "public"}
+        assert sub_context["suppress_content_persistence"] is True
+        assert sub_context["public_request_deadline_at"] == "2026-01-02T00:10:00+00:00"
+        assert (
+            node.execution_context["public_chat_history"][0]["content"]
+            == "private parent question"
+        )
         assert node.execution_context.get("workflow_node_depth") is None
 
         # 3. 실행 결과 확인 (WorkflowNode는 {"result": ...} 형태로 반환)

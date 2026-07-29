@@ -9,6 +9,7 @@ from apps.gateway.auth.dependencies import get_current_user
 from apps.gateway.auth.permissions import ensure_workflow_permission
 from apps.gateway.core.config import settings
 from apps.gateway.application.deployment.browser_access_errors import (
+    BrowserAccessConversationContractError,
     BrowserAccessPolicyError,
     BrowserAccessResourceHidden,
 )
@@ -50,6 +51,9 @@ from apps.shared.domain.deployment_runtime_policy import (
     SURFACE_PUBLIC_INFO,
     DeploymentRuntimePolicy,
     is_deployment_type_allowed_for_surface,
+)
+from apps.shared.domain.public_chat_conversation import (
+    public_chat_conversation_capability,
 )
 from apps.shared.domain.provider_execution_capability import CapabilityPurpose
 from apps.shared.domain.workflow_node_location import (
@@ -208,8 +212,7 @@ def _raise_browser_access_policy_error(exc: BrowserAccessPolicyError) -> None:
     }
     if exc.origin_index is not None:
         detail["field"] = (
-            "browser_access_policy.embedding.parent_origins"
-            f"[{exc.origin_index}]"
+            f"browser_access_policy.embedding.parent_origins[{exc.origin_index}]"
         )
     raise HTTPException(status_code=422, detail=detail) from None
 
@@ -267,8 +270,7 @@ def _deployment_llm_policy_audit_metadata(kwargs: dict) -> dict[str, str]:
     try:
         location = CanonicalWorkflowNodeLocation(
             tuple(
-                (segment.kind, segment.node_id)
-                for segment in policy_in.container_path
+                (segment.kind, segment.node_id) for segment in policy_in.container_path
             ),
             node_id,
         )
@@ -291,11 +293,16 @@ def _raise_provider_execution_policy_error(
     if exc.code == "query_embedding_rollout_unavailable":
         status_code = 503
     else:
-        status_code = 409 if exc.code in {
-            "selection_ambiguous",
-            "capability_attempt_reused",
-            "capability_stale",
-        } else 422
+        status_code = (
+            409
+            if exc.code
+            in {
+                "selection_ambiguous",
+                "capability_attempt_reused",
+                "capability_stale",
+            }
+            else 422
+        )
     raise HTTPException(
         status_code=status_code,
         detail={
@@ -332,6 +339,9 @@ def create_deployment(
             current_user.id,
             observed_workflow_id=app.workflow_id,
             runtime_policy=runtime_policy,
+            require_public_chat_conversation_contract=(
+                settings.PUBLIC_CHAT_CONVERSATION_ROLLOUT_MODE == "strict"
+            ),
             auth_secret_lifecycle_mutations_enabled=(
                 settings.APP_AUTH_SECRET_LIFECYCLE_MODE == "active"
             ),
@@ -363,6 +373,12 @@ def preview_deployment_preflight(
         app.workflow_id,
         preflight_in.graph_snapshot,
     )
+    DeploymentService.validate_public_chat_conversation_config(
+        deployment_type=preflight_in.type,
+        config=preflight_in.config,
+        graph_snapshot=graph_snapshot,
+        required=(settings.PUBLIC_CHAT_CONVERSATION_ROLLOUT_MODE == "strict"),
+    )
     try:
         result = DeploymentService.preview_knowledge_preflight(
             db,
@@ -379,9 +395,7 @@ def preview_deployment_preflight(
     except DeploymentAuthSecretPreflightError as error:
         _raise_deployment_auth_secret_preflight_error(request, error)
     result.normalized_browser_access_policy = (
-        DeploymentBrowserAccessPolicy.model_validate(
-            browser_access_policy.to_dict()
-        )
+        DeploymentBrowserAccessPolicy.model_validate(browser_access_policy.to_dict())
         if browser_access_policy is not None
         else None
     )
@@ -493,6 +507,16 @@ def create_browser_access_revision(
         )
     except BrowserAccessPolicyError as exc:
         _raise_browser_access_policy_error(exc)
+    except BrowserAccessConversationContractError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": exc.code,
+                "message": (
+                    "The public conversation consumer mapping is invalid."
+                ),
+            },
+        ) from None
     except BrowserAccessResourceHidden:
         raise HTTPException(status_code=404, detail="Deployment not found") from None
     except DeploymentPreflightBlocked as exc:
@@ -806,6 +830,8 @@ def get_deployment_info_public(
     input_schema와 output_schema를 조회합니다.
 
     """
+    response.headers["Cache-Control"] = "no-store"
+
     from fastapi import HTTPException
 
     from apps.shared.db.models.app import App
@@ -852,6 +878,14 @@ def get_deployment_info_public(
         type=deployment.type.value,
         input_schema=deployment.input_schema,
         output_schema=deployment.output_schema,
+        public_conversation_contract=(
+            public_chat_conversation_capability(
+                deployment.config,
+                deployment.graph_snapshot,
+            )
+            if deployment.type is DeploymentType.CHATBOT
+            else None
+        ),
     )
 
 
@@ -884,6 +918,9 @@ def toggle_deployment(
             scheduler,
             runtime_policy=runtime_policy,
             user_id=current_user.id,
+            require_public_chat_conversation_contract=(
+                settings.PUBLIC_CHAT_CONVERSATION_ROLLOUT_MODE == "strict"
+            ),
             auth_secret_lifecycle_mutations_enabled=(
                 settings.APP_AUTH_SECRET_LIFECYCLE_MODE == "active"
             ),

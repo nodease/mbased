@@ -29,8 +29,17 @@ _redis_client: Optional[redis.Redis] = None
 _async_redis_client: Optional[aioredis.Redis] = None  # [NEW] 비동기 클라이언트
 
 
-def get_redis_client() -> redis.Redis:
+def get_redis_client(
+    *, socket_timeout_seconds: float | None = None
+) -> redis.Redis:
     """Redis 클라이언트 싱글톤 반환 (동기)"""
+    if socket_timeout_seconds is not None:
+        return redis.from_url(
+            REDIS_URL,
+            socket_connect_timeout=socket_timeout_seconds,
+            socket_timeout=socket_timeout_seconds,
+            retry_on_timeout=False,
+        )
     global _redis_client
     if _redis_client is None:
         _redis_client = redis.from_url(REDIS_URL)

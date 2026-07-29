@@ -8,6 +8,7 @@ Workflow-Engine Celery 태스크 정의
 import logging
 import time
 import uuid
+from datetime import datetime, timezone
 from typing import Any, Dict
 
 from celery.exceptions import Retry
@@ -17,6 +18,14 @@ from apps.shared.db.session import SessionLocal
 from apps.shared.domain.deployment_runtime_policy import (
     DeploymentRuntimePolicy,
     is_deployment_type_allowed_for_trigger,
+)
+from apps.shared.domain.public_chat_conversation import (
+    PublicChatConversationContractError,
+    resolve_public_chat_conversation_contract,
+)
+from apps.shared.domain.public_chat_history import (
+    PublicChatHistoryError,
+    remaining_public_chat_history_tokens,
 )
 from apps.shared.domain.schedule_dispatch import (
     REASON_EXECUTION_FAILED_AFTER_ADMISSION,
@@ -31,8 +40,14 @@ from apps.shared.services.schedule_dispatch_observability import (
     emit_schedule_dispatch_signal,
 )
 from apps.shared.services.workflow_task_publisher import (
+    PUBLIC_CHAT_WORKFLOW_TASK_NAME,
     RedactedWorkflowTask,
     send_workflow_task,
+)
+from apps.shared.services.public_chat_history_transient_store import (
+    PUBLIC_CHAT_HISTORY_TRANSIENT_IO_TIMEOUT_SECONDS,
+    PublicChatHistoryTransientStoreError,
+    consume_public_chat_history,
 )
 from apps.shared.services.workflow_node_catalog import node_side_effect_mapping
 from apps.shared.services.workflow_configuration_preflight import (
@@ -83,12 +98,111 @@ def _safe_retry(self, error: Exception):
     )
 
 
-def _workflow_task_deadline() -> float:
+def _reject_queued_public_chat_history(execution_context: Dict[str, Any]) -> None:
+    if "public_chat_history" in execution_context:
+        raise NonRetryableWorkflowError("conversation.history_payload_forbidden")
+
+
+def _is_public_transient_context(execution_context: Dict[str, Any]) -> bool:
+    return (
+        "public_chat_history_ref" in execution_context
+        or execution_context.get("public_chat_stateless_compatibility") is True
+        or execution_context.get("execution_actor") == {"type": "public"}
+    )
+
+
+def _reject_public_context_on_generic_task(
+    execution_context: Dict[str, Any],
+) -> None:
+    if _is_public_transient_context(execution_context):
+        raise NonRetryableWorkflowError("conversation.task_contract_mismatch")
+
+
+def _validate_public_task_contract(
+    execution_context: Dict[str, Any],
+    *,
+    is_deployed: bool,
+) -> None:
+    has_history_reference = "public_chat_history_ref" in execution_context
+    is_stateless = (
+        execution_context.get("public_chat_stateless_compatibility") is True
+    )
+    if (
+        (
+            "memory_mode" in execution_context
+            and execution_context["memory_mode"] is not False
+        )
+        or execution_context.get("conversation_id") is not None
+        or not is_deployed
+        or has_history_reference == is_stateless
+        or execution_context.get("trigger_mode") != "app"
+        or execution_context.get("execution_actor") != {"type": "public"}
+        or execution_context.get("suppress_content_persistence") is not True
+        or execution_context.get("execution_subject") is not None
+    ):
+        raise NonRetryableWorkflowError("conversation.task_contract_mismatch")
+
+
+def _workflow_task_deadline(
+    public_request_deadline: datetime | None = None,
+    *,
+    now: datetime | None = None,
+    monotonic_now: float | None = None,
+) -> float:
     hard_limit = celery_app.conf.task_time_limit
     if not isinstance(hard_limit, (int, float)) or hard_limit <= 0:
         raise RuntimeError("workflow task hard time limit is invalid")
     safety_margin = min(1.0, float(hard_limit) * 0.1)
-    return time.monotonic() + float(hard_limit) - safety_margin
+    current_monotonic = time.monotonic() if monotonic_now is None else monotonic_now
+    task_deadline = current_monotonic + float(hard_limit) - safety_margin
+    if public_request_deadline is None:
+        return task_deadline
+
+    current = now or datetime.now(timezone.utc)
+    remaining_seconds = (
+        public_request_deadline.astimezone(timezone.utc)
+        - current.astimezone(timezone.utc)
+    ).total_seconds()
+    return min(task_deadline, current_monotonic + max(0.0, remaining_seconds))
+
+
+def _public_history_consume_timeout_seconds(task_deadline: float) -> float:
+    remaining_seconds = task_deadline - time.monotonic()
+    if remaining_seconds <= 0:
+        raise NonRetryableWorkflowError("conversation.request_expired")
+    return min(
+        PUBLIC_CHAT_HISTORY_TRANSIENT_IO_TIMEOUT_SECONDS,
+        remaining_seconds,
+    )
+
+
+def _enforce_public_request_deadline(
+    execution_context: Dict[str, Any],
+    *,
+    now: datetime | None = None,
+) -> datetime | None:
+    is_public_transient = (
+        "public_chat_history_ref" in execution_context
+        or execution_context.get("public_chat_stateless_compatibility") is True
+        or execution_context.get("execution_actor") == {"type": "public"}
+    )
+    if not is_public_transient:
+        return None
+    raw_deadline = execution_context.get("public_request_deadline_at")
+    if not isinstance(raw_deadline, str):
+        raise NonRetryableWorkflowError("conversation.request_deadline_invalid")
+    try:
+        deadline = datetime.fromisoformat(raw_deadline)
+    except ValueError:
+        raise NonRetryableWorkflowError(
+            "conversation.request_deadline_invalid"
+        ) from None
+    if deadline.tzinfo is None or deadline.utcoffset() is None:
+        raise NonRetryableWorkflowError("conversation.request_deadline_invalid")
+    current = now or datetime.now(timezone.utc)
+    if deadline.astimezone(timezone.utc) <= current.astimezone(timezone.utc):
+        raise NonRetryableWorkflowError("conversation.request_expired")
+    return deadline.astimezone(timezone.utc)
 
 
 def _cleanup_execution_resources(engine, session, *, label: str) -> None:
@@ -101,14 +215,15 @@ def _cleanup_execution_resources(engine, session, *, label: str) -> None:
                 label,
                 type(exc).__name__,
             )
-    try:
-        session.close()
-    except Exception as exc:
-        logger.warning(
-            "%s session close failed: error_type=%s",
-            label,
-            type(exc).__name__,
-        )
+    if session is not None:
+        try:
+            session.close()
+        except Exception as exc:
+            logger.warning(
+                "%s session close failed: error_type=%s",
+                label,
+                type(exc).__name__,
+            )
 
 
 def _enforce_runtime_configuration(graph: Dict[str, Any], *, surface: str) -> None:
@@ -488,6 +603,47 @@ def _canonical_deployed_graph_execution_context(
         )
     context["deployment_id"] = str(deployment.id)
     context["workflow_version"] = deployment.version
+    for key in (
+        "conversation_id",
+        "execution_actor",
+        "memory_mode",
+        "public_chat_history_consumer_ref",
+        "public_chat_history_token_budget",
+        "public_chat_stateless_compatibility",
+        "suppress_content_persistence",
+    ):
+        context.pop(key, None)
+
+    has_public_history = "public_chat_history_ref" in queued_context
+    stateless_compatibility = (
+        queued_context.get("public_chat_stateless_compatibility") is True
+    )
+    if has_public_history or stateless_compatibility:
+        deployment_type = getattr(deployment.type, "value", deployment.type)
+        if (
+            deployment_type != "chatbot"
+            or queued_context.get("trigger_mode") != "app"
+            or queued_context.get("execution_subject") is not None
+        ):
+            raise PermanentDeploymentExecutionError(
+                "public conversation execution boundary is invalid"
+            )
+        context["execution_actor"] = {"type": "public"}
+        context["suppress_content_persistence"] = True
+        if has_public_history:
+            try:
+                contract = resolve_public_chat_conversation_contract(
+                    getattr(deployment, "config", None),
+                    deployment.graph_snapshot,
+                    required=True,
+                )
+            except PublicChatConversationContractError:
+                raise PermanentDeploymentExecutionError(
+                    "public conversation consumer mapping is invalid"
+                ) from None
+            context["public_chat_history_consumer_ref"] = contract.history_consumer_ref
+        else:
+            context["public_chat_stateless_compatibility"] = True
     return context
 
 
@@ -499,7 +655,10 @@ def _graph_requires_frozen_deployment(graph: Dict[str, Any]) -> bool:
 
 
 @celery_app.task(
-    name="workflow.execute", bind=True, max_retries=3, base=RedactedWorkflowTask
+    name="workflow.execute",
+    bind=True,
+    max_retries=3,
+    base=RedactedWorkflowTask,
 )
 def execute_workflow(
     self,
@@ -507,6 +666,53 @@ def execute_workflow(
     user_input: Dict[str, Any],
     execution_context: Dict[str, Any],
     is_deployed: bool = False,
+):
+    queued_context = dict(execution_context or {})
+    _reject_queued_public_chat_history(queued_context)
+    _reject_public_context_on_generic_task(queued_context)
+    return _execute_workflow(
+        self,
+        graph,
+        user_input,
+        queued_context,
+        is_deployed,
+    )
+
+
+@celery_app.task(
+    name=PUBLIC_CHAT_WORKFLOW_TASK_NAME,
+    bind=True,
+    max_retries=3,
+    base=RedactedWorkflowTask,
+)
+def execute_public_chat_workflow(
+    self,
+    graph: Dict[str, Any],
+    user_input: Dict[str, Any],
+    execution_context: Dict[str, Any],
+    is_deployed: bool = False,
+):
+    queued_context = dict(execution_context or {})
+    _reject_queued_public_chat_history(queued_context)
+    _validate_public_task_contract(
+        queued_context,
+        is_deployed=is_deployed,
+    )
+    return _execute_workflow(
+        self,
+        graph,
+        user_input,
+        queued_context,
+        is_deployed,
+    )
+
+
+def _execute_workflow(
+    self,
+    graph: Dict[str, Any],
+    user_input: Dict[str, Any],
+    execution_context: Dict[str, Any],
+    is_deployed: bool,
 ):
     """
     워크플로우 비동기 실행
@@ -524,13 +730,17 @@ def execute_workflow(
     """
     from apps.workflow_engine.workflow.core.workflow_engine import WorkflowEngine
 
-    task_deadline = _workflow_task_deadline()
-    session = SessionLocal()
+    queued_context = dict(execution_context or {})
+    _reject_queued_public_chat_history(queued_context)
+    public_request_deadline = _enforce_public_request_deadline(queued_context)
+    task_deadline = _workflow_task_deadline(public_request_deadline)
+    session = None
     engine = None
     sync_result = {}
+    public_history_consumed = False
 
     try:
-        queued_context = dict(execution_context or {})
+        session = SessionLocal()
         execution_context = (
             _canonical_deployed_graph_execution_context(
                 session,
@@ -555,6 +765,27 @@ def execute_workflow(
                 type(e).__name__,
             )
 
+        history_reference = execution_context.pop("public_chat_history_ref", None)
+        if history_reference is not None:
+            try:
+                history_token_budget = remaining_public_chat_history_tokens(user_input)
+            except PublicChatHistoryError as error:
+                raise NonRetryableWorkflowError(error.code) from None
+            _enforce_public_request_deadline(execution_context)
+            public_chat_history = consume_public_chat_history(
+                history_reference,
+                timeout_seconds=_public_history_consume_timeout_seconds(task_deadline),
+            )
+            if public_chat_history is None:
+                raise NonRetryableWorkflowError("conversation.history_unavailable")
+            public_history_consumed = True
+            execution_context["public_chat_history"] = [
+                dict(message) for message in public_chat_history
+            ]
+            execution_context["public_chat_history_token_budget"] = history_token_budget
+
+        _enforce_public_request_deadline(execution_context)
+
         engine = WorkflowEngine(
             graph=graph,
             user_input=user_input,
@@ -575,10 +806,23 @@ def execute_workflow(
 
     except ExternalEffectRetrySignal as e:
         logger.warning("Workflow external effect retry requested: code=%s", e.code)
+        if public_history_consumed:
+            raise NonRetryableWorkflowError(
+                "conversation.history_replay_required"
+            ) from e
         _safe_retry(self, e)
     except ExternalEffectError as e:
         logger.warning("Workflow external effect stopped: code=%s", e.code)
         return _external_effect_error_result(e)
+    except PublicChatHistoryTransientStoreError as e:
+        if e.code == "conversation.history_store_unavailable":
+            if time.monotonic() >= task_deadline:
+                raise NonRetryableWorkflowError(
+                    "conversation.request_expired"
+                ) from None
+            _enforce_public_request_deadline(queued_context)
+            _safe_retry(self, e)
+        raise NonRetryableWorkflowError("conversation.history_unavailable") from None
     except (PermanentDeploymentExecutionError, NonRetryableWorkflowError) as e:
         logger.error(
             "Workflow execution blocked: error_type=%s",
@@ -587,6 +831,10 @@ def execute_workflow(
         raise
     except Exception as e:
         logger.error("Workflow execution failed: error_type=%s", type(e).__name__)
+        if public_history_consumed:
+            raise NonRetryableWorkflowError(
+                "conversation.history_replay_required"
+            ) from e
         _safe_retry(self, e)
     finally:
         _cleanup_execution_resources(engine, session, label="workflow")

@@ -2,6 +2,7 @@ import uuid
 
 import pytest
 from apps.shared.services.workflow_task_publisher import (
+    PUBLIC_CHAT_WORKFLOW_TASK_NAME,
     WORKFLOW_ARGS_REPR,
     WORKFLOW_KWARGS_REPR,
     WorkflowTaskPublishError,
@@ -33,6 +34,23 @@ def test_workflow_publisher_adds_identity_once_and_redacts_repr() -> None:
     assert celery.calls[0][1]["argsrepr"] == WORKFLOW_ARGS_REPR
     assert celery.calls[0][1]["kwargsrepr"] == WORKFLOW_KWARGS_REPR
     assert args[2] == {"execution_id": existing}
+
+
+def test_public_chat_workflow_publisher_adds_identity_and_redacts_repr() -> None:
+    celery = _Celery()
+    context = {"execution_actor": {"type": "public"}}
+
+    send_workflow_task(
+        celery,
+        PUBLIC_CHAT_WORKFLOW_TASK_NAME,
+        args=[{"nodes": []}, {"question": "private"}, context, True],
+    )
+
+    sent = celery.calls[0]
+    uuid.UUID(sent[1]["args"][2]["execution_id"])
+    assert sent[1]["argsrepr"] == WORKFLOW_ARGS_REPR
+    assert sent[1]["kwargsrepr"] == WORKFLOW_KWARGS_REPR
+    assert "execution_id" not in context
 
 
 def test_workflow_publisher_issues_identity_when_missing() -> None:
