@@ -1,7 +1,7 @@
 # Knowledge Test Cases
 
 Status: Draft
-Verified Against: feature/mba-354 @ 788c840ff15ad921f75160a011505c6020beebe4
+Verified Against: feature/mba-354 @ 0dcc92377bd9632a1cb2c218472c164462f37810
 이 문서는 현재 RAG 동작과 목표 KB 통합 모델에 필요한 테스트 범위를 함께 기록한다. MBA-105 목표 모델 테스트는 [ADR-0017](../../decisions/ADR-0017-knowledge-integration-provisional-implementation-baseline.md)과 [implementation_baseline.md](implementation_baseline.md)의 임시 baseline을 기준으로 구현 blocker가 된다.
 KC sync의 실행·복구·snapshot·versioned finalization 검증은 [ADR-0048](../../decisions/ADR-0048-knowledge-collection-sync-execution-boundary.md)을 따른다.
 Organization Detector Provider와 embedding 전 local masking Target 테스트는 [ADR-0070](../../decisions/ADR-0070-organization-detector-provider-and-pre-embedding-local-masking-boundary.md)을 따른다. MBA-362가 runtime/persistence/provider adapter 테스트를 TDD로 구현하기 전에는 완료 증거가 아니다.
