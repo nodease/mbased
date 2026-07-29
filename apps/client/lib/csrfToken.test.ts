@@ -214,6 +214,72 @@ describe('attachCsrfProtection', () => {
     expect(attempts).toBe(2);
   });
 
+  it('coalesces one refresh when concurrent replay-safe requests reject the same token', async () => {
+    let resolveRefresh: ((response: Response) => void) | undefined;
+    let markRefreshStarted: (() => void) | undefined;
+    const refreshStarted = new Promise<void>((resolve) => {
+      markRefreshStarted = resolve;
+    });
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(csrfResponse('expired-token'))
+      .mockImplementationOnce(() => {
+        markRefreshStarted?.();
+        return new Promise<Response>((resolve) => {
+          resolveRefresh = resolve;
+        });
+      });
+    vi.stubGlobal('fetch', fetchMock);
+    let markSecondExpiredAttempt: (() => void) | undefined;
+    const secondExpiredAttempt = new Promise<void>((resolve) => {
+      markSecondExpiredAttempt = resolve;
+    });
+    const seenTokens: string[] = [];
+    const adapter: AxiosAdapter = async (config) => {
+      const token = String(
+        AxiosHeaders.from(config.headers).get('X-CSRF-Token'),
+      );
+      seenTokens.push(token);
+      if (token === 'expired-token') {
+        if (config.url?.endsWith('/b')) {
+          await refreshStarted;
+          markSecondExpiredAttempt?.();
+        }
+        return Promise.reject({
+          isAxiosError: true,
+          config,
+          response: {
+            status: 403,
+            data: {
+              error: { code: 'auth.csrf_validation_failed' },
+            },
+          },
+        });
+      }
+      return success(config);
+    };
+    const client = axios.create({ adapter, withCredentials: true });
+    attachCsrfProtection(client);
+
+    const requests = Promise.all([
+      client.put('/protected/a', { value: 1 }),
+      client.delete('/protected/b'),
+    ]);
+    await secondExpiredAttempt;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    resolveRefresh?.(csrfResponse('refreshed-token'));
+
+    await expect(requests).resolves.toHaveLength(2);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(seenTokens.filter((token) => token === 'expired-token')).toHaveLength(
+      2,
+    );
+    expect(
+      seenTokens.filter((token) => token === 'refreshed-token'),
+    ).toHaveLength(2);
+  });
+
   it('does not automatically replay non-idempotent requests', async () => {
     vi.stubGlobal(
       'fetch',

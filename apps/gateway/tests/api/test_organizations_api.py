@@ -378,7 +378,7 @@ class TestOrganizationsApi(unittest.TestCase):
 
         response = TestClient(app).get(
             "/api/v1/organizations/current",
-            headers={"X-Request-ID": "req-test"},
+            headers={"X-Request-ID": "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b"},
         )
 
         self.assertEqual(response.status_code, 400)
@@ -400,7 +400,7 @@ class TestOrganizationsApi(unittest.TestCase):
             "/api/v1/organizations/current",
             headers={
                 "X-Organization-Id": "not-a-uuid",
-                "X-Request-ID": "req-test",
+                "X-Request-ID": "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b",
             },
         )
 
@@ -428,7 +428,7 @@ class TestOrganizationsApi(unittest.TestCase):
             "/api/v1/organizations/current",
             headers={
                 "X-Organization-Id": str(organization_id),
-                "X-Request-ID": "req-test",
+                "X-Request-ID": "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b",
             },
         )
 
@@ -736,14 +736,14 @@ class TestOrganizationsApi(unittest.TestCase):
         ]
         header_cases = [
             (
-                {"X-Request-ID": "req-test"},
+                {"X-Request-ID": "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b"},
                 400,
                 _error("organization.required", "X-Organization-Id header is required."),
             ),
             (
                 {
                     "X-Organization-Id": "not-a-uuid",
-                    "X-Request-ID": "req-test",
+                    "X-Request-ID": "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b",
                 },
                 422,
                 _error(
@@ -755,7 +755,7 @@ class TestOrganizationsApi(unittest.TestCase):
             (
                 {
                     "X-Organization-Id": str(header_organization_id),
-                    "X-Request-ID": "req-test",
+                    "X-Request-ID": "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b",
                 },
                 404,
                 _error("resource.not_found", "Organization not found."),
@@ -834,7 +834,7 @@ class TestOrganizationsApi(unittest.TestCase):
                             kwargs["json"] = {"organization_auth_state": "manager"}
                         else:
                             kwargs["json"] = {"user_id": str(target_user_id)}
-                    headers = {"X-Request-ID": "req-test"}
+                    headers = {"X-Request-ID": "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b"}
                     if service_name != "accept_invitation":
                         headers["X-Organization-Id"] = str(organization_id)
                     response = getattr(TestClient(app), method)(
@@ -845,7 +845,7 @@ class TestOrganizationsApi(unittest.TestCase):
 
                 self.assertEqual(response.status_code, exc.status_code)
                 self.assertEqual(response.json()["error"]["code"], code)
-                self.assertEqual(response.json()["error"]["request_id"], "req-test")
+                self.assertEqual(response.json()["error"]["request_id"], "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b")
 
     def test_route_hides_organization_outside_user_memberships(self):
         # 조직이 없거나 현재 사용자의 membership scope 밖이면 존재 여부를 노출하지 않고 404로 숨긴다.
@@ -859,7 +859,7 @@ class TestOrganizationsApi(unittest.TestCase):
 
         response = TestClient(app).get(
             f"/api/v1/organizations/{organization_id}",
-            headers={"X-Request-ID": "req-test"},
+            headers={"X-Request-ID": "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b"},
         )
 
         self.assertEqual(response.status_code, 404)
@@ -908,7 +908,7 @@ class TestOrganizationsApi(unittest.TestCase):
 
         response = TestClient(app).patch(
             f"/api/v1/organizations/{organization_id}",
-            headers={"X-Request-ID": "req-test"},
+            headers={"X-Request-ID": "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b"},
             json={"name": "Acme Korea"},
         )
 
@@ -929,7 +929,7 @@ class TestOrganizationsApi(unittest.TestCase):
             f"/api/v1/organizations/{organization_id}",
             headers={
                 "X-Organization-Id": "not-a-uuid",
-                "X-Request-ID": "req-test",
+                "X-Request-ID": "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b",
             },
             json={"name": "Acme Korea"},
         )
@@ -956,7 +956,7 @@ class TestOrganizationsApi(unittest.TestCase):
             f"/api/v1/organizations/{organization_id}",
             headers={
                 "X-Organization-Id": str(header_organization_id),
-                "X-Request-ID": "req-test",
+                "X-Request-ID": "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b",
             },
             json={"name": "Acme Korea"},
         )
@@ -983,7 +983,7 @@ class TestOrganizationsApi(unittest.TestCase):
             f"/api/v1/organizations/{organization_id}",
             headers={
                 "X-Organization-Id": str(organization_id),
-                "X-Request-ID": "req-test",
+                "X-Request-ID": "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b",
             },
             json={"name": "Acme Korea"},
         )
@@ -1015,7 +1015,7 @@ class TestOrganizationsApi(unittest.TestCase):
                 f"/api/v1/organizations/{organization_id}",
                 headers={
                     "X-Organization-Id": str(organization_id),
-                    "X-Request-ID": "req-test",
+                    "X-Request-ID": "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b",
                 },
                 json={"name": "Acme Korea"},
             )
@@ -1050,7 +1050,7 @@ class TestOrganizationsApi(unittest.TestCase):
                 f"/api/v1/organizations/{organization_id}",
                 headers={
                     "X-Organization-Id": str(organization_id),
-                    "X-Request-ID": "req-test",
+                    "X-Request-ID": "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b",
                 },
                 json={"name": "Acme Korea"},
             )
@@ -1078,7 +1078,7 @@ class TestOrganizationsApi(unittest.TestCase):
             f"/api/v1/organizations/{organization_id}",
             headers={
                 "X-Organization-Id": str(organization_id),
-                "X-Request-ID": "req-test",
+                "X-Request-ID": "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b",
             },
             json={"name": "Acme Korea"},
         )
@@ -1107,7 +1107,7 @@ class TestOrganizationsApi(unittest.TestCase):
             f"/api/v1/organizations/{organization_id}",
             headers={
                 "X-Organization-Id": str(organization_id),
-                "X-Request-ID": "req-test",
+                "X-Request-ID": "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b",
             },
             json={"name": "Acme Korea"},
         )
@@ -1135,7 +1135,7 @@ class TestOrganizationsApi(unittest.TestCase):
             f"/api/v1/organizations/{organization_id}",
             headers={
                 "X-Organization-Id": str(organization_id),
-                "X-Request-ID": "req-test",
+                "X-Request-ID": "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b",
             },
             json={},
         )
@@ -1162,7 +1162,7 @@ class TestOrganizationsApi(unittest.TestCase):
             f"/api/v1/organizations/{organization_id}",
             headers={
                 "X-Organization-Id": str(organization_id),
-                "X-Request-ID": "req-test",
+                "X-Request-ID": "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b",
             },
             json={"name": "   "},
         )
@@ -1193,14 +1193,14 @@ class TestOrganizationsApi(unittest.TestCase):
             f"/api/v1/organizations/{organization_id}",
             headers={
                 "X-Organization-Id": str(organization_id),
-                "X-Request-ID": "req-test",
+                "X-Request-ID": "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b",
             },
             json={"name": "A" * 256},
         )
 
         self.assertEqual(response.status_code, 422)
         self.assertEqual(response.json()["error"]["code"], "validation.failed")
-        self.assertEqual(response.json()["error"]["request_id"], "req-test")
+        self.assertEqual(response.json()["error"]["request_id"], "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b")
         self.assertEqual(
             response.json()["error"]["message"],
             "Request validation failed.",
@@ -1488,7 +1488,7 @@ def _error(code, message, details=None):
         "error": {
             "code": code,
             "message": message,
-            "request_id": "req-test",
+            "request_id": "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b",
             "details": details or {},
         }
     }

@@ -147,6 +147,12 @@ Status: Draft
 | AUTH-TC-CS024 | Middleware 순서는 허용된 Client가 안전한 CSRF 오류를 읽고 Public/webhook 외곽 경계를 유지해야 한다. | `app.user_middleware` 순서를 검사한다. | Webhook redaction → Public CORS → credentialed CORS → CSRF → Session 순서. |
 | AUTH-TC-CS025 | Ambient cross-site GET은 bootstrap cookie를 회전시키지 않아야 한다. | Custom bootstrap header 없이 cross-site image/navigation 요청을 보내거나 unlisted same-site Origin에서 header를 보낸다. | Fixed 403, Set-Cookie 없음, token service/DB 미진입. |
 | AUTH-TC-CS026 | Auth/organization lifecycle 전환 전의 in-flight bootstrap은 stale token을 되살리지 않아야 한다. | Bootstrap A가 pending인 동안 cache를 invalidate하고 같은 origin/scope bootstrap B를 시작한 뒤 A를 늦게 완료한다. | A caller는 mutation 전 실패, B는 A 정리 뒤 발급되어 최종 cookie/cache를 소유하고 이후 요청이 B를 재사용. |
+| AUTH-TC-CS027 | 동일한 만료 token을 사용한 동시 안전 요청은 refresh를 서로 무효화하지 않아야 한다. | 두 PUT/DELETE가 같은 token으로 403을 받고 첫 refresh가 pending인 동안 두 번째 403을 처리한다. | Generation 폐기와 bootstrap 각 1회, 두 요청 모두 새 token으로 한 번만 재시도해 성공. |
+| AUTH-TC-CS028 | 비ASCII double-submit token은 exception 없이 거부해야 한다. | Header/cookie에 같은 비ASCII 문자열을 보낸다. | `compare_digest` 전에 `token_invalid`, fixed 403, endpoint effect 0. |
+| AUTH-TC-CS029 | CSRF 감사 request ID는 token/PII header를 반사하지 않아야 한다. | 유효한 CSRF token 또는 임의 문자열을 `X-Request-ID`에도 넣고 거부를 유도한다. | 응답과 audit에는 새 canonical UUID만 있고 입력 원문은 없음. |
+| AUTH-TC-CS030 | 동기 CSRF 거부 감사 persistence는 event loop를 점유하지 않아야 한다. | Sync callback에서 DB/I/O 대기를 모사하고 callback thread를 기록한다. | Callback은 bounded worker thread에서 실행되고 고정 403 계약 유지. |
+| AUTH-TC-CS031 | Auth API endpoint 행은 endpoint inventory에만 있어야 한다. | `/auth/csrf` endpoint 행을 field/cookie/error table에 중복한다. | 문서 구조 테스트 실패; endpoint 행 정확히 1개. |
+
 ## Component And Hook Tests
 
 | ID | 검증 조건 | 최소 실패 조건 | 기대 결과 |

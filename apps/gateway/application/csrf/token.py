@@ -154,6 +154,8 @@ class CsrfTokenService:
         if (
             len(header_token) > _MAX_TOKEN_LENGTH
             or len(cookie_token) > _MAX_TOKEN_LENGTH
+            or not header_token.isascii()
+            or not cookie_token.isascii()
         ):
             return CsrfValidationReason.TOKEN_INVALID
         if not hmac.compare_digest(header_token, cookie_token):

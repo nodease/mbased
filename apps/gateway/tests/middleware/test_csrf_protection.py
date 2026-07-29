@@ -1,5 +1,7 @@
 import re
+import threading
 
+import httpx
 import pytest
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
@@ -21,7 +23,8 @@ from apps.gateway.middleware.csrf import CsrfProtectionMiddleware
 
 
 ORIGIN = "https://client.example"
-NOW_HEADER = {"X-Request-ID": "csrf-request-id"}
+REQUEST_ID = "b6cd0468-834d-4d26-868e-f25c887efe06"
+NOW_HEADER = {"X-Request-ID": REQUEST_ID}
 
 
 def _policy(
@@ -43,6 +46,8 @@ def _policy(
 def _build_app(
     token_service: CsrfTokenService,
     denied: list[tuple[str, str, str, str]],
+    *,
+    on_denied_override=None,
 ):
     app = FastAPI()
     effects = {"protected": 0, "public": 0, "pre_auth": 0}
@@ -89,7 +94,7 @@ def _build_app(
         token_service=token_service,
         allowed_origins=(ORIGIN,),
         enforcement_enabled=True,
-        on_denied=on_denied,
+        on_denied=on_denied_override or on_denied,
     )
     return app, effects
 
@@ -185,7 +190,7 @@ def test_invalid_browser_boundary_is_rejected_before_body_or_side_effect(
         "error": {
             "code": "auth.csrf_validation_failed",
             "message": "CSRF validation failed.",
-            "request_id": "csrf-request-id",
+            "request_id": REQUEST_ID,
         }
     }
     assert effects["protected"] == 0
@@ -194,7 +199,7 @@ def test_invalid_browser_boundary_is_rejected_before_body_or_side_effect(
             expected_reason,
             "cookie_authenticated",
             "POST",
-            "csrf-request-id",
+            REQUEST_ID,
         )
     ]
 
@@ -217,11 +222,79 @@ def test_cookie_authenticated_route_without_auth_cookie_returns_401_before_effec
         "error": {
             "code": "auth.required",
             "message": "Authentication is required.",
-            "request_id": "csrf-request-id",
+            "request_id": REQUEST_ID,
         }
     }
     assert effects["protected"] == 0
     assert denied == []
+
+
+@pytest.mark.asyncio
+async def test_denial_telemetry_runs_outside_the_gateway_event_loop(
+    token_service: CsrfTokenService,
+):
+    callback_threads: list[int] = []
+    event_loop_thread = threading.get_ident()
+
+    def on_denied(*_args):
+        callback_threads.append(threading.get_ident())
+
+    app, effects = _build_app(
+        token_service,
+        [],
+        on_denied_override=on_denied,
+    )
+    headers, token = _authenticated_headers(token_service)
+    headers["Origin"] = "https://attacker.example"
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app),
+        base_url=ORIGIN,
+    ) as client:
+        client.cookies.set("auth_token", "session-a")
+        client.cookies.set(CSRF_COOKIE_NAME, token)
+        response = await client.post(
+            "/protected",
+            headers=headers,
+            json={"value": 1},
+        )
+
+    assert response.status_code == 403
+    assert effects["protected"] == 0
+    assert callback_threads
+    assert callback_threads[0] != event_loop_thread
+
+
+def test_csrf_denial_replaces_noncanonical_request_id_before_telemetry(
+    token_service: CsrfTokenService,
+):
+    denied: list[tuple[str, str, str, str]] = []
+    app, effects = _build_app(token_service, denied)
+    headers, token = _authenticated_headers(token_service)
+    headers["Origin"] = "https://attacker.example"
+    headers["X-Request-ID"] = token
+
+    with TestClient(app, base_url=ORIGIN) as client:
+        client.cookies.set("auth_token", "session-a")
+        client.cookies.set(CSRF_COOKIE_NAME, token)
+        response = client.post("/protected", headers=headers, json={"value": 1})
+
+    safe_request_id = response.json()["error"]["request_id"]
+    assert safe_request_id != token
+    assert re.fullmatch(
+        r"[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-"
+        r"[89ab][0-9a-f]{3}-[0-9a-f]{12}",
+        safe_request_id,
+    )
+    assert denied == [
+        (
+            "origin_invalid",
+            "cookie_authenticated",
+            "POST",
+            safe_request_id,
+        )
+    ]
+    assert effects["protected"] == 0
 
 
 def test_pre_auth_token_uses_anonymous_seed_without_auth_cookie(

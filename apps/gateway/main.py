@@ -2,7 +2,6 @@
 # .env 파일을 기본값으로 로드 ( 개발 환경 )
 import logging
 import sys
-import uuid
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -61,6 +60,7 @@ from apps.gateway.core.http_security import (
     parse_credentialed_cors_origins,
     resolve_session_signing_secret,
 )
+from apps.gateway.core.request_id import safe_request_id
 from apps.gateway.lifespan import lifespan  # Import lifespan from module
 from apps.gateway.middleware.webhook_query_redaction import (
     WebhookQueryRedactionMiddleware,
@@ -86,7 +86,7 @@ app = FastAPI(title="Moduly Gateway API", lifespan=lifespan)
 # 요청별 request_id를 보장하고 audit 로그용 요청 metadata를 전파한다.
 @app.middleware("http")
 async def add_request_id(request: Request, call_next):
-    request_id = request.headers.get("X-Request-ID") or str(uuid.uuid4())
+    request_id = safe_request_id(request.headers.get("X-Request-ID"))
     request.state.request_id = request_id
     token = set_current_metadata(
         {

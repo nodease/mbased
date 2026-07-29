@@ -112,6 +112,11 @@ Auth는 보호된 Gateway API가 `auth_token` 쿠키에서 현재 사용자를 �
 - AUTH-REQ-086: `CORS_ORIGINS`는 CSRF exact-Origin allowlist에 재사용하되 CORS 허용을 CSRF 성공으로 간주하지 않아야 한다. CORS middleware는 허용된 Client가 CSRF `401/403`을 읽을 수 있도록 CSRF middleware 바깥에 있어야 한다.
 - AUTH-REQ-087: Workflow stream proxy는 original Origin, Fetch Metadata, CSRF token과 organization context를 전달하고, 엄격히 검증한 header token만 outbound host-only CSRF cookie로 복제해야 한다. 다른 proxy/public adapter는 이 예외를 일반화하지 않아야 한다.
 - AUTH-REQ-088: CSRF enforcement는 development와 production에서 기본 활성화되어야 한다. Disabled mode는 `NODE_ENV=test`에서만 허용하고 production disabled/unknown mode는 startup을 실패시켜야 한다.
+- AUTH-REQ-089: Header/cookie CSRF token은 constant-time equality 이전에 길이와 ASCII 형식을 검증해야 한다. 비ASCII 또는 비정규 입력은 exception이나 `500` 없이 고정 `403`의 내부 `token_invalid` reason으로 닫아야 한다.
+- AUTH-REQ-090: 같은 origin/scope의 동일한 rejected token을 사용한 동시 안전 요청은 token cache generation을 한 번만 폐기하고 하나의 refresh bootstrap을 공유해야 한다. 늦게 도착한 동일 token의 `403`이 이미 시작한 refresh를 무효화하거나 정상 요청 하나를 실패시켜서는 안 된다.
+- AUTH-REQ-091: 외부 `X-Request-ID`는 canonical RFC 4122 UUID만 보존하고 다른 값은 서버 생성 UUID로 대체해야 한다. Token, PII 또는 임의 header 원문을 응답, audit와 log의 request ID로 반사하지 않아야 한다.
+- AUTH-REQ-092: CSRF 거부 audit/metric callback의 동기 DB 또는 I/O 작업은 Gateway event loop 밖의 전용 bounded thread 경계에서 수행해야 한다. Callback 실패는 고정 `401/403` 계약을 바꾸지 않아야 한다.
+
 ## Policies And Edge Cases
 
 - CORS, SameSite와 CSRF token은 서로 대체하지 않는 독립 방어 계층이다.

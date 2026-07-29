@@ -160,6 +160,28 @@ export const invalidateCsrfToken = () => {
   cachedTokenByOrigin.clear();
 };
 
+const invalidateRejectedCsrfToken = (
+  organizationId: string | null | undefined,
+  requestTarget: RequestInfo | URL | undefined,
+  rejectedToken: unknown,
+) => {
+  if (typeof rejectedToken !== 'string' || rejectedToken.length === 0) {
+    return false;
+  }
+  const scope = normalizeScope(organizationId);
+  const target = resolveBootstrapTarget(requestTarget);
+  const cachedToken = cachedTokenByOrigin.get(target.cacheKey);
+  if (
+    !cachedToken ||
+    cachedToken.scope !== scope ||
+    cachedToken.token !== rejectedToken
+  ) {
+    return false;
+  }
+  invalidateCsrfToken();
+  return true;
+};
+
 export const getCsrfToken = async (
   organizationId?: string | null,
   requestTarget?: RequestInfo | URL,
@@ -248,8 +270,16 @@ export const attachCsrfProtection = (client: AxiosInstance) => {
       const error = rawError as AxiosError;
       if (!isFixedCsrfFailure(error)) return Promise.reject(rawError);
 
-      invalidateCsrfToken();
       const config = error.config as RetryableRequestConfig | undefined;
+      if (config) {
+        const headers = AxiosHeaders.from(config.headers);
+        const organizationId = headers.get(ORGANIZATION_HEADER_NAME);
+        invalidateRejectedCsrfToken(
+          typeof organizationId === 'string' ? organizationId : null,
+          axiosRequestTarget(config),
+          headers.get(CSRF_HEADER_NAME),
+        );
+      }
       if (!config || config._csrfRetried || !isReplaySafe(config)) {
         return Promise.reject(rawError);
       }
@@ -288,24 +318,30 @@ export const csrfFetch = async (
     if (organizationId && !headers.has(ORGANIZATION_HEADER_NAME)) {
       headers.set(ORGANIZATION_HEADER_NAME, organizationId);
     }
-    headers.set(CSRF_HEADER_NAME, await getCsrfToken(organizationId, input));
-    return fetch(input, {
+    const token = await getCsrfToken(organizationId, input);
+    headers.set(CSRF_HEADER_NAME, token);
+    const response = await fetch(input, {
       ...init,
       method,
       headers,
       credentials: init.credentials ?? 'include',
     });
+    return { organizationId, response, token };
   };
 
-  const firstResponse = await send();
-  if (!(await responseHasFixedCsrfFailure(firstResponse))) {
-    return firstResponse;
+  const firstAttempt = await send();
+  if (!(await responseHasFixedCsrfFailure(firstAttempt.response))) {
+    return firstAttempt.response;
   }
 
-  invalidateCsrfToken();
+  invalidateRejectedCsrfToken(
+    firstAttempt.organizationId,
+    input,
+    firstAttempt.token,
+  );
   const headers = new Headers(init.headers);
-  if (!fetchReplaySafe(method, headers)) return firstResponse;
-  return send();
+  if (!fetchReplaySafe(method, headers)) return firstAttempt.response;
+  return (await send()).response;
 };
 
 if (typeof window !== 'undefined') {

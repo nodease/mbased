@@ -86,6 +86,21 @@ def test_missing_mismatched_and_malformed_tokens_are_rejected(
     assert reason is expected
 
 
+def test_non_ascii_double_submit_tokens_are_rejected_without_exception(
+    service: CsrfTokenService,
+):
+    reason = service.validate(
+        header_token="é",
+        cookie_token="é",
+        binding_kind=CsrfBindingKind.PRE_AUTH,
+        binding_secret="anonymous-seed",
+        organization_scope=None,
+        now=datetime(2026, 7, 29, tzinfo=timezone.utc),
+    )
+
+    assert reason is CsrfValidationReason.TOKEN_INVALID
+
+
 @pytest.mark.parametrize(
     ("binding_kind", "binding_secret", "organization_scope"),
     [

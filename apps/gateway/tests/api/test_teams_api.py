@@ -310,7 +310,7 @@ class TestTeamsApi(unittest.TestCase):
         ):
             response = TestClient(app).get(
                 "/api/v1/teams",
-                headers={"X-Request-ID": "req-test"},
+                headers={"X-Request-ID": "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b"},
             )
 
         self.assertEqual(response.status_code, 401)
@@ -456,7 +456,7 @@ class TestTeamsApi(unittest.TestCase):
                 "/api/v1/teams",
                 headers={
                     "X-Organization-Id": str(uuid4()),
-                    "X-Request-ID": "req-test",
+                    "X-Request-ID": "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b",
                 },
                 json={},
             )
@@ -806,7 +806,7 @@ class TestTeamsApi(unittest.TestCase):
                 f"/api/v1/teams/{uuid4()}",
                 headers={
                     "X-Organization-Id": str(uuid4()),
-                    "X-Request-ID": "req-test",
+                    "X-Request-ID": "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b",
                 },
                 json={"name": "Builders"},
             )
@@ -834,7 +834,7 @@ class TestTeamsApi(unittest.TestCase):
 
         self.assertEqual(response.status_code, 422)
         self.assertEqual(response.json()["error"]["code"], "validation.failed")
-        self.assertEqual(response.json()["error"]["request_id"], "req-test")
+        self.assertEqual(response.json()["error"]["request_id"], "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b")
         self.assertEqual(
             response.json()["error"]["message"],
             "Request validation failed.",
@@ -1107,7 +1107,7 @@ class TestTeamsApi(unittest.TestCase):
                 f"/api/v1/teams/{uuid4()}/members",
                 headers={
                     "X-Organization-Id": str(uuid4()),
-                    "X-Request-ID": "req-test",
+                    "X-Request-ID": "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b",
                 },
                 json={},
             )
@@ -1173,7 +1173,7 @@ class TestTeamsApi(unittest.TestCase):
                 f"/api/v1/teams/{uuid4()}/members",
                 headers={
                     "X-Organization-Id": str(uuid4()),
-                    "X-Request-ID": "req-test",
+                    "X-Request-ID": "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b",
                 },
                 json={"user_id": str(uuid4())},
             )
@@ -1200,7 +1200,7 @@ class TestTeamsApi(unittest.TestCase):
 
         self.assertEqual(response.status_code, 422)
         self.assertEqual(response.json()["error"]["code"], "validation.failed")
-        self.assertEqual(response.json()["error"]["request_id"], "req-test")
+        self.assertEqual(response.json()["error"]["request_id"], "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b")
         self.assertEqual(
             response.json()["error"]["message"],
             "Request validation failed.",
@@ -1404,7 +1404,7 @@ class TestTeamsApi(unittest.TestCase):
                 f"/api/v1/teams/{uuid4()}/members/{uuid4()}",
                 headers={
                     "X-Organization-Id": str(uuid4()),
-                    "X-Request-ID": "req-test",
+                    "X-Request-ID": "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b",
                 },
             )
 
@@ -1430,7 +1430,7 @@ class TestTeamsApi(unittest.TestCase):
 
         self.assertEqual(response.status_code, 422)
         self.assertEqual(response.json()["error"]["code"], "validation.failed")
-        self.assertEqual(response.json()["error"]["request_id"], "req-test")
+        self.assertEqual(response.json()["error"]["request_id"], "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b")
         self.assertEqual(
             response.json()["error"]["message"],
             "Request validation failed.",
@@ -1456,7 +1456,7 @@ class TestTeamsApi(unittest.TestCase):
 
         self.assertEqual(response.status_code, 422)
         self.assertEqual(response.json()["error"]["code"], "validation.failed")
-        self.assertEqual(response.json()["error"]["request_id"], "req-test")
+        self.assertEqual(response.json()["error"]["request_id"], "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b")
         self.assertEqual(
             response.json()["error"]["message"],
             "Request validation failed.",
@@ -1649,7 +1649,7 @@ class TestTeamsApi(unittest.TestCase):
     ):
         session.authenticate(user_id)
         app.dependency_overrides[get_db] = lambda: session
-        headers = {"X-Request-ID": "req-test"}
+        headers = {"X-Request-ID": "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b"}
         if raw_organization_id is not None:
             headers["X-Organization-Id"] = raw_organization_id
         elif organization_id is not None:
@@ -1675,7 +1675,7 @@ class TestTeamsApi(unittest.TestCase):
     ):
         session.authenticate(user_id)
         app.dependency_overrides[get_db] = lambda: session
-        headers = {"X-Request-ID": "req-test"}
+        headers = {"X-Request-ID": "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b"}
         if raw_organization_id is not None:
             headers["X-Organization-Id"] = raw_organization_id
         elif organization_id is not None:
@@ -1701,7 +1701,7 @@ class TestTeamsApi(unittest.TestCase):
     ):
         session.authenticate(user_id)
         app.dependency_overrides[get_db] = lambda: session
-        headers = {"X-Request-ID": "req-test"}
+        headers = {"X-Request-ID": "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b"}
         if raw_organization_id is not None:
             headers["X-Organization-Id"] = raw_organization_id
         elif organization_id is not None:
@@ -1729,7 +1729,7 @@ class TestTeamsApi(unittest.TestCase):
     ):
         session.authenticate(user_id)
         app.dependency_overrides[get_db] = lambda: session
-        headers = {"X-Request-ID": "req-test"}
+        headers = {"X-Request-ID": "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b"}
         if raw_organization_id is not None:
             headers["X-Organization-Id"] = raw_organization_id
         elif organization_id is not None:
@@ -1757,7 +1757,7 @@ class TestTeamsApi(unittest.TestCase):
     ):
         session.authenticate(user_id)
         app.dependency_overrides[get_db] = lambda: session
-        headers = {"X-Request-ID": "req-test"}
+        headers = {"X-Request-ID": "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b"}
         if raw_organization_id is not None:
             headers["X-Organization-Id"] = raw_organization_id
         elif organization_id is not None:
@@ -1785,7 +1785,7 @@ class TestTeamsApi(unittest.TestCase):
     ):
         session.authenticate(user_id)
         app.dependency_overrides[get_db] = lambda: session
-        headers = {"X-Request-ID": "req-test"}
+        headers = {"X-Request-ID": "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b"}
         if raw_organization_id is not None:
             headers["X-Organization-Id"] = raw_organization_id
         elif organization_id is not None:
@@ -1811,7 +1811,7 @@ class TestTeamsApi(unittest.TestCase):
     ):
         session.authenticate(user_id)
         app.dependency_overrides[get_db] = lambda: session
-        headers = {"X-Request-ID": "req-test"}
+        headers = {"X-Request-ID": "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b"}
         if raw_organization_id is not None:
             headers["X-Organization-Id"] = raw_organization_id
         elif organization_id is not None:
@@ -2201,7 +2201,7 @@ def _error(code, message, details=None):
         "error": {
             "code": code,
             "message": message,
-            "request_id": "req-test",
+            "request_id": "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b",
             "details": details or {},
         }
     }

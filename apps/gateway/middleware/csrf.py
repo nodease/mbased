@@ -3,10 +3,10 @@ from __future__ import annotations
 import inspect
 import logging
 import re
-import uuid
 from collections.abc import Callable, Sequence
 from typing import Any
 
+from anyio import CapacityLimiter, to_thread
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -27,6 +27,7 @@ from apps.gateway.application.csrf.token import (
     CsrfTokenService,
     CsrfValidationReason,
 )
+from apps.gateway.core.request_id import safe_request_id
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +41,7 @@ _ALLOWED_FETCH_SITES = frozenset({"same-origin", "same-site"})
 _JSON_MEDIA_TYPE = "application/json"
 _MULTIPART_MEDIA_TYPE = "multipart/form-data"
 _MULTIPART_BOUNDARY_PATTERN = re.compile(r"^[0-9A-Za-z._-]{1,70}$")
+_TELEMETRY_CONCURRENCY_LIMIT = 4
 
 
 class CsrfProtectionMiddleware(BaseHTTPMiddleware):
@@ -61,6 +63,7 @@ class CsrfProtectionMiddleware(BaseHTTPMiddleware):
         self._enforcement_enabled = enforcement_enabled
         self._on_denied = on_denied
         self._on_auth_required = on_auth_required
+        self._telemetry_limiter = CapacityLimiter(_TELEMETRY_CONCURRENCY_LIMIT)
 
     async def dispatch(self, request: Request, call_next) -> Response:
         policy = self._registry.match(request.method, request.url.path)
@@ -178,35 +181,37 @@ class CsrfProtectionMiddleware(BaseHTTPMiddleware):
             parameters[name] = value.lower() if name == "charset" else value
         return parameters
 
-    @staticmethod
-    def _safe_request_id(value: object) -> str:
-        if (
-            isinstance(value, str)
-            and 1 <= len(value) <= 128
-            and all(ord(character) >= 32 for character in value)
-        ):
-            return value
-        return str(uuid.uuid4())
+    async def _run_telemetry_callback(
+        self,
+        callback: Callable[..., Any],
+        *args: Any,
+    ) -> None:
+        callback_result = await to_thread.run_sync(
+            callback,
+            *args,
+            limiter=self._telemetry_limiter,
+        )
+        if inspect.isawaitable(callback_result):
+            await callback_result
 
     async def _authentication_required(
         self,
         request: Request,
         policy: CsrfRoutePolicy,
     ) -> Response:
-        request_id = self._safe_request_id(
+        request_id = safe_request_id(
             request.headers.get("X-Request-ID")
             or getattr(request.state, "request_id", None)
         )
         request.state.request_id = request_id
         if self._on_auth_required is not None:
             try:
-                callback_result = self._on_auth_required(
+                await self._run_telemetry_callback(
+                    self._on_auth_required,
                     policy,
                     request.method.upper(),
                     request_id,
                 )
-                if inspect.isawaitable(callback_result):
-                    await callback_result
             except Exception as exc:
                 logger.error(
                     "Authentication denial telemetry failed: error_type=%s",
@@ -233,20 +238,19 @@ class CsrfProtectionMiddleware(BaseHTTPMiddleware):
         policy: CsrfRoutePolicy,
         reason: CsrfValidationReason,
     ) -> Response:
-        request_id = self._safe_request_id(
+        request_id = safe_request_id(
             request.headers.get("X-Request-ID")
             or getattr(request.state, "request_id", None)
         )
         request.state.request_id = request_id
         try:
-            callback_result = self._on_denied(
+            await self._run_telemetry_callback(
+                self._on_denied,
                 reason,
                 policy,
                 request.method.upper(),
                 request_id,
             )
-            if inspect.isawaitable(callback_result):
-                await callback_result
         except Exception as exc:
             logger.error(
                 "CSRF denial telemetry failed: error_type=%s",

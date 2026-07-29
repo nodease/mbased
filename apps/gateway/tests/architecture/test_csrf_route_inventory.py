@@ -1,4 +1,5 @@
 from collections import Counter
+from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
@@ -12,6 +13,9 @@ from apps.gateway.composition.csrf import (
     build_csrf_route_policy_registry,
 )
 from apps.gateway.main import app
+
+
+REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
 
 
 def test_every_gateway_unsafe_route_has_exactly_one_csrf_policy():
@@ -90,3 +94,16 @@ def test_new_unsafe_route_without_auth_dependency_or_exception_fails_inventory()
 
     with pytest.raises(CsrfRouteInventoryError, match="unclassified unsafe route"):
         build_csrf_route_policy_registry(unclassified_app)
+
+
+def test_auth_api_spec_lists_csrf_endpoint_only_in_endpoint_inventory():
+    api_spec = (
+        REPOSITORY_ROOT / "docs" / "features" / "auth" / "api_spec.md"
+    ).read_text(encoding="utf-8")
+    endpoint_row = (
+        "| GET | `/auth/csrf` | Cookie-authenticated/pre-auth mutation용 "
+        "10분 signed CSRF token과 host-only HttpOnly cookie를 발급한다. "
+        "| Safe bootstrap; resource permission 없음 |"
+    )
+
+    assert api_spec.count(endpoint_row) == 1
