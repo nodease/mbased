@@ -59,6 +59,80 @@ def test_valid_signed_double_submit_token_is_accepted(
     assert reason is None
 
 
+def test_valid_existing_token_can_be_reused_for_the_same_binding_and_scope(
+    service: CsrfTokenService,
+):
+    now = datetime(2026, 7, 29, microsecond=123456, tzinfo=timezone.utc)
+    issued = service.issue(
+        binding_kind=CsrfBindingKind.AUTHENTICATED,
+        binding_secret="session-a",
+        organization_scope="organization-a",
+        now=now,
+    )
+
+    reused = service.reuse_if_valid(
+        token=issued.token,
+        binding_kind=CsrfBindingKind.AUTHENTICATED,
+        binding_secret="session-a",
+        organization_scope="organization-a",
+        now=now + timedelta(seconds=1),
+    )
+
+    assert reused == issued
+
+
+@pytest.mark.parametrize(
+    (
+        "binding_kind",
+        "binding_secret",
+        "organization_scope",
+        "elapsed_seconds",
+    ),
+    [
+        (CsrfBindingKind.AUTHENTICATED, "session-b", "organization-a", 1),
+        (CsrfBindingKind.AUTHENTICATED, "session-a", "organization-b", 1),
+        (CsrfBindingKind.PRE_AUTH, "session-a", "organization-a", 1),
+        (CsrfBindingKind.AUTHENTICATED, "session-a", "organization-a", 601),
+    ],
+)
+def test_existing_token_is_not_reused_across_binding_scope_or_expiry(
+    service: CsrfTokenService,
+    binding_kind: CsrfBindingKind,
+    binding_secret: str,
+    organization_scope: str,
+    elapsed_seconds: int,
+):
+    now = datetime(2026, 7, 29, tzinfo=timezone.utc)
+    issued = service.issue(
+        binding_kind=CsrfBindingKind.AUTHENTICATED,
+        binding_secret="session-a",
+        organization_scope="organization-a",
+        now=now,
+    )
+
+    reused = service.reuse_if_valid(
+        token=issued.token,
+        binding_kind=binding_kind,
+        binding_secret=binding_secret,
+        organization_scope=organization_scope,
+        now=now + timedelta(seconds=elapsed_seconds),
+    )
+
+    assert reused is None
+
+
+def test_malformed_existing_token_is_not_reused(service: CsrfTokenService):
+    reused = service.reuse_if_valid(
+        token="not-a-token",
+        binding_kind=CsrfBindingKind.PRE_AUTH,
+        binding_secret="anonymous-seed",
+        organization_scope=None,
+        now=datetime(2026, 7, 29, tzinfo=timezone.utc),
+    )
+
+    assert reused is None
+
+
 @pytest.mark.parametrize(
     ("header_token", "cookie_token", "expected"),
     [

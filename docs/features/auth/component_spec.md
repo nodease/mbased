@@ -232,7 +232,8 @@ Status: Draft
 
 - Guard는 endpoint보다 먼저 Origin, Fetch Metadata, content type, double-submit equality와 HMAC/session/scope를 검증한다.
 - Header/cookie token은 constant-time equality 전에 bounded ASCII 형식인지 확인해 비ASCII 입력을 exception 없는 `token_invalid`로 닫는다.
-- 실패 body는 고정 `auth.csrf_validation_failed`만 노출한다. Bootstrap organization scope는 token 발급 전에 길이와 제어 문자를 검증하고 실패를 `organization_scope_invalid` bounded reason으로 변환한다. Bounded reason은 metric/audit adapter 내부에서만 사용한다.
+- 실패 body는 고정 `auth.csrf_validation_failed`만 노출한다. Bootstrap organization scope는 token 발급 전에 길이와 제어 문자를 검증하고 실패를 `organization_scope_invalid` bounded reason으로 변환한다. 계약된 bounded reason은 metric/log allowlist에서 같은 label로 보존하고 미등록 값만 `unknown`으로 축약하며, 원문은 metric/audit adapter에 전달하지 않는다.
+- Token service는 요청 cookie를 현재 binding kind, auth cookie 또는 anonymous seed, organization/account scope와 expiry로 재검증한다. 유효하면 원래 token과 expiry를 반환하고, 실패하면 endpoint가 새 token을 발급해 동일 session/scope의 여러 탭이 공유 cookie를 서로 무효화하지 않게 한다.
 - Gateway ingress와 CSRF guard는 같은 request ID helper를 사용한다. Canonical RFC 4122 UUID만 보존하고 그 밖의 header 원문은 새 UUID로 대체한다.
 - 동기 audit/metric callback은 middleware와 bootstrap endpoint가 공유하는 process-shared 전용 capacity limiter의 worker thread에서 실행한다. 요청 coroutine은 결과를 기다리되 DB commit으로 event loop와 공용 sync worker를 막지 않으며 callback exception은 고정 응답 뒤로 격리한다.
 - 인증 cookie가 없는 protected mutation은 token을 identity로 사용하지 않고 `401 auth.required`로 종료한다.

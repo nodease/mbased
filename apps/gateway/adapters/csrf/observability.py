@@ -4,6 +4,8 @@ import logging
 from collections import Counter
 from typing import ClassVar
 
+from apps.gateway.application.csrf.token import CsrfValidationReason
+
 logger = logging.getLogger(__name__)
 
 try:
@@ -26,17 +28,7 @@ except ValueError:
 
 
 class CsrfObservability:
-    _REASONS = frozenset(
-        {
-            "token_missing",
-            "token_mismatch",
-            "token_invalid",
-            "token_expired",
-            "origin_invalid",
-            "fetch_metadata_invalid",
-            "content_type_invalid",
-        }
-    )
+    _REASONS = frozenset(reason.value for reason in CsrfValidationReason)
     _POLICIES = frozenset({"cookie_authenticated", "pre_auth_session"})
     _METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE"})
     _local_counters: ClassVar[Counter[tuple[str, str, str]]] = Counter()

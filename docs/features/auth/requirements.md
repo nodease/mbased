@@ -119,6 +119,8 @@ Auth는 보호된 Gateway API가 `auth_token` 쿠키에서 현재 사용자를 �
 - AUTH-REQ-093: Workflow 또는 다른 보호 리소스의 authoritative organization을 알고 있는 direct-fetch consumer는 같은 organization ID를 request body와 `X-Organization-Id`에 명시해야 한다. Ambient active organization과 리소스 organization이 다를 때 token scope가 ambient 값으로 대체되어서는 안 된다.
 - AUTH-REQ-094: Bootstrap의 `X-Organization-Id`가 128자를 넘거나 제어 문자를 포함하면 token 발급, DB 접근과 cookie 변경 전에 `organization_scope_invalid` bounded reason의 고정 `403 auth.csrf_validation_failed`로 닫아야 한다.
 - AUTH-REQ-095: Middleware mutation 거부, bootstrap proof/scope 거부와 invalid-session 감사 callback은 하나의 process-shared 전용 capacity limiter를 사용해야 한다. Bootstrap 거부 폭주가 공용 sync worker 또는 DB connection concurrency를 점유해서는 안 된다.
+- AUTH-REQ-096: Bootstrap은 요청의 기존 `csrf_token` cookie가 현재 auth/anonymous binding, organization/account scope와 expiry에 유효하면 같은 token을 반환해야 한다. 다른 session/scope, binding kind, 만료 또는 malformed token은 재사용하지 않아야 한다.
+- AUTH-REQ-097: `organization_scope_invalid`를 포함한 계약된 CSRF denial reason은 bounded observability allowlist에서 같은 metric/log label로 보존해야 한다. 미등록 입력만 `unknown`으로 축약하고 원문 scope는 기록하지 않아야 한다.
 
 ## Policies And Edge Cases
 

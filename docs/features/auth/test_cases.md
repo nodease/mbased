@@ -155,6 +155,9 @@ Status: Draft
 | AUTH-TC-CS032 | Wizard mutation의 리소스 organization과 CSRF scope가 일치해야 한다. | LocalStorage는 조직 A지만 Workflow prop은 조직 B인 상태에서 Code/Prompt/Template 요청을 보낸다. | Body와 `X-Organization-Id`가 모두 조직 B이고 bootstrap/token scope도 B. |
 | AUTH-TC-CS033 | Malformed bootstrap organization scope는 고정 CSRF 오류로 닫혀야 한다. | 129자 scope 또는 제어 문자를 포함한 scope로 bootstrap한다. | Token/cookie/DB effect 0, `organization_scope_invalid` 감사와 fixed 403. |
 | AUTH-TC-CS034 | Bootstrap과 middleware 거부 감사는 같은 bounded 실행 경계를 사용해야 한다. | 동기 callback을 동시에 limiter 초과 실행하고 bootstrap request thread를 기록한다. | 동시 callback 최대 4, bootstrap 검증 thread와 audit worker thread 분리, 고정 오류 유지. |
+| AUTH-TC-CS035 | 같은 session/scope의 여러 탭 bootstrap은 기존 유효 token을 공유해야 한다. | 탭 A의 token cookie가 있는 상태에서 탭 B가 같은 auth cookie와 organization으로 bootstrap한다. | 탭 B body/cookie token과 expiry가 탭 A와 동일하며 탭 A의 mutation이 계속 유효하다. |
+| AUTH-TC-CS036 | 기존 token 재사용은 binding/scope/expiry를 우회하지 않아야 한다. | 다른 auth cookie, organization, binding kind와 만료 token으로 bootstrap한다. | 기존 token 미재사용, 새 binding/scope token 발급; 이전 token replay 실패. |
+| AUTH-TC-CS037 | Malformed organization scope reason은 관측 경계에서도 보존해야 한다. | `organization_scope_invalid` denial과 미등록 sentinel reason을 각각 기록한다. | 전자는 metric/log에 같은 bounded label, sentinel은 `unknown`; scope 원문 미기록. |
 
 ## Component And Hook Tests
 

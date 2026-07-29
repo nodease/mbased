@@ -41,7 +41,7 @@ Status: Draft
 }
 ```
 
-응답은 같은 token을 host-only HttpOnly `csrf_token` cookie로 설정한다. Anonymous bootstrap은 host-only HttpOnly `csrf_anon_seed`도 설정한다. `Cache-Control: no-store`, `Pragma: no-cache`가 필수다. Token은 ASCII `v1.expiry.nonce.mac` 형식이며 auth cookie, user와 organization 원문을 포함하지 않는다. 비ASCII token은 equality 비교 전에 `token_invalid`로 닫고, equality를 통과한 비정규 token은 canonical parsing에서 `token_invalid`로 닫는다. Header/Origin/Fetch Metadata 검증과 organization scope 형식 검증 실패는 cookie를 설정하거나 회전시키지 않고 `403 auth.csrf_validation_failed`를 반환한다. Scope 형식 실패의 내부 reason은 `organization_scope_invalid`이며 원문은 감사에 기록하지 않는다.
+응답은 같은 token을 host-only HttpOnly `csrf_token` cookie로 설정한다. 요청 cookie의 token이 현재 auth/anonymous binding, organization/account scope와 expiry에 유효하면 새 nonce를 발급하지 않고 그 token과 원래 expiry를 재사용한다. 다른 session/scope, binding kind, 만료 또는 malformed token은 새로 발급한다. Anonymous bootstrap은 host-only HttpOnly `csrf_anon_seed`도 설정한다. `Cache-Control: no-store`, `Pragma: no-cache`가 필수다. Token은 ASCII `v1.expiry.nonce.mac` 형식이며 auth cookie, user와 organization 원문을 포함하지 않는다. 비ASCII token은 equality 비교 전에 `token_invalid`로 닫고, equality를 통과한 비정규 token은 canonical parsing에서 `token_invalid`로 닫는다. Header/Origin/Fetch Metadata 검증과 organization scope 형식 검증 실패는 cookie를 설정하거나 회전시키지 않고 `403 auth.csrf_validation_failed`를 반환한다. Scope 형식 실패의 내부 reason `organization_scope_invalid`는 metric/log에서도 같은 bounded label로 보존하며 원문은 감사에 기록하지 않는다.
 
 `X-Request-ID`는 canonical RFC 4122 UUID만 보존한다. 다른 값은 서버가 생성한 UUID로 대체하며 입력 원문을 응답이나 CSRF 감사 metadata에 복사하지 않는다.
 

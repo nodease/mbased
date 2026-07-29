@@ -98,6 +98,44 @@ def test_authenticated_csrf_bootstrap_validates_cookie_and_clears_anon_seed(
     )
 
 
+def test_authenticated_bootstrap_reuses_same_session_and_scope_cookie(monkeypatch):
+    monkeypatch.setattr(AuthService, "get_user_from_token", lambda db, token: object())
+    monkeypatch.setattr(
+        auth_endpoint,
+        "csrf_token_service",
+        lambda: CsrfTokenService.from_root_secret("csrf-endpoint-test-secret"),
+    )
+
+    with _client() as client:
+        client.cookies.set("auth_token", "valid-auth-token")
+        first = client.get(
+            "/auth/csrf",
+            headers={
+                **_bootstrap_headers(),
+                "X-Organization-Id": "organization-a",
+            },
+        )
+        first_token = first.json()["token"]
+
+        # TestClient의 축약 route와 production cookie path가 다르므로
+        # 두 번째 탭이 공유 cookie를 보내는 상태를 명시적으로 구성한다.
+        client.cookies.clear()
+        client.cookies.set("auth_token", "valid-auth-token")
+        client.cookies.set(CSRF_COOKIE_NAME, first_token)
+        second = client.get(
+            "/auth/csrf",
+            headers={
+                **_bootstrap_headers(),
+                "X-Organization-Id": "organization-a",
+            },
+        )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json()["token"] == first_token
+    assert second.cookies[CSRF_COOKIE_NAME] == first_token
+
+
 def test_invalid_auth_cookie_cannot_fall_back_to_anonymous_bootstrap(monkeypatch):
     def reject_invalid_cookie(_db, _token):
         raise HTTPException(status_code=401, detail="invalid")

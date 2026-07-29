@@ -10,7 +10,7 @@ Gateway에는 공통 `get_current_user` dependency를 사용하는 route 외에�
 
 Safe GET도 응답의 `Set-Cookie` 부수효과를 가진다. Ambient cross-site image/navigation GET이 bootstrap token을 회전시키면 Client memory header와 host-only cookie가 달라져 non-replayable workflow mutation을 지속적으로 막을 수 있다. 또한 Client가 same-origin reverse proxy와 별도 공개 API origin을 함께 사용하면 token body와 host-only cookie가 서로 다른 host에 놓일 수 있다.
 
-운영 검토에서 세 경계가 추가로 확인됐다. 동일한 만료 token을 사용한 동시 요청이 각각 cache generation을 올리면 먼저 시작한 정상 refresh가 무효화될 수 있다. Python의 문자열 `compare_digest`는 비ASCII 입력에서 exception을 내므로 형식 검증보다 먼저 호출할 수 없다. 또한 외부 request ID 원문을 CSRF audit에 복사하거나 동기 PostgreSQL audit commit을 async middleware에서 직접 실행하면 token/PII 보존과 event-loop 정체가 발생할 수 있다. Workflow 조직을 body에 전달하면서 CSRF scope header를 ambient active organization에 맡기면 실제 credential 소비 조직과 token binding이 달라질 수 있고, bootstrap endpoint가 malformed scope와 거부 감사를 middleware와 다른 오류·실행 경계로 처리하면 고정 응답과 가용성 계약을 우회한다.
+운영 검토에서 추가 경계가 확인됐다. 동일한 만료 token을 사용한 동시 요청이 각각 cache generation을 올리면 먼저 시작한 정상 refresh가 무효화될 수 있다. 같은 session/scope의 여러 탭이 각각 bootstrap하면서 새 nonce를 발급하면 브라우저 공유 cookie가 바뀌어 먼저 열린 탭의 non-replayable mutation이 실패한다. Python의 문자열 `compare_digest`는 비ASCII 입력에서 exception을 내므로 형식 검증보다 먼저 호출할 수 없다. 또한 외부 request ID 원문을 CSRF audit에 복사하거나 동기 PostgreSQL audit commit을 async middleware에서 직접 실행하면 token/PII 보존과 event-loop 정체가 발생할 수 있다. Workflow 조직을 body에 전달하면서 CSRF scope header를 ambient active organization에 맡기면 실제 credential 소비 조직과 token binding이 달라질 수 있고, bootstrap endpoint가 malformed scope와 거부 감사를 middleware와 다른 오류·실행 경계로 처리하면 고정 응답과 가용성 계약을 우회한다. 새 scope reason이 bounded observability allowlist에 없으면 안전한 원문 제한은 유지하더라도 공격·오구성을 `unknown`과 구분할 수 없다.
 
 ## Options Considered
 
@@ -31,7 +31,7 @@ Safe GET도 응답의 `Set-Cookie` 부수효과를 가진다. Ambient cross-site
 
 Bootstrap의 `Set-Cookie` 회전 방어에서는 exact Origin만 요구하는 방안, 기존 cookie가 있을 때 회전하지 않는 방안, custom header와 Origin/Fetch Metadata를 결합하는 방안을 비교했다. Exact Origin만 요구하면 same-origin safe GET에서 브라우저가 Origin을 생략하는 경우를 지원하지 못한다. 기존 cookie 재사용만으로는 첫 ambient 요청과 organization scope 전환을 막지 못한다. 따라서 custom header로 cross-origin 요청을 preflight에 묶고, exact allowlisted Origin 또는 same-origin Fetch Metadata를 추가 검증하는 방안을 선택했다.
 
-후속 hardening에서는 모든 `403`이 무조건 generation을 올리는 방식과 rejected token이 current cache와 일치할 때만 compare-and-invalidate하는 방식을 비교해 후자를 선택했다. Request ID는 임의 printable 문자열 allowlist 대신 canonical RFC 4122 UUID만 보존하고 나머지는 서버 UUID로 대체한다. Audit persistence는 event loop 직접 호출, fire-and-forget queue, bounded thread 실행을 비교했다. 감사 유실을 허용하지 않으면서 event loop를 보호하기 위해 요청이 완료를 기다리는 전용 bounded thread 실행을 선택했다. Middleware와 bootstrap이 별도 limiter를 소유하는 방안은 합산 DB concurrency와 공용 sync worker 점유를 제한하지 못하므로 하나의 process-shared CSRF telemetry limiter를 사용한다.
+후속 hardening에서는 모든 `403`이 무조건 generation을 올리는 방식과 rejected token이 current cache와 일치할 때만 compare-and-invalidate하는 방식을 비교해 후자를 선택했다. 탭 간 조정에서는 브라우저 저장소에 token을 공유하는 방안, 매 bootstrap마다 새 token을 발급하는 방안, 서버가 현재 cookie를 같은 binding/scope에서 검증해 재사용하는 방안을 비교했다. Memory-only Client 원칙과 lifecycle 격리를 유지하면서 공유 cookie를 안정화하기 위해 마지막 방안을 선택한다. Request ID는 임의 printable 문자열 allowlist 대신 canonical RFC 4122 UUID만 보존하고 나머지는 서버 UUID로 대체한다. Audit persistence는 event loop 직접 호출, fire-and-forget queue, bounded thread 실행을 비교했다. 감사 유실을 허용하지 않으면서 event loop를 보호하기 위해 요청이 완료를 기다리는 전용 bounded thread 실행을 선택했다. Middleware와 bootstrap이 별도 limiter를 소유하는 방안은 합산 DB concurrency와 공용 sync worker 점유를 제한하지 못하므로 하나의 process-shared CSRF telemetry limiter를 사용한다.
 
 ## Decision
 
@@ -43,8 +43,9 @@ Option C를 채택한다.
 2. Token payload에는 auth cookie, 사용자, organization 또는 그 fingerprint 원문을 넣지 않는다. MAC은 domain-separated key, binding 종류, auth cookie 또는 anonymous seed의 HMAC, active `X-Organization-Id` 또는 account sentinel을 포함한다.
 3. 인증 cookie가 없으면 host-only HttpOnly random `csrf_anon_seed`에 결박한 pre-auth token을 발급한다. 유효하지 않거나 비활성 계정에 결박된 `auth_token`이 있으면 anonymous로 조용히 전환하지 않고 `401 auth.invalid`로 닫고 invalid auth/CSRF cookie를 삭제한다. Client는 cookie 삭제가 반영된 뒤 bootstrap을 한 번만 다시 시도할 수 있다.
 4. Bootstrap은 `X-CSRF-Bootstrap: 1`을 필수로 요구한다. Origin이 있으면 credentialed CORS allowlist와 exact match해야 하고, Origin이 생략된 same-origin GET은 `Sec-Fetch-Site: same-origin`이어야 한다. 존재하는 Fetch Metadata의 cross-site 값은 거부한다. `X-Organization-Id`의 길이와 제어 문자는 token 발급 전에 검증하고 실패를 `organization_scope_invalid` 내부 reason의 고정 CSRF 거부로 처리한다. 이 검증은 token service 발급, DB와 Set-Cookie보다 먼저 수행한다.
-5. Bootstrap 응답은 `Cache-Control: no-store`, `Pragma: no-cache`를 사용한다. Token과 seed cookie는 `/api/v1`, 600초, HttpOnly, host-only이며 non-local에서는 Secure와 SameSite=None, loopback에서는 SameSite=Lax를 사용한다.
-6. Signup, password login, Google OAuth 성공과 logout은 이전 CSRF/anonymous cookie를 삭제한다. Client는 인증 전환과 active organization 변경 시 memory token을 폐기한다.
+5. Bootstrap 요청의 기존 `csrf_token` cookie가 현재 binding kind, auth cookie 또는 anonymous seed, organization/account scope와 expiry에 유효하면 token body와 cookie에 같은 값을 재사용한다. 다른 session/scope, binding kind, 만료 또는 malformed token은 재사용하지 않고 새 token을 발급한다.
+6. Bootstrap 응답은 `Cache-Control: no-store`, `Pragma: no-cache`를 사용한다. Token과 seed cookie는 `/api/v1`, 600초, HttpOnly, host-only이며 non-local에서는 Secure와 SameSite=None, loopback에서는 SameSite=Lax를 사용한다.
+7. Signup, password login, Google OAuth 성공과 logout은 이전 CSRF/anonymous cookie를 삭제한다. Client는 인증 전환과 active organization 변경 시 memory token을 폐기한다.
 
 ### 중앙 route policy와 검증 순서
 
@@ -61,7 +62,7 @@ Option C를 채택한다.
 
 ### 오류, 관측과 Client
 
-1. CSRF 실패는 항상 `403 auth.csrf_validation_failed`와 고정 message를 반환한다. 내부에서는 bounded reason, policy, method와 검증된 request ID만 metric/audit에 기록하며 token, cookie, Origin, session, organization과 path parameter 원문을 기록하지 않는다. 외부 request ID는 canonical RFC 4122 UUID만 보존하고 나머지는 새 UUID로 대체한다.
+1. CSRF 실패는 항상 `403 auth.csrf_validation_failed`와 고정 message를 반환한다. 내부에서는 bounded reason, policy, method와 검증된 request ID만 metric/audit에 기록하며 token, cookie, Origin, session, organization과 path parameter 원문을 기록하지 않는다. `organization_scope_invalid`를 포함한 계약 reason은 metric/log allowlist에 같은 값으로 보존하고 미등록 값만 `unknown`으로 축약한다. 외부 request ID는 canonical RFC 4122 UUID만 보존하고 나머지는 새 UUID로 대체한다.
 2. Client token은 module memory에만 저장하고 localStorage, sessionStorage, URL과 log에 남기지 않는다. Origin마다 현재 organization/account scope token 하나만 유지하고, 실제 mutation origin과 scope가 같은 동시 bootstrap만 하나로 합치며 host-only cookie와 bootstrap endpoint를 mutation origin에 맞춘다. Lifecycle generation 이전에 시작한 bootstrap은 cache를 되살리지 못하고, 같은 origin의 새 bootstrap은 이전 요청이 정리된 뒤 cookie를 갱신한다.
 3. 공통 Axios client와 보호된 직접 fetch는 unsafe method에 token을 자동 첨부한다. Workflow나 다른 보호 리소스의 authoritative organization을 이미 알고 있는 consumer는 그 값을 body와 `X-Organization-Id`에 함께 명시하고 ambient active organization fallback에 맡기지 않는다. 동일한 rejected token의 동시 실패는 current origin/scope/token 비교로 generation을 한 번만 폐기하고 하나의 refresh를 공유한다. CSRF 실패 시 PUT/DELETE 또는 idempotency key가 있는 요청만 새 token으로 최대 한 번 재시도한다. 일반 POST/PATCH는 자동 replay하지 않는다.
 4. Workflow SSE의 same-origin Next proxy는 API host-only CSRF cookie를 직접 받을 수 없다. 이 단일 proxy는 엄격한 token 문자·길이 검사를 거친 `X-CSRF-Token`을 outbound `csrf_token` cookie로 복제하고, 원래 Origin, Fetch Metadata, organization과 request context를 Gateway에 전달한다. Gateway는 동일한 HMAC/session/scope 검증을 수행한다.
@@ -79,6 +80,7 @@ Option C를 채택한다.
 - Route audience를 먼저 분류하면 login cookie의 우연한 포함이 Public 또는 server credential route의 principal을 바꾸지 않는다.
 - Exact Origin, Fetch Metadata, content type와 token을 독립적으로 검증하면 어느 한 방어 계층의 오구성이 곧바로 mutation 허용으로 이어지지 않는다.
 - Custom bootstrap header는 ambient image/navigation GET을 차단하고 cross-origin script 요청을 CORS preflight에 묶는다. Same-origin Fetch Metadata fallback은 safe GET에서 Origin이 생략되는 브라우저 동작을 지원한다.
+- 같은 binding/scope의 유효한 cookie token을 재사용하면 token을 browser storage에 복제하지 않고도 여러 탭의 memory header와 공유 cookie가 어긋나는 것을 막는다.
 - Host-only cookie는 origin 간 공유되지 않으므로 cache와 bootstrap도 실제 mutation origin별로 분리해야 header/cookie equality를 보장할 수 있다.
 - Non-idempotent 자동 replay를 금지하면 token expiry 복구가 중복 side effect로 바뀌지 않는다.
 - Rejected token과 current cache를 비교하면 늦은 동일 실패가 이미 진행 중인 정상 refresh를 취소하지 않으면서 실제 새 token 거부는 다시 폐기할 수 있다.

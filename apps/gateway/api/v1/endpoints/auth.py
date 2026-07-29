@@ -316,11 +316,18 @@ async def bootstrap_csrf_token(
         binding_kind = CsrfBindingKind.PRE_AUTH
         binding_secret = anonymous_seed
 
-    issued = token_service.issue(
+    issued = token_service.reuse_if_valid(
+        token=request.cookies.get(CSRF_COOKIE_NAME),
         binding_kind=binding_kind,
         binding_secret=binding_secret,
         organization_scope=organization_scope,
     )
+    if issued is None:
+        issued = token_service.issue(
+            binding_kind=binding_kind,
+            binding_secret=binding_secret,
+            organization_scope=organization_scope,
+        )
 
     _set_csrf_cookie(
         response,

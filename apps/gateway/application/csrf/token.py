@@ -118,8 +118,10 @@ class CsrfTokenService:
         now: datetime | None = None,
     ) -> IssuedCsrfToken:
         issued_at = self._normalize_now(now)
-        expires_at = issued_at + timedelta(seconds=self._ttl_seconds)
-        expiry = int(expires_at.timestamp())
+        expiry = int(
+            (issued_at + timedelta(seconds=self._ttl_seconds)).timestamp()
+        )
+        expires_at = datetime.fromtimestamp(expiry, tz=timezone.utc)
         nonce = self._nonce_factory(_NONCE_BYTES)
         if len(nonce) != _NONCE_BYTES:
             raise ValueError("CSRF nonce factory returned an invalid length")
@@ -139,6 +141,36 @@ class CsrfTokenService:
             )
         )
         return IssuedCsrfToken(token=token, expires_at=expires_at)
+
+    def reuse_if_valid(
+        self,
+        *,
+        token: str | None,
+        binding_kind: CsrfBindingKind,
+        binding_secret: str,
+        organization_scope: str | None,
+        now: datetime | None = None,
+    ) -> IssuedCsrfToken | None:
+        if (
+            self.validate(
+                header_token=token,
+                cookie_token=token,
+                binding_kind=binding_kind,
+                binding_secret=binding_secret,
+                organization_scope=organization_scope,
+                now=now,
+            )
+            is not None
+        ):
+            return None
+
+        # validate() already proved the canonical token shape and expiry.
+        assert token is not None
+        _, raw_expiry, _, _ = token.split(".")
+        return IssuedCsrfToken(
+            token=token,
+            expires_at=datetime.fromtimestamp(int(raw_expiry), tz=timezone.utc),
+        )
 
     def validate(
         self,
