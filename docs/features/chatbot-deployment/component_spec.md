@@ -65,7 +65,7 @@ Public Client는 deployment-owned parent embedding policy가 확인된 surface�
 - LLM node가 하나면 해당 node를 선택 상태로 표시하고, 여러 개면 사용자가 하나를 고르기 전 배포 버튼을 비활성화한다.
 - 선택값은 preflight/create의 동일한 versioned config로 보내며 최종 runtime은 Gateway와 Worker의 canonical snapshot 검증 결과를 사용한다.
 - Embed Chat은 public info의 `client_history_v1` capability에서만 `/chat` history envelope을 보낸다.
-- capability가 `legacy_v0`이거나 누락되면 mixed-revision 호환 root를 사용하되 `memory_mode`와 `conversation_id`를 보내지 않는다.
-- Compatibility rolling deployment에서 `/chat`이 404이면 같은 current inputs와 deployment version을 history 없이 root로 정확히 한 번 재시도한다. Root 실패나 다른 status에는 이 fallback을 반복하지 않는다.
-- 새 Gateway compatibility adapter는 이 root 요청을 server-side Memory가 아닌 stateless public 실행으로 변환한다.
+- capability가 `legacy_v0`이거나 누락되면 mixed-revision 호환 root를 사용하되 history와 `memory_mode` 없이 요청별 secure-random `conversation_id` 하나만 보낸다.
+- Compatibility rolling deployment에서 `/chat`이 404이면 같은 current inputs와 deployment version, 새 일회성 격리 ID를 history 없이 root로 정확히 한 번 재시도한다. Root 실패나 다른 status에는 이 fallback을 반복하지 않는다.
+- 새 Gateway compatibility adapter는 격리 ID를 제거하고 이 root 요청을 server-side Memory가 아닌 stateless public 실행으로 변환한다.
 - strict rollout 전환 뒤 legacy capability deployment는 새 consumer config version으로 재배포해야 한다.

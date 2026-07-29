@@ -198,12 +198,16 @@ describe('EmbedChatPage deployment transition', () => {
       String(fetchMock.mock.calls[2]?.[1]?.body),
     ) as Record<string, unknown>;
     expect(fallbackRequestBody).toEqual({
-      inputs: { question: 'Mixed gateway question' },
+      inputs: {
+        question: 'Mixed gateway question',
+        conversation_id: expect.stringMatching(
+          /^public-once-v1:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+        ),
+      },
       deployment_version: 1,
     });
     expect(fallbackRequestBody).not.toHaveProperty('conversation');
     expect(fallbackRequestBody).not.toHaveProperty('memory_mode');
-    expect(fallbackRequestBody).not.toHaveProperty('conversation_id');
   });
 
   it('does not loop when the one legacy fallback also returns 404', async () => {

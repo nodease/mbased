@@ -85,7 +85,7 @@ Public Chatbot은 서버에 익명 transcript를 영구 저장하지 않고 Clie
 - MEM-REQ-028: 서버는 'system', 'developer', 'tool', extra field, 빈 content, 미완성 turn, 20 turn 초과와 malformed envelope을 provider dispatch 전에 거부해야 한다.
 - MEM-REQ-029: 서버는 현재 inputs와 history를 다시 계산해 4,096-token context 상한을 적용하고, 초과 시 가장 오래된 완료 turn 단위로 제거해야 한다. 현재 inputs만으로 상한을 넘으면 거부해야 한다.
 - MEM-REQ-029A: Public history는 인증·인가·system policy·resource provenance·credential 또는 billing principal의 근거가 될 수 없어야 한다.
-- MEM-REQ-029B: Public Chatbot은 legacy 'memory_mode'와 browser-generated 'conversation_id'를 거부하고 Conversation Session/Turn/Entry/Transcript/Access Grant를 생성·조회하지 않아야 한다.
+- MEM-REQ-029B: Public `/chat`은 legacy 'memory_mode'와 browser-generated 'conversation_id'를 거부하고 Conversation Session/Turn/Entry/Transcript/Access Grant를 생성·조회하지 않아야 한다. Compatibility root의 요청별 격리 ID는 구 Gateway owner-memory fallback 차단에만 사용하고 새 Gateway가 dispatch 전에 제거해야 한다.
 - MEM-REQ-029C: Public WorkflowRun, WorkflowNodeRun과 Trace payload는 input/history/prompt/completion 원문을 저장하지 않고 content-free 상태·시간·usage metadata만 저장해야 한다.
 
 ### Provenance And Authorization
@@ -209,8 +209,8 @@ MBA-318은 Public client-held history, legacy Public memory control 차단, cont
 - MEM-REQ-099: Public RAG audit actor는 `actor_id=null`, `actor_type=public`이어야 하며 app owner, credential principal 또는 generic system actor로 대체하지 않아야 한다.
 - MEM-REQ-100: Public token validation은 실제 tokenizer만 사용하고 tokenizer를 사용할 수 없으면 문자 휴리스틱 없이 `conversation.token_count_unavailable`로 fail-closed해야 한다.
 - MEM-REQ-101: Public envelope, legacy control과 consumer mapping 검증은 budget admission, secret migration, DB mutation과 task publish보다 먼저 완료해야 한다.
-- MEM-REQ-102: 혼합 revision 동안 public info capability가 client-history 지원 여부를 나타내야 하며 capability가 없는 구 Gateway와 구 Client 조합도 가용해야 한다.
-- MEM-REQ-103: 새 Gateway가 legacy root public Chatbot 요청을 호환 처리할 때 legacy control을 제거하고 server Memory와 content persistence를 활성화하지 않는 무상태 실행이어야 한다.
+- MEM-REQ-102: 혼합 revision 동안 public info capability가 client-history 지원 여부를 나타내야 하며 capability가 없는 구 Gateway와 새 Client 조합도 owner 범위 Memory 혼합 없이 가용해야 한다.
+- MEM-REQ-103: 새 Gateway가 legacy root public Chatbot 요청을 호환 처리할 때 요청별 격리 ID를 포함한 legacy control을 제거하고 server Memory와 content persistence를 활성화하지 않는 무상태 실행이어야 한다.
 - MEM-REQ-104: strict rollout mode에서는 root public Chatbot 실행을 허용하지 않고 전용 `/chat` history 계약만 허용해야 한다.
 - MEM-REQ-105: Public raw history는 bounded TTL의 일회성 transient store에만 두고 broker에는 opaque reference만 전달해야 하며, task는 Gateway 생성 시각 기준 bounded absolute deadline과 broker expiry를 가져야 한다.
 - MEM-REQ-106: Worker는 DB 조회, Knowledge sync, Workflow Engine과 provider 호출 전에 deadline을 재검증하고 expired/malformed public task를 non-retryable하게 거부해야 한다.
@@ -238,5 +238,6 @@ MBA-318은 Public client-held history, legacy Public memory control 차단, cont
 - MEM-REQ-128: Workflow Engine은 공통 노드 실행 경계에서 각 node `execute` 직전에 task deadline을 검사하고, 만료 뒤 `FileExtractionNode`의 remote fetch를 포함한 새 외부 I/O를 시작하지 않아야 한다.
 - MEM-REQ-129: Strict rollout에서 active Public Chatbot browser-access revision은 복제할 source config와 graph의 consumer mapping을 row 생성, activation preflight와 active pointer mutation 전에 재검증해야 한다. Inactive revision은 staging할 수 있지만 활성화 시 같은 검증을 통과해야 한다.
 - MEM-REQ-130: Compatibility rolling deployment에서 Public Client가 `client_history_v1` capability를 받은 뒤 `/chat` 404를 받으면 같은 current inputs와 deployment version을 history-free legacy root로 정확히 한 번 재시도해야 한다. Legacy fallback의 실패나 다른 status는 반복 재시도하지 않아야 한다.
+- MEM-REQ-131: Capability 누락·`legacy_v0`·`/chat` 404 fallback의 root 요청은 각각 새 secure-random 일회성 `conversation_id`를 포함해 구 Gateway의 app-owner Memory fallback을 차단해야 한다. 이 ID는 저장·재사용하지 않고 새 Gateway가 제거하며, secure UUID를 만들 수 없으면 Client는 root 요청 전에 fail-closed해야 한다.
 
 `PUBLIC_CHAT_CONVERSATION_ROLLOUT_MODE=compatibility`는 배포 순서용 임시 기본값이다. strict 전환 전 active legacy public Chatbot을 consumer mapping이 있는 새 deployment version으로 교체한다.

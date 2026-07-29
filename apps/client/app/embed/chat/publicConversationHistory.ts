@@ -10,6 +10,18 @@ export const buildPublicConversationRunPath = (urlSlug: string): string =>
 const buildLegacyPublicRunPath = (urlSlug: string): string =>
   `/api/v1/run-public/${encodeURIComponent(urlSlug)}`;
 
+const secureRandomUuid = (): string => {
+  const cryptoApi = globalThis.crypto;
+  if (!cryptoApi || typeof cryptoApi.randomUUID !== 'function') {
+    throw new Error('Secure random UUID is unavailable.');
+  }
+  return cryptoApi.randomUUID();
+};
+
+const buildLegacyPublicConversationIsolationId = (
+  randomUuid: () => string,
+): string => `public-once-v1:${randomUuid()}`;
+
 export interface PublicConversationHistoryMessage {
   role: 'user' | 'assistant';
   content: string;
@@ -31,6 +43,7 @@ export const buildPublicConversationRequest = (
   messages: readonly DisplayMessage[],
   contract: PublicConversationContract | undefined,
   deploymentVersion: number,
+  randomUuid: () => string = secureRandomUuid,
 ): PublicConversationRequest => {
   if (contract === 'client_history_v1') {
     return {
@@ -47,7 +60,11 @@ export const buildPublicConversationRequest = (
   return {
     path: buildLegacyPublicRunPath(urlSlug),
     body: {
-      inputs,
+      inputs: {
+        ...inputs,
+        conversation_id:
+          buildLegacyPublicConversationIsolationId(randomUuid),
+      },
       deployment_version: deploymentVersion,
     },
   };

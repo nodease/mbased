@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   MAX_PUBLIC_CHAT_ENVELOPE_BYTES,
@@ -8,6 +8,10 @@ import {
   buildPublicConversationRunPath,
   isPublicConversationHistoryContentEligible,
 } from './publicConversationHistory';
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe('buildPublicConversationRunPath', () => {
   it('uses the dedicated public chat transport path and encodes the slug', () => {
@@ -50,22 +54,54 @@ describe('buildPublicConversationRequest', () => {
     });
   });
 
-  it('falls back to the legacy root request when the capability is absent', () => {
-    expect(
+  it('uses a fresh one-time isolation ID for every legacy root request', () => {
+    const randomUuids = [
+      '00000000-0000-4000-8000-000000000001',
+      '00000000-0000-4000-8000-000000000002',
+    ];
+    let randomUuidIndex = 0;
+    const randomUuid = () => randomUuids[randomUuidIndex++];
+
+    const requests = [0, 1].map(() =>
       buildPublicConversationRequest(
         'chat',
         { question: 'now' },
         [],
         undefined,
         4,
+        randomUuid,
       ),
-    ).toEqual({
+    );
+
+    expect(requests[0]).toEqual({
       path: '/api/v1/run-public/chat',
       body: {
-        inputs: { question: 'now' },
+        inputs: {
+          question: 'now',
+          conversation_id:
+            'public-once-v1:00000000-0000-4000-8000-000000000001',
+        },
         deployment_version: 4,
       },
     });
+    expect(requests[1].body.inputs).toEqual({
+      question: 'now',
+      conversation_id: 'public-once-v1:00000000-0000-4000-8000-000000000002',
+    });
+  });
+
+  it('fails closed before a legacy root request without secure UUID support', () => {
+    vi.stubGlobal('crypto', {});
+
+    expect(() =>
+      buildPublicConversationRequest(
+        'chat',
+        { question: 'now' },
+        [],
+        'legacy_v0',
+        4,
+      ),
+    ).toThrow('Secure random UUID is unavailable.');
   });
 });
 

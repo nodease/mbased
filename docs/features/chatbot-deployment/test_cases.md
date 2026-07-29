@@ -150,9 +150,9 @@ Public Chatbot은 bounded client-held history 계약을 검증한다. `memory_mo
 - 공개 Chatbot에 LLM이 하나면 consumer select가 그 node를 표시하고, 여러 개면 명시적 선택 전 배포가 차단된다.
 - Preflight와 create가 동일한 `public_chat_conversation.v1` config를 받는다.
 - Public info는 valid mapping에 `client_history_v1`, missing/invalid legacy deployment에 `legacy_v0`를 반환한다.
-- Embed Chat은 capability가 있으면 `/chat`, 없거나 legacy이면 `memory_mode`/`conversation_id` 없는 root request를 만든다.
-- 혼합 Gateway 세대에서 `/chat` route 404를 받으면 같은 inputs/version의 history-free root request를 한 번만 만들고, fallback root 404에는 재시도 loop를 만들지 않는다.
-- 새 Gateway compatibility root는 legacy memory controls를 제거하고 `memory_mode=false`, `conversation_id=null`, persistence suppression으로 실행한다.
+- Embed Chat은 capability가 있으면 `/chat`, 없거나 legacy이면 history/`memory_mode` 없이 매 요청 새 일회성 `conversation_id`가 있는 root request를 만든다.
+- 혼합 Gateway 세대에서 `/chat` route 404를 받으면 같은 inputs/version과 새 격리 ID의 history-free root request를 한 번만 만들고, fallback root 404에는 재시도 loop를 만들지 않는다.
+- 새 Gateway compatibility root는 일회성 ID를 포함한 legacy memory controls를 제거하고 `memory_mode=false`, `conversation_id=null`, persistence suppression으로 실행한다.
 - Strict mode root Chatbot은 `conversation.history_required`로 거부한다.
 - Multi-LLM runtime은 지정 consumer 외 node에 history 또는 history 기반 RAG query를 전달하지 않는다.
 - Public RAG audit 세 경로는 public actor를 기록한다.

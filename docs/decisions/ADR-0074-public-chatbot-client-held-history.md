@@ -35,7 +35,7 @@ MBA-318 Public Chatbot은 Option C를 사용한다.
 2. 서버는 `system`, `developer`, `tool` role, extra field, 빈 content, 미완성·비교대 순서와 20 turn 초과를 거부한다.
 3. 서버는 현재 `inputs`와 history를 다시 계산하고 대화 context가 4,096 token을 넘으면 가장 오래된 완료 turn부터 제거한다. 현재 inputs만으로 상한을 넘으면 provider 호출 전에 거부한다.
 4. Client history는 신뢰할 수 없는 대화 맥락일 뿐이며 인증·인가·system policy·provenance의 근거가 될 수 없다.
-5. Public 요청에서는 legacy `memory_mode`와 browser-generated `conversation_id`를 거부하고, server-side Conversation Session·Turn·Entry·Transcript·Access Grant를 생성하거나 조회하지 않는다.
+5. Public `/chat` 요청에서는 legacy `memory_mode`와 browser-generated `conversation_id`를 거부하고, server-side Conversation Session·Turn·Entry·Transcript·Access Grant를 생성하거나 조회하지 않는다. Compatibility root에만 구 Gateway owner-memory fallback을 차단하는 요청별 일회성 `conversation_id`를 허용하며 새 Gateway는 이를 dispatch 전에 제거한다.
 6. Public lifecycle API(create/close/reset/delete/transcript/purge-status)는 등록하지 않는다. 새 대화와 reset은 Client가 local history를 버리는 동작이다.
 7. 브라우저는 history를 React memory에만 유지한다. refresh·tab 종료 시 history는 사라지며 localStorage/sessionStorage에 자동 복구용 원문을 저장하지 않는다.
 8. Workflow/Celery transport는 요청 처리 중 history를 일시 전달할 수 있지만 task 표현을 redaction하고, Public Chatbot WorkflowRun·NodeRun·Trace payload에는 입력·history·prompt·completion 원문을 저장하지 않는다. Result backend 값은 소비 직후 제거하며 장애 시 기존 최대 1시간 TTL을 상한으로 한다.
@@ -151,7 +151,7 @@ LLMNode는 Gateway가 검증·bound한 history의 각 content를 정확히 한 �
 3. Public 실행은 authorization subject와 분리된 `execution_actor={"type":"public"}`를 사용한다. RAG audit은 `actor_id=null`, `actor_type=public`이며 app owner·credential principal·system으로 대체하지 않는다.
 4. Public token bound는 실제 tokenizer만 사용한다. model tokenizer를 얻지 못하면 `cl100k_base`를 사용하고 그것도 실패하면 `conversation.token_count_unavailable`로 provider 호출 전에 거부한다. 문자 수 추정은 사용하지 않는다.
 5. Envelope와 legacy control 검증, consumer mapping 검증은 budget admission, secret migration, DB mutation과 task publish 전에 끝난다.
-6. `compatibility` rollout 동안 public info는 `client_history_v1` 또는 `legacy_v0` capability를 반환한다. 새 Client는 capability가 없거나 legacy이면 legacy control 없이 root를 사용한다. 새 Gateway의 root public Chatbot 호환 요청은 `memory_mode=false`, `conversation_id=null`, content persistence suppression 상태로 무상태 실행한다. `strict` 전환 뒤 root public Chatbot은 history-required로 닫는다.
+6. `compatibility` rollout 동안 public info는 `client_history_v1` 또는 `legacy_v0` capability를 반환한다. 새 Client는 capability가 없거나 legacy이면 history와 `memory_mode` 없이 요청마다 새 secure-random `conversation_id` 하나만 root에 보낸다. 구 Gateway는 이를 owner-memory 조회를 차단하는 일회성 scope로 사용하고, 새 Gateway는 해당 control을 제거해 `memory_mode=false`, `conversation_id=null`, content persistence suppression 상태로 무상태 실행한다. `strict` 전환 뒤 root public Chatbot은 history-required로 닫는다.
 7. Gateway는 raw history를 600초 TTL의 일회성 Redis key에 저장하고 Celery task에는 128-bit opaque reference만 넣는다. Public transient dispatch는 같은 생성 시각 기준 600초 deadline을 context와 Celery `expires`에 함께 기록한다. Worker는 DB, Knowledge sync, engine과 provider보다 먼저 absolute deadline을 검증한 뒤 history를 atomic GET+DELETE로 한 번만 소비하며 stale/malformed/missing reference를 non-retryable하게 거부한다. Result는 소비 직후 제거한다.
 
 ### Rationale
@@ -555,33 +555,38 @@ Public conversation consumer는 현재 편집 graph에서 선택되지만 Client
 - 새 node가 direct network/file/provider I/O를 추가해도 공통 deadline 경계를 우회하지 않아야 한다.
 - Public deployment의 신규 activation/revision lifecycle은 strict consumer contract와 active pointer mutation 순서를 함께 검토한다.
 
-## Implementation Decision: 혼합 Gateway 세대의 Public chat route fallback
+## Implementation Decision: 혼합 Gateway의 Public chat fallback과 owner-memory 격리
 
 ### Context
 
-Compatibility rolling deployment에서는 구·신 Gateway Pod가 같은 Service 뒤에 동시에 존재할 수 있다. `/info`가 신 Pod의 `client_history_v1` capability를 반환한 뒤 `/chat` POST가 구 Pod에 도달하면 구 버전에는 route가 없어 404가 발생하며, session affinity가 없는 배포에서는 공개 대화가 간헐적으로 중단된다.
+Compatibility rolling deployment에서는 구·신 Gateway Pod가 같은 Service 뒤에 동시에 존재할 수 있다. `/info`가 신 Pod의 `client_history_v1` capability를 반환한 뒤 `/chat` POST가 구 Pod에 도달하면 구 버전에는 route가 없어 404가 발생하며, session affinity가 없는 배포에서는 공개 대화가 간헐적으로 중단된다. 그러나 history와 `conversation_id`가 모두 없는 legacy root는 구 Gateway가 앱 소유자 `user_id` 범위의 과거 성공 run을 Memory로 조회하게 만들어 서로 다른 익명 방문자의 대화를 섞을 수 있다.
 
 ### Options Considered
 
 - Gateway Service에 session affinity 적용: capability 조회와 실행이 같은 세대로 간다는 보장이 rollout 인프라 설정에 결합되고 모든 환경에 동일하게 적용하기 어려워 선택하지 않는다.
 - `/chat` 404를 즉시 사용자 오류로 종료: 정상 rolling deployment에서 높은 확률로 가용성 단절을 만들므로 선택하지 않는다.
-- 모든 `/chat` 실패를 legacy root로 재시도: application error와 과부하까지 중복 요청할 수 있어 선택하지 않는다.
-- `client_history_v1` 요청의 404에만 history-free root를 한 번 시도: 구 route 미지원에 한정해 호환성을 복구하고 반복 실행을 제한하므로 선택한다.
+- `conversation_id` 없는 history-free root: 구 Gateway의 owner 범위 Memory fallback으로 익명 방문자 간 대화가 섞일 수 있어 선택하지 않는다.
+- Page/session 단위 격리 ID를 재사용: 구 Gateway server-side Memory를 익명 대화 저장소로 계속 사용하게 되므로 선택하지 않는다.
+- 요청마다 secure-random 일회성 격리 ID를 포함한 root를 사용: 구 Gateway의 owner fallback을 차단하고 새 Gateway가 control을 제거할 수 있어 선택한다.
 
 ### Final Decision
 
 1. Embed Chat은 `client_history_v1`으로 만든 `/chat` 요청이 404일 때만 legacy root 요청을 정확히 한 번 보낸다.
-2. Fallback은 같은 current inputs와 `deployment_version`을 유지하지만 `conversation`, `memory_mode`, `conversation_id`를 보내지 않는다.
-3. Legacy root의 실패에는 다시 fallback하지 않으며 `/chat`의 404 외 status는 기존 처리 계약을 유지한다.
-4. Deployment version 409는 기존처럼 info를 no-store로 갱신하고 이전 history를 폐기한 뒤 현재 입력을 한 번 재시도한다. 갱신된 capability가 `client_history_v1`이고 그 `/chat`이 구 Pod의 404를 받는 경우에도 동일한 1회 fallback을 적용한다.
+2. Capability가 legacy이거나 `/chat` 404 fallback인 모든 root 요청은 같은 current inputs와 `deployment_version`, 요청마다 새로 생성한 `public-once-v1:<UUIDv4>` 격리 ID만 `inputs.conversation_id`로 보낸다. `conversation`과 `memory_mode`는 보내지 않는다.
+3. 격리 ID는 React state나 browser storage에 보관·재사용하지 않는다. Secure UUID를 만들 수 없으면 legacy root를 보내지 않고 fail-closed한다.
+4. 새 Gateway compatibility adapter는 격리 ID를 다른 legacy control과 함께 제거하고 무상태 실행한다. 구 Gateway는 이를 해당 요청만의 scope로 사용해 앱 소유자 범위 과거 run을 조회하지 않는다.
+5. Legacy root의 실패에는 다시 fallback하지 않으며 `/chat`의 404 외 status는 기존 처리 계약을 유지한다.
+6. Deployment version 409는 기존처럼 info를 no-store로 갱신하고 이전 history를 폐기한 뒤 현재 입력을 한 번 재시도한다. 갱신된 capability가 `client_history_v1`이고 그 `/chat`이 구 Pod의 404를 받는 경우에도 동일한 1회 fallback을 적용한다.
 
 ### Rationale
 
-404 route mismatch는 rolling deployment 중 transport generation 차이에서 발생한다. Client가 전송하는 fallback을 history-free로 제한하면 구 Gateway 계약과 호환되면서 익명 대화 원문 전체를 legacy 경로에 전달하지 않는다. 비재귀 1회 처리로 실제 deployment/application 404에서도 요청 폭증이나 무한 재시도를 방지한다.
+404 route mismatch는 rolling deployment 중 transport generation 차이에서 발생한다. Root에는 전체 history가 아니라 current inputs만 전달하고 매 요청의 격리 ID를 재사용하지 않으므로 구 Gateway의 owner-memory 혼합과 대화 연속 저장을 동시에 차단한다. 새 Gateway는 ID를 제거해 현재 무상태 계약을 유지하며, 비재귀 1회 처리로 요청 폭증이나 무한 재시도를 방지한다.
 
 ### Affected Files
 
+- `apps/client/app/embed/chat/publicConversationHistory.ts`
 - `apps/client/app/embed/chat/[urlSlug]/page.tsx`
+- `apps/client/app/embed/chat/publicConversationHistory.test.ts`
 - `apps/client/app/embed/chat/[urlSlug]/page.test.tsx`
 - Chatbot Deployment와 Conversation Memory requirements/component/test case 문서
 
@@ -590,3 +595,4 @@ Compatibility rolling deployment에서는 구·신 Gateway Pod가 같은 Service
 - Compatibility mode 제거 시 active Client cache와 구 Gateway Pod가 모두 사라진 뒤 fallback 제거 여부를 검토한다.
 - Public route status 계약이 바뀌면 404가 route 미지원 외 application 오류를 포함하는지 다시 검토한다.
 - Gateway routing에 capability generation affinity를 도입하면 Client fallback과 중복되지 않는지 확인한다.
+- Legacy root ID를 session/page 단위로 재사용하거나 browser storage에 보관하지 않는지 Client 변경 시 검토한다.

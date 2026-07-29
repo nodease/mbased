@@ -4,7 +4,7 @@ Status: Draft
 
 챗봇 배포는 기존 배포/공개 실행 엔드포인트의 계약을 확장한다. 현재 `internal_chatbot`은 인증 deployment run/run-info endpoint에서 active membership·workflow `execute` 확인과 로그인 사용자의 execution subject 전달을 적용한다. Target private-RAG 내부 Chatbot access grant와 session namespace는 이 current contract 위에 추가되는 후속 기능이며, 동일한 완성 상태로 간주하지 않는다.
 
-공개 route는 업무 `inputs`와 분리한 bounded `conversation.history`를 매 요청에 전달하며 `memory_mode`, browser `conversation_id`, server-side transcript와 execution-log memory를 사용하지 않는다. 인증 내부 route는 별도의 bounded `conversation.client_id`를 사용하며 durable session/persistence 계약은 후속 범위다. 세부 계약은 [Conversation Memory API spec](../conversation-memory/api_spec.md)을 따른다.
+공개 `/chat` route는 업무 `inputs`와 분리한 bounded `conversation.history`를 매 요청에 전달하며 `memory_mode`, browser `conversation_id`, server-side transcript와 execution-log memory를 사용하지 않는다. Compatibility root는 구 Gateway owner-memory fallback 차단용 일회성 격리 ID만 사용하고 새 Gateway가 이를 제거한다. 인증 내부 route는 별도의 bounded `conversation.client_id`를 사용하며 durable session/persistence 계약은 후속 범위다. 세부 계약은 [Conversation Memory API spec](../conversation-memory/api_spec.md)을 따른다.
 
 ## Endpoints
 
@@ -210,7 +210,7 @@ Response: `{"status": "success", "results": { ... }}`.
 
 Public Chatbot preflight/create의 `config.public_conversation`은 `public_chat_conversation.v1`과 한 개의 canonical `history_consumer`를 사용한다. 대상 node는 deployment snapshot의 `llmNode`여야 한다. Gateway는 `/chat` 실행 전에 mapping을 검증하고 Worker가 persisted deployment row에서 다시 검증한다.
 
-Public info response의 `public_conversation_contract`는 `client_history_v1` 또는 `legacy_v0`이다. 구 Gateway처럼 필드가 없으면 Client는 legacy로 취급한다. Compatibility rollout에서 legacy root 요청은 새 Gateway가 server Memory 없이 stateless로 실행한다. Strict rollout에서는 root Chatbot 요청과 consumer mapping 없는 legacy deployment의 create/toggle 활성화를 거부하며 toggle 실패는 deployment, App active pointer, schedule과 transaction을 변경하지 않는다.
+Public info response의 `public_conversation_contract`는 `client_history_v1` 또는 `legacy_v0`이다. 구 Gateway처럼 필드가 없으면 Client는 legacy로 취급한다. Compatibility rollout에서 Client는 root 요청마다 secure-random 일회성 `conversation_id`를 보내 구 Gateway의 app-owner Memory fallback을 차단하고, 새 Gateway는 이를 제거해 server Memory 없이 stateless로 실행한다. Strict rollout에서는 root Chatbot 요청과 consumer mapping 없는 legacy deployment의 create/toggle 활성화를 거부하며 toggle 실패는 deployment, App active pointer, schedule과 transaction을 변경하지 않는다.
 
 Public `/chat` raw history는 600초 TTL의 일회성 Redis key에만 저장하고 Celery에는 opaque reference를 전달한다. Execution context는 authorization subject 대신 별도 public audit actor, canonical consumer safe reference, content persistence suppression과 600초 absolute deadline을 포함한다. Celery publish도 같은 시각의 `expires`를 사용한다. Worker는 deadline을 먼저 검사하고 history reference를 atomic GET+DELETE로 소비하며 snapshot에서 consumer ref를 재구성한다. 공통 external-effect executor는 write/read-only provider I/O 전에 같은 monotonic deadline을 검사하고 만료된 claim은 failed-before-effect/stop으로 종료한다.
 

@@ -424,7 +424,7 @@ Disposable PostgreSQL evidence는 `NODEASE_RUN_DISPOSABLE_DB_TEST=1`인 전용 C
 - MEM-TC-BOUND-004: Public RAG retrieve, collection retrieve와 policy block audit은 모두 `actor_id=null`, `actor_type=public`이다.
 - MEM-TC-BOUND-005: tokenizer model lookup과 exact fallback이 모두 실패하면 provider 호출 없이 `conversation.token_count_unavailable`다.
 - MEM-TC-BOUND-006: legacy control 요청은 budget, secret migration, DB mutation과 task publish를 한 번도 호출하지 않는다.
-- MEM-TC-BOUND-007: 새 Frontend+구 Gateway는 capability 필드 누락을 `memory_mode`/`conversation_id` 없는 legacy root로 처리한다.
+- MEM-TC-BOUND-007: 새 Frontend+구 Gateway는 capability 필드 누락을 history/`memory_mode` 없이 새 일회성 `conversation_id`를 가진 legacy root로 처리해 app-owner Memory fallback을 사용하지 않는다.
 - MEM-TC-BOUND-008: 구 Frontend+새 compatibility Gateway는 root 요청이 성공하되 memory/conversation control을 제거하고 content persistence를 억제한다.
 - MEM-TC-BOUND-009: 새 Frontend+새 Gateway는 `client_history_v1`에서 `/chat`을 사용한다.
 - MEM-TC-BOUND-010: strict Gateway는 root public Chatbot을 history-required로 거부한다.
@@ -456,4 +456,5 @@ Disposable PostgreSQL evidence는 `NODEASE_RUN_DISPOSABLE_DB_TEST=1`인 전용 C
 - MEM-TC-BOUND-036: Client는 unsaved LLM consumer와 edge를 포함한 현재 graph의 동일 snapshot을 deployment preflight와 create에 전달한다.
 - MEM-TC-BOUND-037: task deadline이 만료된 File Extraction 진입 노드는 remote fetch를 포함한 node 실행을 시작하지 않고 non-retryable `external_effect.deadline_exceeded`로 종료한다.
 - MEM-TC-BOUND-038: Strict mode의 active browser-access revision은 legacy Public Chatbot consumer mapping을 다른 preflight와 mutation 전에 safe 422로 거부하고 rollback하며, inactive staging은 active 전환 전까지 pointer를 바꾸지 않는다.
-- MEM-TC-BOUND-039: `client_history_v1` info 뒤 구 Gateway가 `/chat`을 404로 거부하면 Embed Chat은 같은 current inputs와 version을 `conversation`·legacy memory control 없이 root로 한 번만 재시도하며, fallback root도 404이면 추가 요청 없이 사용자 오류로 종료한다.
+- MEM-TC-BOUND-039: `client_history_v1` info 뒤 구 Gateway가 `/chat`을 404로 거부하면 Embed Chat은 같은 current inputs/version과 새 일회성 격리 ID를 history-free root로 한 번만 보내며, fallback root도 404이면 추가 요청 없이 사용자 오류로 종료한다.
+- MEM-TC-BOUND-040: 연속된 legacy root 요청은 서로 다른 `public-once-v1:<UUIDv4>`를 사용하고 Client state/storage에 보존하지 않는다. 새 compatibility Gateway는 ID를 제거해 false/null context로 dispatch하며 secure UUID 생성 불가 시 Client는 root를 호출하지 않는다.
