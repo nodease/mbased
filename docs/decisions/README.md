@@ -8,6 +8,10 @@
 - DB schema, RBAC, audit, data retention, organization boundary, 보안 경계는 ADR 후보로 본다.
 - ADR은 결정의 이유와 선택지를 기록한다. 현재 구현 기준은 관련 문서(`docs/`, `features/`)에도 반드시 반영한다.
 - 파일명은 `ADR-NNNN-topic-slug.md` 형식을 사용한다. `NNNN`은 4자리 순번이다.
+- 로컬 초안 또는 PR을 열기 전 병렬 개발 브랜치에서 번호를 아직 확정할 수 없는 제안은
+  `docs/decisions/proposals/ADR-TBD-topic-slug.md`에 둘 수 있다. 이 파일은 공식 ADR registry에
+  포함되지 않으며 `Status: Proposed`만 사용할 수 있다. PR을 열기 전 최신 `dev` 기준 번호를
+  배정하고 루트로 이동한 뒤 H1, 인덱스와 모든 공식 링크를 함께 갱신해야 한다.
 - 병렬 브랜치의 ADR 번호는 예약된 전역 식별자가 아니다. Merge 또는 rebase 직전에 최신 dev의 인덱스를 기준으로 중복을 확인하고, 충돌하면 아직 병합되지 않은 ADR의 파일명·제목·본문 링크·인덱스를 함께 재번호한다. 같은 번호의 서로 다른 결정을 dev에 병합하지 않는다. PR quality gate는 파일명, H1, 번호 유일성과 이 README 인덱스의 1:1 대응을 항상 검사한다.
 - 중복이 이미 dev에 병합됐다면 dev history에 먼저 도달한 ADR의 번호를 유지하고 후발 ADR의 파일명, H1, 인덱스와 모든 공식 참조만 다음 가용 번호로 재분류한다. 이 식별자 무결성 복구는 결정 내용의 소급 변경으로 보지 않으며 본문은 수정하지 않는다.
 - ADR 본문은 작성 시점의 기록으로 보존하고 소급 수정하지 않는다. 결정이 바뀌면 새 ADR을 추가하고 이전 ADR을 참조한다. 단 머리말 `Status`는 기록이 아니라 상태이므로 `Superseded` 등으로 전이할 수 있다.
@@ -80,7 +84,7 @@ ADR 본문은 작성 시점의 결정 과정을 보존하는 기록 문서다. `
 | [ADR-0056](ADR-0056-app-auth-secret-issuance-and-rotation.md) | Accepted | App 인증 secret 발급·검증·rotation 경계 | App·Deployment 일반 응답에서 secret 원문을 제거하고 명시적 one-time rotation API만 원문을 반환한다. App에는 비가역 current/previous verifier와 version을 저장하며, row lock·CAS·최대 5분 grace·즉시 폐기·transaction-bound audit을 적용한다. |
 | [ADR-0057](ADR-0057-llm-credential-at-rest-encryption-and-rotation.md) | Accepted | LLM credential 저장 암호화와 key rotation | LLM credential config를 전용 versioned keyring으로 암호화하고 Shared 단일 decrypt 경계, dual-read/single-write 전환, Gateway·Workflow Worker·Knowledge Worker startup 검증과 제한 batch backfill·rotation을 적용한다. |
 | [ADR-0058](ADR-0058-bootstrap-difficulty-routing-policy.md) | Superseded | Bootstrap 난이도 라우팅 정책 | ADR-0059의 Judge bootstrap과 점진 학습 구조로 대체됐다. |
-| [ADR-0059](ADR-0059-judge-bootstrap-incremental-routing.md) | Accepted | Judge Bootstrap과 점진 학습 로컬 라우팅 | 초기 운영 요청은 Judge가 실행 주체가 쓸 수 있는 후보 중 모델을 선택하고, Judge label과 실제 운영 성과가 충분히 쌓이면 로컬 mDeBERTa 분류기가 우선 선택한다. 낮은 신뢰도는 Judge로 되돌아가며, Judge 실패는 기본/대체 모델로 닫는다. |
+| [ADR-0059](ADR-0059-judge-bootstrap-incremental-routing.md) | Superseded | Judge Bootstrap과 점진 학습 로컬 라우팅 | ADR-0073이 신규 Target 계약을 대체한다. Versioned V1 row와 실행 이력은 호환·rollback을 위한 역사 계약으로 보존한다. |
 | [ADR-0060](ADR-0060-my-module-cost-summary-presentation.md) | Accepted | 내 모듈 비용 요약 표시 경계 | 현재 워크플로우 화면은 page-level 비용·추세·위험 요약과 `cost-summary` 호출을 제거하고 workflow별 총비용과 실행/Agent Builder 구분값을 유지한다. `cost-summary` API와 Admin 조직 비용 요약은 호환성과 관리 용도로 유지한다. |
 | [ADR-0061](ADR-0061-agent-builder-hierarchical-knowledge-selection.md) | Accepted | Agent Builder 계층형 Knowledge 선택 | Collection 동적 routing과 직접 KB binding을 분리하고 opaque handle, 권한 필터, 안정 점수 정렬, 중복 KB 선택 동기화와 runtime 합집합 중복 제거를 정의한다. |
 | [ADR-0062](ADR-0062-workflow-node-secret-reference-boundary.md) | Accepted | Workflow node secret reference 경계 | Agent Builder와 Node Detail의 masked 직접 입력 및 `나중에 설정` UX를 유지하면서 Slack/GitHub 원문 secret을 서버 암호화 immutable revision으로 저장하고 graph/deployment에는 opaque reference만 보존한다. |
@@ -94,7 +98,15 @@ ADR 본문은 작성 시점의 결정 과정을 보존하는 기록 문서다. `
 | [ADR-0070](ADR-0070-organization-detector-provider-and-pre-embedding-local-masking-boundary.md) | Accepted | 조직 Detector Provider와 embedding 전 로컬 마스킹 경계 | Local hard baseline, closed mode/provider/action matrix, exact provider·egress approval revision, UTF-8 byte span/fingerprint, platform+Organization validity epoch와 30-day legacy hard max를 redacted canonical/retrieval 경계에 강제한다. 현재 runtime/provider/persistence는 미구현이며 MBA-362와 각 관리 readiness 전에는 non-null provider 및 review-capable path를 비활성화한다. |
 | [ADR-0071](ADR-0071-rag-query-embedding-provider-capability.md) | Accepted | RAG query embedding provider capability 경계 | Deployment version과 canonical LLM location, exact embedding model별 명시 policy를 사용한다. Authorized 후보가 있을 때만 model별 capability와 durable usage operation을 만들고 query/vector를 invocation-local로 유지하며 ADR-0067 guarded transport를 사용한다. 일반 runtime activation과 legacy 제거는 MBA-320이 소유한다. |
 | [ADR-0072](ADR-0072-outbound-proxy-only-network-enforcement.md) | Accepted | Outbound proxy-only 네트워크 강제 경계 | Application guard를 의미 정책 권위로 유지하면서 explicit Squid transport, Compose internal network와 provider-neutral Helm NetworkPolicy를 결합한다. PR CI는 pinned kind+Calico IPv4에서 direct HTTPS 차단을 검증하고 dual-stack·운영 CNI는 release gate로 둔다. |
+| [ADR-0073](ADR-0073-requirement-judge-capability-routing-v2.md) | Accepted | Requirement Judge와 Capability Routing V2 책임 분리 | Requirement Judge와 서버 selector의 Target 책임을 확정한다. 이 채택은 production 활성화 승인이 아니며 구현과 활성화 적격성은 MBA-372에서 별도로 검증한다. |
 | [ADR-0074](ADR-0074-public-chatbot-client-held-history.md) | Accepted | Public Chatbot client-held conversation history | Public은 완료된 user/assistant history를 요청마다 보내고 서버는 20 turn/4,096 token을 검증한다. Public Session/Transcript/Access Grant와 content-bearing run/node/trace를 저장하지 않는다. ADR-0030/0033 durable Memory는 authenticated internal Chatbot 후속 target으로 유지한다. |
+
+## 번호 미확정 제안
+
+이 절은 PR을 열기 전 로컬 또는 병렬 브랜치에서 번호가 아직 정해지지 않은 초안을 찾기 위한
+목록이며 공식 ADR registry가 아니다. PR을 열기 전 4자리 번호를 배정해 위 `목록`으로 이동한다.
+
+현재 등록된 번호 미확정 제안은 없다.
 
 ## 참고 보고서
 

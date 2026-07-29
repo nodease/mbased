@@ -1,11 +1,11 @@
 # Cost Optimizer Component Spec
 
 Status: Draft
-Verified Against: feature/mba-198 @ 40c45fcc
+Verified Against: origin/dev @ 79da97f57aa116bdd73ce51cb2ff365b03bed713
 
 ## Purpose
 
-이 문서는 `requirements.md`의 FR-001부터 FR-015까지를 화면과 컴포넌트 관점에서 구현 가능한 형태로 정리한다.
+이 문서는 `requirements.md`의 FR-001부터 FR-016까지를 화면과 컴포넌트 관점에서 구현 가능한 형태로 정리한다.
 FR-011은 LLM 노드 상세 화면의 Judge-first 자동 라우팅 컨트롤로 다룬다. 사용자는
 작업 설명, 기본 모델과 기본 대체 모델을 정하고 자동 라우팅을 켠다. 입력군/유사도 편집 UI는
 노출하지 않는다. 자동 라우팅이 켜진 뒤에는 정책과 분리된 자동 라우팅 학습기의 상태,
@@ -37,6 +37,7 @@ Cost Optimizer UI는 workflow 전체 비교 화면이 아니라, LLM 노드 상�
 | FR-013 | Recommendation verification / compare quality row | 추천 모달과 일반 결과 분석 화면에서 baseline 대비 candidate 비용·속도·token·품질 점수·schema·downstream 결과를 보여주고 적용 또는 이력 재조회로 연결한다. |
 | FR-014 | 배포별 자동 파라미터 최적화 | 배포 모달에서는 자동 최적화 단계를 표시하지 않고 비활성 기본값으로 배포하며, 워크플로우 운영 현황에서 비용 위험과 분리된 자동 최적화 상태를 관리한다. |
 | FR-015 | 제약·난이도/사전 지식 기반 라우터 실험 | 현재 UI와 운영 active policy를 바꾸지 않는다. fixed-fixture 보고서로 검증 전용 전략과 사전 지식 기반 전략을 함께 검토한다. |
+| FR-016 | Capability Routing V2 Target | 요구 판정, 서버 최종 선택과 cache 재사용을 구분하고 activation eligibility·canary·rollback 상태를 안전하게 표시한다. 현재 product UI에는 미구현이다. |
 
 ## Implementation Tracking
 
@@ -54,18 +55,64 @@ Cost Optimizer UI는 workflow 전체 비교 화면이 아니라, LLM 노드 상�
 | FR-008 | Apply candidate action | `apps/client/app/modules/[id]/cost-optimizer/[nodeId]/page.tsx` | 구현 완료 | `apps/client/app/features/workflow/tests/costOptimizer/fr8-apply-flow.test.tsx` | 통과 |
 | FR-009 | Cost/usage metric display, experiment history | `apps/client/app/modules/[id]/cost-optimizer/[nodeId]/page.tsx`, `apps/client/app/features/workflow/components/costOptimizer/CostOptimizerHistoryPanel.tsx`, `apps/client/app/features/workflow/hooks/useCostOptimizerHistory.ts` | 구현 완료 | `apps/client/app/features/workflow/tests/costOptimizer/fr9-usage-display.test.tsx`, `apps/client/app/features/workflow/tests/costOptimizer/fr9-experiment-history-api-client.test.ts`, `apps/client/app/features/workflow/tests/costOptimizer/fr9-history-model.test.ts` | 통과 |
 | FR-010 | Permission-gated UI | `apps/client/app/features/workflow/components/costOptimizer/CostOptimizerEntryAction.tsx`, `apps/client/app/modules/[id]/cost-optimizer/[nodeId]/page.tsx` | 구현 완료 | `apps/client/app/features/workflow/tests/costOptimizer/fr1-entry-action.test.tsx`, `apps/client/app/features/workflow/tests/costOptimizer/fr6-playground-mode-switch.test.tsx` | 통과 |
-| FR-011 | Policy controls / learner summary / model-routing route | `apps/client/app/features/workflow/components/nodes/llm/components/LLMNodePanel.tsx`, `apps/client/app/modules/[id]/model-routing/[nodeId]/page.tsx` | 구현 완료 | `apps/client/app/features/workflow/tests/costOptimizer/fr3-llm-node-routing.test.tsx` | 토글, 주기, policy 상태, learner 상태·활성 버전 표시 통과 |
+| FR-011 | LLM node inline policy controls / learner summary | `apps/client/app/features/workflow/components/nodes/llm/components/LLMNodePanel.tsx` | 인라인 컨트롤 구현 완료. 별도 `model-routing` route는 현재 tree에 없으며 FR-011 구현 증거로 간주하지 않음 | `apps/client/app/features/workflow/tests/costOptimizer/fr3-llm-node-routing.test.tsx` | 토글, 주기, policy 상태, learner 상태·활성 버전 표시 통과 |
 | FR-011 | Runtime decision trace | `apps/client/app/features/workflow/components/modelRouting/ModelRoutingDecisionDetails.tsx` | 구현 완료 | `apps/client/app/features/workflow/tests/costOptimizer/fr11-judge-first-routing-trace.test.tsx`, `apps/client/app/features/workflow/tests/test-sidebar-node-detail.test.tsx` | policy와 learner 식별자, Judge 호출, 학습 포함 여부 표시 통과 |
 | FR-012 | Optimization recommendation modal | `apps/client/app/features/workflow/components/costOptimizer/OptimizationRecommendationModal.tsx`, `apps/client/app/features/workflow/components/nodes/llm/components/LLMNodePanel.tsx` | 구현 완료 | `apps/client/app/features/workflow/tests/costOptimizer/fr8-apply-api-client.test.ts`, `apps/client/app/features/workflow/tests/costOptimizer/fr2-entry-to-baseline-connection.test.tsx` | 통과 기록 있음 |
 | FR-013 | Recommendation verification, compare quality row, history restore | `apps/client/app/features/workflow/components/costOptimizer/OptimizationRecommendationModal.tsx`, `apps/client/app/features/workflow/components/costOptimizer/CostOptimizerHistoryPanel.tsx`, `apps/client/app/features/workflow/hooks/useCostOptimizerHistory.ts`, `apps/client/app/features/workflow/api/workflowApi.ts`, `apps/client/app/features/workflow/types/Api.ts`, `apps/client/app/modules/[id]/cost-optimizer/[nodeId]/page.tsx` | 구현 완료 | `apps/client/app/features/workflow/tests/costOptimizer/fr13-recommendation-inline-verification.test.tsx`, `apps/client/app/features/workflow/tests/costOptimizer/fr13-recommendation-verification-api-client.test.ts`, `apps/client/app/features/workflow/tests/costOptimizer/fr6-playground-mode-switch.test.tsx` | modal 검증, 일반 compare 품질 행, 평가 불가, 단건 비교 이력 복원 통과 |
 | FR-014 | Deployment default / management | `apps/client/app/features/workflow/components/deployment/DeploymentFlowModal.tsx`, `apps/client/app/features/workflow/components/deployment/AutomaticOptimizationManagementModal.tsx`, `apps/client/app/dashboard/mymodule/page.tsx` | 구현 완료 | `apps/client/app/features/workflow/components/deployment/DeploymentFlowModal.test.tsx`, `apps/client/app/features/workflow/components/deployment/AutomaticOptimizationManagementModal.test.tsx`, `apps/client/app/features/workflow/tests/costOptimizer/fr14-dashboard-automatic-optimization-management.test.tsx` | 통과 |
-| FR-015 | 실험 결과 artifact | `scripts/experiment_constraint_difficulty_router.py`, 실행 시 생성되는 로컬 `reports/model-routing/constraint-difficulty-v1-fixed-fixture/` | 실제 semantic matcher fixture, 검증 전용 constraint, prior-guided cold-start 비교를 포함한 개발자용 JSON/Markdown 생성 구현, 제품 UI 없음 | `tests/experiments/test_constraint_difficulty_routing_experiment.py` | 통과 |
+| FR-015 | 실험 결과 artifact | 후속 `scripts/experiment_constraint_difficulty_router.py`, `reports/model-routing/constraint-difficulty-v1-fixed-fixture/` | Target 계약만 정의. 명시한 script·test·report artifact와 제품 UI는 현재 tree에 없음 | 후속 `tests/experiments/test_constraint_difficulty_routing_experiment.py` | 미구현·미실행 |
+| FR-016 | V2 routing/activation safe projection | 후속 Client implementation | Target 계약만 정의. Product UI와 platform operator 관리 화면 미구현 | `test_cases.md`의 `M365-E01`~`M365-E11`, `M365-F11`~`M365-F26` | 미구현 |
+
+FR-011 자동 라우팅 설정은 LLM node detail의 인라인 컨트롤이 현재 구현 경계다. `CostOptimizerEntryAction`이 이동하는 `/modules/{workflowId}/cost-optimizer/{nodeId}`는 A/B compare workspace이며 별도 model-routing 관리 화면이 아니다.
 
 ## FR-015 UI Boundary
 
-현재 제품 화면과 runtime은 `prior_guided_adaptive_v1`을 사용한다. 입력군·유사도·semantic
-matcher UI는 노출하지 않는다. Test Sidebar와 실행 로그는 같은 공통 컴포넌트로 선택 모델과
-safe 판단 근거를 표시한다.
+FR-015의 Target `prior_guided_adaptive_v1`과 constraint-difficulty strategy는 fixed-fixture 실험 전용이다.
+현재 tree에는 해당 구현·test·report artifact가 없고 제품 runtime strategy나 active policy도 아니며
+제품 UI를 제공하지 않는다. 향후 생성되는 실험 결과를
+제품 trace처럼 표시하거나 사용자가 해당 strategy를 선택하게 해서는 안 된다.
+
+## FR-016 Capability Routing V2 UI Boundary
+
+FR-016은 [ADR-0073 Capability Routing V2](../../decisions/ADR-0073-requirement-judge-capability-routing-v2.md)의
+Target UI 계약이다. 현재 product UI가 이를 구현하거나 V2를 활성화했다고 표시하지 않는다.
+
+- 실행 상세는 `requested_strategy_id`, `effective_strategy_id`, bounded `strategy_resolution_reason`을
+  먼저 표시한다. Effective V2 decision에서만 `requirement_source`, `model_selection_source`,
+  `routing_reuse_source`를 서로 다른 의미로 표시하며 Requirement Judge를 “모델 선택자”라고 표현하지
+  않는다.
+- `requirement_source=not_required`는 effective V2의 economic admission에 따른 정상 생략,
+  `unavailable`은 effective V2의 판정 실패로 구분한다.
+- `operational_evidence_correction_pending`은 운영 모델 근거, `canary_usage_correction_pending`은 Canary
+  승격·안전 근거가 권위 있는 usage 정정에 맞춰 재구축 중인 safe strategy resolution으로 표시한다. 둘 다
+  corrected token/cost 원문, provider usage operation이나 대상 event/snapshot detail은 노출하지 않는다. V2 off·profile/requirement source/credential
+  policy/Worker 부적격은
+  strategy resolution으로 표시하고 V2 source를 꾸며내지 않는다.
+- Cache hit는 “이전 추천 재사용”으로 표시하되 current authorization·hard gate를 통과한 최종 선택과
+  혼동하지 않는다. Profile/source가 바뀐 뒤의 결과를 이전 cache hit로 표시하지 않고, safe projection에는
+  opaque activation profile/source version과 cache contract version만 사용한다.
+- Workflow `deploy` 권한자는 platform이 허용한 strategy version을 선택하거나 더 안전한 경로로
+  opt-out할 수 있다. Activation threshold, 전역 scope와 profile approval control은 제공하지 않는다.
+- 일반 organization owner/manager 화면에 platform routing operator control을 임시로 노출하지 않는다.
+- 전용 `platform routing benchmark operator`와 target resource `execute` 권한 경계가 구현되기 전에는
+  일반 workflow 실행·테스트 UI에 billable benchmark action을 노출하지 않는다.
+- Activation 상태는 `비활성`, `진단`, `제한 Canary`, `활성`, `긴급 중지`, `Profile 만료/불일치`를
+  구분하고 profile version, `Judge 전용 | 승인 learner` requirement source mode, opaque source
+  version, bounded scope, 유효 기간, rollback 준비 상태와 sealed evidence revision만 safe projection으로
+  표시한다. Environment global kill과 특정 activation domain의 safety block을 구분하고, 다른 family까지
+  중지된 것처럼 표시하지 않는다. Candidate
+  learner가 발행됐다는 이유로 “활성 learner” 또는 production-ready로 표시하지 않는다.
+- Profile 부재·stale·scope 불일치는 오류를 숨긴 채 V2를 실행하지 않는다. “저장 모델 사용” 또는
+  “사용 가능한 모델 없음”을 실제 server result에 맞게 표시한다.
+- Contract version 없는 legacy row는 “라우팅 계약 재발행 필요”와 stored safe model 사용 여부를
+  표시한다. Client가 생성 시각으로 V1/V2를 추측하거나 자동 migration하지 않는다.
+- Candidate 제외 상세, raw prompt/output, RAG 원문, credential, tenant evidence와 provider payload는
+  화면에 표시하지 않는다.
+
+현재 `ModelRoutingDecisionDetails`에는 Judge 성공을 "후보 모델을 비교해 실제 실행 모델을 선택"으로
+설명하고 Judge 영역에 후보 수를 표시하는 구형 projection이 남아 있다. 이는 FR-016 구현이 아니라
+`M365-E06`으로 추적하는 Current gap이다. 해당 Client 경계가 수정되기 전에는 현재 화면을 V2
+관측 계약 준수 근거로 사용하지 않는다.
 
 ## FR-014 배포별 자동 파라미터 최적화 UI
 
@@ -265,8 +312,9 @@ B 후보 재실행을 위해 baseline picker를 다시 열거나 workspace를 �
 Planner 실제 비용만 중앙 요약에 표시한다. 상세 Inspector는 payload 출처, 마스킹된 입력
 요약, 출력 형식, RAG 여부, 난이도 label/근거, 난이도별 모델, 실제 실행 confidence와
 fallback 여부를 표시한다. 원문 prompt/input/KB 본문은 어느 화면에도 표시하지 않는다.
-Runtime Judge가 남긴 0~3 범위의 `task_requirements`가 있으면 작업 복잡도·결정 영향도·근거 종합·
-출력 정밀도 판단 근거로 사용할 수 있다. 값이 없는 이전 실행이나 계약 밖 값은 임의 점수로
+Runtime Judge가 남긴 0~3 범위의 `task_requirements`가 있으면 작업 복잡도·결정 영향도·근거 종합
+판정 근거로 사용할 수 있다. 출력 schema·형식과 tool/effect 요구는 Judge 점수가 아니라 서버가
+계산한 structural fact로 별도 표시한다. 값이 없는 이전 실행이나 계약 밖 값은 임의 점수로
 대체하지 않는다.
 
 초안 artifact가 없거나 생성에 실패해도 workflow 편집과 수동 모델 실행은 막지 않는다.
@@ -278,9 +326,10 @@ Runtime Judge가 남긴 0~3 범위의 `task_requirements`가 있으면 작업 �
 1. 사용자가 LLM node에서 `자동 모델 라우팅`을 켠다.
 2. 시스템은 실행 가능한 후보 모델을 배포 policy에 보관하고, Judge/local router 학습 상태는
    같은 작업 지문과 학습 계약을 가진 별도 learner에 보관한다.
-3. 성공 배포 Judge label이 50건 미만이면 Judge가 현재 요청을 보고 모델과 fallback을 선택한다.
-4. 50건 이상이고 최근 20건의 학습 전 예측·계약 품질 기준을 통과한 로컬 라우터가 충분히
-   확신하면 로컬 라우터가 선택하며, 처음 보는 입력 또는 확신이 낮은 입력은 Judge를 다시 호출한다.
+3. 성공 배포 Judge label이 learner gate보다 적으면 Judge가 현재 요청의 요구 능력만 판정하고
+   서버가 current candidate와 hard gate를 적용해 모델과 fallback을 선택한다.
+4. Learner gate를 통과한 로컬 라우터가 충분히 확신하면 로컬 라우터가 요구 능력을 예측하고
+   서버가 모델을 선택한다. 처음 보는 입력 또는 확신이 낮은 입력은 Judge를 다시 호출한다.
 5. 테스트 실행은 배포와 같은 선택 방식을 사용하지만 학습에는 포함하지 않는다. 테스트 실행 상세와 실행 로그에서 실제 선택 모델, 적용 rule, fallback, policy version과
    safe 판단 근거를 확인한다.
 
@@ -301,7 +350,7 @@ prompt, Judge 내부 응답은 표시하지 않는다. 정책이 없는 예외 �
 
 #### Routing analysis panel
 
-기존 model-routing route의 첫 화면은 모델 추천 한 건보다 라우팅 가능 여부를 먼저
+LLM node detail의 인라인 routing analysis panel은 모델 추천 한 건보다 라우팅 가능 여부를 먼저
 보여준다.
 
 | 분석 상태 | 주 표시 | 기본 액션 |
@@ -400,11 +449,13 @@ LLM 노드 상세 비교는 `실행 상태(상태·비용·시간·토큰) → �
 - LLM node output에 `metadata.model_routing`이 있으면 `ModelRoutingDecisionDetails`를
   재사용한다. 화면은 `모델 선택 결과`를 첫 영역으로 두고, 실제 실행 모델, 선택 경로,
   선택 근거를 먼저 표시한다.
-- Runtime/Test Judge가 모델을 선택한 경우 header의 `Judge가 모델 선택` 배지는 표시하지 않는다. 바로 아래 `Judge 실행` 영역에서 같은 사실을 중복 없이 확인하며, local router·저장 정책·기본 모델 선택 경로 배지는 유지한다.
-- 이어지는 `Judge 실행` 영역은 항상 같은 위치에 표시한다. `Judge 실행 성공`이면 Judge 모델,
-  확신도, 검토 후보 수, Judge 비용과 safe `Judge 판단 설명`을 보여준다. 판단 설명은 선택 모델이
-  필요한 능력과 후보 증거에 맞는 이유만 240자 이하로 표시하며 요청 원문·RAG 문서 원문은 표시하지 않는다. `Judge 호출 실패`이면 기본 모델 회귀 사실,
-  호출한 Judge 모델, 후보 수, 안전 오류 이유를 보여준다. `Judge 호출 안 함`이면 local router
+- FR-016 Target에서는 Runtime/Test Judge가 요구 능력을 판정해도 header에 `Judge가 모델 선택`
+  배지를 표시하지 않는다. `Judge 실행` 영역에는 요구 판정 성공 여부를, `모델 선택 결과` 영역에는
+  서버 선택 결과를 분리하며 local classifier·저장 정책·fallback 경로 표시를 유지한다.
+- FR-016 Target의 `Judge 실행` 영역은 항상 같은 위치에 표시한다. `Judge 실행 성공`이면 Judge 모델,
+  확신도, attempt 수, Judge 비용과 bounded 요구 판정 사유를 보여준다. 후보 수와 후보 비교 근거는
+  Judge 영역에 표시하지 않는다. `Judge 호출 실패`이면 stored safe path 사용 여부, 호출한 Judge 모델과
+  안전 오류 이유를 보여준다. `Judge 호출 안 함`이면 local classifier
   선택·정책 없음·테스트 preview 중 해당 이유를 보여준다. 이전 trace에 Judge 상태가 없으면
   호출 실패로 추측하지 않고 `Judge 실행 정보 없음`을 표시한다.
 - `fallback_used=true`이면 Judge 실패와 별개인 실제 LLM provider 대체 실행을 `모델 호출 대체 실행`
@@ -450,12 +501,12 @@ LLM 노드 상세 화면은 자동 모델 라우팅을 별도 route가 아니라
 
 자동 라우팅 ON 상태:
 
-- `기본 모델 (규칙 미일치 시)` 선택 UI를 표시한다. 이 값은 입력군 rule과 매칭되지 않은 요청의 기본 모델이며, policy table의 `active_policy.default_model_id`와 node draft의 `model_id`를 함께 갱신한다.
+- `기본 모델` 선택 UI를 표시한다. 이 값은 요구 판정 또는 selector를 사용할 수 없을 때 current gate를 다시 통과해야 하는 stored safe path이며, policy table의 `active_policy.default_model_id`와 node draft의 `model_id`를 함께 갱신한다.
 - `기본 대체 모델` 선택 UI를 표시한다. 이 값은 기본 모델 호출 실패 시에만 사용하며, `active_policy.fallback_model_id`와 node draft의 `fallback_model_id`를 함께 갱신한다.
 - active policy 상태 panel을 표시한다. panel은 `GET /model-routing/policy` 응답을 우선 사용한다.
 - runtime은 active policy를 사용해 모델을 선택한다.
-- 배포 직후 기본 policy와 빈 rule을 `collecting` 상태로 표시한다. 비동기 bootstrap 검증 중에는 node에 저장된 `model_id`/`fallback_model_id`를 사용하고, 입력군별 기준·후보 검증을 통과한 rule만 이후 표시한다.
-- judge LLM은 일반 실행 중 호출하지 않는다.
+- 배포 직후 Judge-first policy를 `collecting` 상태로 표시한다. Learner가 current contract와 품질 gate를 통과하기 전에는 Runtime Judge 또는 current-valid stored path를 사용한다.
+- Current `judge_bootstrap_incremental_v1`은 일반 실행 중 Runtime Judge를 호출할 수 있다. FR-016 Target에서는 economic admission으로 의도적 생략한 경우와 호출 실패를 별도 source로 표시한다.
 
 정책 상태 panel은 다음 정보를 보여준다.
 

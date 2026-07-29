@@ -1,6 +1,6 @@
 # ADR-0059: Judge Bootstrap과 점진 학습 로컬 모델 라우팅
 
-Status: Accepted
+Status: Superseded
 
 Supersedes: [ADR-0058](ADR-0058-bootstrap-difficulty-routing-policy.md)
 
