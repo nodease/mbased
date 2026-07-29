@@ -1,8 +1,10 @@
 import { AxiosHeaders, type AxiosInstance } from 'axios';
 
+import { ACTIVE_ORGANIZATION_CHANGED_EVENT } from './activeOrganizationEvent';
+
+export { ACTIVE_ORGANIZATION_CHANGED_EVENT } from './activeOrganizationEvent';
+
 const ACTIVE_ORGANIZATION_ID_STORAGE_KEY = 'moduly_active_organization_id';
-export const ACTIVE_ORGANIZATION_CHANGED_EVENT =
-  'nodease-active-organization-changed';
 
 type OrganizationLike = {
   id: string;

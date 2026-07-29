@@ -10,6 +10,7 @@ vi.mock('axios', () => ({
       post: axiosPostMock,
       patch: vi.fn(),
       interceptors: {
+        request: { use: vi.fn() },
         response: { use: vi.fn() },
       },
     })),

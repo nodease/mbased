@@ -5,10 +5,8 @@ import {
   type InternalAxiosRequestConfig,
 } from 'axios';
 
-import {
-  ACTIVE_ORGANIZATION_CHANGED_EVENT,
-  getStoredActiveOrganizationId,
-} from './activeOrganization';
+import { getStoredActiveOrganizationId } from './activeOrganization';
+import { ACTIVE_ORGANIZATION_CHANGED_EVENT } from './activeOrganizationEvent';
 import { resolvePublicApiBaseUrl } from './publicApiOrigin';
 
 const CSRF_HEADER_NAME = 'X-CSRF-Token';
