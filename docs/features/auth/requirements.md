@@ -5,7 +5,7 @@ Related Features: organization, audit-tracing, workflow, deployment, chatbot-dep
 
 ## Purpose
 
-Auth 기능은 사용자의 인증 생명주기를 담당한다. 현재 구현 범위는 이메일/비밀번호 회원가입, 분산 abuse prevention이 적용된 이메일/비밀번호 로그인, Google OAuth 로그인, JWT 세션 쿠키 발급/검증/삭제, 현재 사용자 조회, 클라이언트 인증 리다이렉트 처리이다.
+Auth 기능은 사용자의 인증 생명주기를 담당한다. 현재 구현 범위는 이메일/비밀번호 회원가입, 분산 abuse prevention이 적용된 이메일/비밀번호 로그인, Google OAuth 로그인, JWT 세션 쿠키 발급/검증/삭제, 현재 사용자 조회, 클라이언트 인증 리다이렉트 처리와 cookie-authenticated unsafe API의 중앙 CSRF 방어이다.
 
 Auth는 보호된 Gateway API가 `auth_token` 쿠키에서 현재 사용자를 식별할 수 있는 공통 인증 경계를 제공한다. 신규 사용자 생성 시 기본 organization 컨텍스트를 준비하고, 주요 인증 성공/실패 이벤트를 audit로 기록한다. Resource permission 판정, organization 관리, audit 조회/정책 처리는 auth 자체의 책임 범위가 아니다.
 
@@ -93,8 +93,31 @@ Auth는 보호된 Gateway API가 `auth_token` 쿠키에서 현재 사용자를 �
 - AUTH-REQ-068: Production Helm 배포에서 Ingress가 활성화되면 실제 peer topology에 맞는 trusted proxy CIDR이 필수여야 한다. Direct Gateway 배포는 빈 목록으로 forwarded address를 무시할 수 있으며, 광역 CIDR을 추측해 기본값으로 제공하지 않아야 한다.
 - AUTH-REQ-069: Bundled Docker Compose는 development mode를 명시적으로 기본 적용해야 하며, 운영 사용 시 `NODE_ENV=production`과 dedicated login fingerprint keyring을 설정해 production startup 검증을 활성화해야 한다.
 
+- AUTH-REQ-070: 시스템은 `GET /auth/csrf`에서 10분 만료 signed double-submit token을 응답 body와 host-only HttpOnly `csrf_token` cookie로 발급해야 한다.
+- AUTH-REQ-071: CSRF token은 auth cookie 또는 random anonymous seed, binding 종류와 normalized active organization/account scope에 domain-separated HMAC으로 결박해야 하며 이 값들의 원문을 token payload에 포함하지 않아야 한다.
+- AUTH-REQ-072: 인증 cookie가 없는 bootstrap은 host-only HttpOnly `csrf_anon_seed`와 pre-auth token을 발급해야 한다. 유효하지 않은 auth cookie는 anonymous로 조용히 전환하지 않고 `401 auth.invalid`로 닫고 invalid auth/CSRF cookie를 삭제해야 한다.
+- AUTH-REQ-073: `csrf_token`과 `csrf_anon_seed`는 `path=/api/v1`, 600초, HttpOnly, host-only여야 한다. Non-local에서는 Secure/SameSite=None, loopback에서는 SameSite=Lax를 사용해야 한다.
+- AUTH-REQ-074: Signup, password login, Google OAuth 성공과 logout은 stale CSRF/anonymous cookie를 삭제해야 한다.
+- AUTH-REQ-075: 모든 unsafe Gateway route는 `cookie_authenticated`, `pre_auth_session`, `public_anonymous`, `server_credential` 중 정확히 하나로 분류되어야 하며 미분류, 중복 또는 존재하지 않는 명시 예외는 startup과 architecture test를 실패시켜야 한다.
+- AUTH-REQ-076: Cookie/pre-auth mutation은 body parsing과 side effect 전에 configured exact Origin을 요구해야 한다. `Sec-Fetch-Site`가 있으면 `same-origin` 또는 `same-site`만 허용해야 한다.
+- AUTH-REQ-077: Cookie/pre-auth mutation은 기본적으로 canonical JSON만 허용하고 route inventory에 등록된 multipart와 bodyless 요청만 예외로 허용해야 한다.
+- AUTH-REQ-078: Cookie/pre-auth mutation은 `X-CSRF-Token`과 CSRF cookie의 equality, signature, version, expiry, binding kind, auth/anonymous binding과 organization/account scope를 검증해야 한다.
+- AUTH-REQ-079: CSRF 검증은 controller, credential verifier, DB, queue, storage, retrieval과 provider 호출보다 먼저 수행되어야 한다. 인증 cookie가 없는 cookie-authenticated mutation은 side effect 전에 `401 auth.required`로 닫아야 한다.
+- AUTH-REQ-080: Public anonymous와 server credential route는 login cookie 존재 여부로 audience나 principal을 바꾸지 않고 CSRF token을 private 권한 근거로 사용하지 않아야 한다.
+- AUTH-REQ-081: 모든 CSRF 거부는 `403 auth.csrf_validation_failed`와 고정 message를 반환하고, 내부 audit/metric에는 bounded reason, policy, method와 safe request ID만 기록해야 한다. Token, cookie, Origin, session, organization과 path parameter 원문은 기록하지 않아야 한다.
+- AUTH-REQ-082: Client는 CSRF token을 module memory에만 보관하고 같은 scope bootstrap을 single-flight해야 한다. LocalStorage, sessionStorage, URL과 log에 token을 남기지 않아야 한다.
+- AUTH-REQ-083: Client는 login/signup/logout/OAuth와 active organization 변경 때 cached token을 폐기해야 한다. Invalid auth cookie를 삭제한 bootstrap `401`은 한 번만 재시도할 수 있다.
+- AUTH-REQ-084: Client는 CSRF 실패 뒤 PUT/DELETE 또는 idempotency key가 있는 요청만 token refresh 후 최대 한 번 재시도하고, 일반 POST/PATCH를 자동 replay하지 않아야 한다.
+- AUTH-REQ-085: OAuth GET navigation/callback은 custom CSRF header 대신 기존 signed, expiring, one-time state를 유지해야 한다.
+- AUTH-REQ-086: `CORS_ORIGINS`는 CSRF exact-Origin allowlist에 재사용하되 CORS 허용을 CSRF 성공으로 간주하지 않아야 한다. CORS middleware는 허용된 Client가 CSRF `401/403`을 읽을 수 있도록 CSRF middleware 바깥에 있어야 한다.
+- AUTH-REQ-087: Workflow stream proxy는 original Origin, Fetch Metadata, CSRF token과 organization context를 전달하고, 엄격히 검증한 header token만 outbound host-only CSRF cookie로 복제해야 한다. 다른 proxy/public adapter는 이 예외를 일반화하지 않아야 한다.
+- AUTH-REQ-088: CSRF enforcement는 development와 production에서 기본 활성화되어야 한다. Disabled mode는 `NODE_ENV=test`에서만 허용하고 production disabled/unknown mode는 startup을 실패시켜야 한다.
 ## Policies And Edge Cases
 
+- CORS, SameSite와 CSRF token은 서로 대체하지 않는 독립 방어 계층이다.
+- Public iframe parent allowlist와 CSRF Origin allowlist는 목적이 다르며 서로 재사용하지 않는다.
+- 신·구 Client/Gateway 혼합 revision은 지원하지 않는다. Frontend와 Gateway는 같은 maintenance release로 전환하고 함께 rollback한다.
+- Production observation/fail-open mode는 제공하지 않는다.
 - Auth 엔드포인트 자체에는 resource permission 검사가 구현되어 있지 않다.
 - 사용자 테이블의 email은 unique이며, social id도 값이 있으면 unique이다.
 - 비밀번호는 서버에서 salt가 포함된 SHA-256 해시로 저장된다.

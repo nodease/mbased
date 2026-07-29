@@ -14,6 +14,7 @@ import {
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import { getStoredActiveOrganizationId } from '@/lib/activeOrganization';
+import { csrfFetch } from '@/lib/csrfToken';
 
 // 서버 에러 응답 타입 정의 (개선점 1: 에러 스키마 명확화)
 interface ApiErrorResponse {
@@ -107,7 +108,9 @@ export function CodeWizardModal({
     }
 
     if (isOrganizationScopePending) {
-      setError('워크플로우 조직 정보를 불러오는 중입니다. 잠시 후 다시 시도해주세요.');
+      setError(
+        '워크플로우 조직 정보를 불러오는 중입니다. 잠시 후 다시 시도해주세요.',
+      );
       return;
     }
 
@@ -117,7 +120,7 @@ export function CodeWizardModal({
 
     try {
       const resolvedOrganizationId = getWizardOrganizationId();
-      const res = await fetch('/api/v1/code-wizard/generate', {
+      const res = await csrfFetch('/api/v1/code-wizard/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -252,7 +255,11 @@ export function CodeWizardModal({
                 <button
                   onClick={handleGenerate}
                   data-testid="code-wizard-submit"
-                  disabled={isLoading || isOrganizationScopePending || !description.trim()}
+                  disabled={
+                    isLoading ||
+                    isOrganizationScopePending ||
+                    !description.trim()
+                  }
                   className="w-full py-3 px-4 bg-emerald-600 hover:bg-emerald-700 text-white font-medium rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-md hover:shadow-lg"
                 >
                   {isLoading ? (

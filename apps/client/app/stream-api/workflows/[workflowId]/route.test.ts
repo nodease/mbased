@@ -40,7 +40,10 @@ describe('workflow stream proxy route', () => {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Cookie: 'auth_token=session',
+          Cookie: 'auth_token=session; csrf_token=stale',
+          Origin: 'http://localhost:3000',
+          'Sec-Fetch-Site': 'same-origin',
+          'X-CSRF-Token': 'v1.123.nonce.signature',
           'X-Organization-Id': 'org-1',
           'X-Request-Id': 'request-1',
           'X-Correlation-Id': 'corr-1',
@@ -58,7 +61,12 @@ describe('workflow stream proxy route', () => {
     const init = getFetchInit(fetchMock);
     const headers = new Headers(init.headers);
     expect(headers.get('Content-Type')).toBe('application/json');
-    expect(headers.get('Cookie')).toBe('auth_token=session');
+    expect(headers.get('Cookie')).toBe(
+      'auth_token=session; csrf_token=v1.123.nonce.signature',
+    );
+    expect(headers.get('Origin')).toBe('http://localhost:3000');
+    expect(headers.get('Sec-Fetch-Site')).toBe('same-origin');
+    expect(headers.get('X-CSRF-Token')).toBe('v1.123.nonce.signature');
     expect(headers.get('X-Organization-Id')).toBe('org-1');
     expect(headers.get('X-Request-Id')).toBe('request-1');
     expect(headers.get('X-Correlation-Id')).toBe('corr-1');

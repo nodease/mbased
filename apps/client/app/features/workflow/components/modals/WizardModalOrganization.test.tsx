@@ -1,5 +1,16 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('@/lib/csrfToken', () => ({
+  csrfFetch: (input: RequestInfo | URL, init?: RequestInit) =>
+    fetch(input, init),
+}));
 
 import { CodeWizardModal } from './CodeWizardModal';
 import { PromptWizardModal } from './PromptWizardModal';

@@ -1,5 +1,7 @@
 import logging
 import os
+import re
+import secrets
 from collections.abc import Mapping
 from urllib.parse import urlsplit
 
@@ -15,13 +17,21 @@ from apps.gateway.application.authentication.errors import (
     PasswordLoginInternalError,
 )
 from apps.gateway.application.authentication.models import PasswordLoginCommand
+from apps.gateway.application.csrf.token import (
+    CSRF_ANON_COOKIE_NAME,
+    CSRF_COOKIE_NAME,
+    CSRF_ORGANIZATION_HEADER_NAME,
+    CsrfBindingKind,
+)
 from apps.gateway.auth.oauth import oauth
 from apps.gateway.composition.authentication import (
     build_password_login,
     login_network_resolver,
 )
+from apps.gateway.composition.csrf import csrf_token_service
 from apps.gateway.services.auth_return_service import AuthReturnService
 from apps.gateway.services.auth_service import AuthService
+from apps.gateway.utils.api_errors import error_response
 from apps.shared.audit import record_audit
 from apps.shared.audit.actions import AuditAction
 from apps.shared.audit.context import get_current_metadata
@@ -33,9 +43,11 @@ from apps.shared.schemas.auth import (
     SignupRequest,
     UserResponse,
 )
+from apps.shared.schemas.csrf import CsrfTokenResponse
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+_ANONYMOUS_SEED_PATTERN = re.compile(r"^[A-Za-z0-9_-]{43}$")
 
 
 def _request_hostname(request: Request) -> str:
@@ -148,6 +160,139 @@ def _get_cookie_config(request: Request) -> tuple[bool, str | None]:
     return is_production, cookie_domain
 
 
+def _csrf_cookie_options(request: Request) -> dict[str, object]:
+    is_production, _ = _get_cookie_config(request)
+    return {
+        "httponly": True,
+        "secure": is_production,
+        "samesite": "none" if is_production else "lax",
+        "path": "/api/v1",
+        "max_age": 600,
+    }
+
+
+def _set_csrf_cookie(
+    response: Response,
+    request: Request,
+    *,
+    key: str,
+    value: str,
+) -> None:
+    response.set_cookie(
+        key=key,
+        value=value,
+        **_csrf_cookie_options(request),
+    )
+
+
+def _clear_csrf_cookie_family(request: Request, response: Response) -> None:
+    options = _csrf_cookie_options(request)
+    for key in (CSRF_COOKIE_NAME, CSRF_ANON_COOKIE_NAME):
+        response.delete_cookie(
+            key=key,
+            path=str(options["path"]),
+            secure=bool(options["secure"]),
+            httponly=True,
+            samesite=str(options["samesite"]),
+        )
+
+
+@router.get("/csrf", response_model=CsrfTokenResponse)
+def bootstrap_csrf_token(
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+):
+    auth_cookie = request.cookies.get("auth_token")
+    anonymous_seed: str | None = None
+    if auth_cookie:
+        # Invalid authentication must never downgrade to an anonymous binding.
+        try:
+            AuthService.get_user_from_token(db, auth_cookie)
+        except HTTPException as exc:
+            if exc.status_code != 401:
+                raise
+            record_audit(
+                action=AuditAction.AUTH_PERMISSION_DENIED,
+                category="action",
+                actor_type="system",
+                status="failure",
+                metadata={
+                    "reason": "auth.csrf_bootstrap_invalid_session",
+                    **_request_meta(request),
+                },
+            )
+            invalid_response = error_response(
+                request,
+                401,
+                "auth.invalid",
+                "Authentication is invalid.",
+            )
+            _, cookie_domain = _get_cookie_config(request)
+            invalid_response.delete_cookie(
+                key="auth_token",
+                path="/",
+                domain=cookie_domain,
+            )
+            _clear_csrf_cookie_family(request, invalid_response)
+            invalid_response.headers["Cache-Control"] = "no-store"
+            invalid_response.headers["Pragma"] = "no-cache"
+            return invalid_response
+        binding_kind = CsrfBindingKind.AUTHENTICATED
+        binding_secret = auth_cookie
+    else:
+        candidate = request.cookies.get(CSRF_ANON_COOKIE_NAME)
+        anonymous_seed = (
+            candidate
+            if candidate and _ANONYMOUS_SEED_PATTERN.fullmatch(candidate)
+            else secrets.token_urlsafe(32)
+        )
+        binding_kind = CsrfBindingKind.PRE_AUTH
+        binding_secret = anonymous_seed
+
+    try:
+        issued = csrf_token_service().issue(
+            binding_kind=binding_kind,
+            binding_secret=binding_secret,
+            organization_scope=request.headers.get(CSRF_ORGANIZATION_HEADER_NAME),
+        )
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid CSRF request context",
+        ) from None
+
+    _set_csrf_cookie(
+        response,
+        request,
+        key=CSRF_COOKIE_NAME,
+        value=issued.token,
+    )
+    if anonymous_seed is None:
+        options = _csrf_cookie_options(request)
+        response.delete_cookie(
+            key=CSRF_ANON_COOKIE_NAME,
+            path=str(options["path"]),
+            secure=bool(options["secure"]),
+            httponly=True,
+            samesite=str(options["samesite"]),
+        )
+    else:
+        _set_csrf_cookie(
+            response,
+            request,
+            key=CSRF_ANON_COOKIE_NAME,
+            value=anonymous_seed,
+        )
+
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Pragma"] = "no-cache"
+    return CsrfTokenResponse(
+        token=issued.token,
+        expires_at=issued.expires_at,
+    )
+
+
 @router.post("/signup", response_model=LoginResponse)
 def signup(
     request_obj: Request,
@@ -170,7 +315,9 @@ def signup(
     try:
         result = AuthService.signup(db, request)
     except Exception as e:
-        _record_auth_failure(AuditAction.USER_SIGNUP_FAILED, request_obj, request.email, e)
+        _record_auth_failure(
+            AuditAction.USER_SIGNUP_FAILED, request_obj, request.email, e
+        )
         raise
 
     _record_auth_success(AuditAction.USER_SIGNUP, request_obj, result.user)
@@ -194,6 +341,7 @@ def signup(
     else:
         cookie_params["secure"] = False
 
+    _clear_csrf_cookie_family(request_obj, response)
     response.set_cookie(**cookie_params)
 
     return result
@@ -288,6 +436,7 @@ def login(
     else:
         cookie_params["secure"] = False
 
+    _clear_csrf_cookie_family(request_obj, response)
     response.set_cookie(**cookie_params)
 
     return response_result
@@ -305,6 +454,7 @@ def logout(request_obj: Request, response: Response):
         delete_params["domain"] = cookie_domain
 
     response.delete_cookie(**delete_params)
+    _clear_csrf_cookie_family(request_obj, response)
 
     # 로그아웃은 actor를 시그니처에서 알 수 없어(쿠키 삭제 시점) actor_id 없이 기록한다.
     record_audit(
@@ -467,6 +617,7 @@ async def auth_google_callback(
     redirect_url = AuthReturnService.build_client_redirect(request, return_path)
 
     redirect_response = RedirectResponse(url=redirect_url, status_code=302)
+    _clear_csrf_cookie_family(request, redirect_response)
     redirect_response.set_cookie(
         key="auth_token",
         value=access_token,

@@ -1,10 +1,22 @@
 import { NextRequest } from 'next/server';
 
 const CONTEXT_HEADER_ALLOWLIST = [
+  'Origin',
+  'Sec-Fetch-Site',
+  'X-CSRF-Token',
   'X-Organization-Id',
   'X-Request-Id',
   'X-Correlation-Id',
 ];
+const CSRF_TOKEN_PATTERN = /^[A-Za-z0-9._-]{1,256}$/;
+
+const withoutCsrfCookie = (cookieHeader: string) =>
+  cookieHeader
+    .split(';')
+    .map((cookie) => cookie.trim())
+    .filter((cookie) => !cookie.toLowerCase().startsWith('csrf_token='))
+    .filter(Boolean)
+    .join('; ');
 
 const normalizeBackendUrl = (url: string) =>
   url.replace(/\/+$/, '').replace(/\/api\/v1$/i, '');
@@ -53,9 +65,16 @@ export async function POST(
   }
 
   const headers = new Headers();
-  const cookie = request.headers.get('cookie');
-  if (cookie) {
-    headers.set('Cookie', cookie);
+  const cookie = request.headers.get('cookie') || '';
+  const csrfToken = request.headers.get('X-CSRF-Token');
+  const forwardedCookie = withoutCsrfCookie(cookie);
+  if (csrfToken && CSRF_TOKEN_PATTERN.test(csrfToken)) {
+    headers.set(
+      'Cookie',
+      [forwardedCookie, `csrf_token=${csrfToken}`].filter(Boolean).join('; '),
+    );
+  } else if (forwardedCookie) {
+    headers.set('Cookie', forwardedCookie);
   }
   if (!isFormData) {
     headers.set('Content-Type', 'application/json');

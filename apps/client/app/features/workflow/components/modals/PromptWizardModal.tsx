@@ -1,8 +1,17 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { X, Sparkles, Copy, Check, Loader2, ArrowRight, Info } from 'lucide-react';
+import {
+  X,
+  Sparkles,
+  Copy,
+  Check,
+  Loader2,
+  ArrowRight,
+  Info,
+} from 'lucide-react';
 import { getStoredActiveOrganizationId } from '@/lib/activeOrganization';
+import { csrfFetch } from '@/lib/csrfToken';
 
 interface PromptWizardModalProps {
   isOpen: boolean;
@@ -27,7 +36,6 @@ export function PromptWizardModal({
   onApply,
   organizationId,
 }: PromptWizardModalProps) {
-
   const [currentPrompt, setCurrentPrompt] = useState(originalPrompt);
   const [improvedPrompt, setImprovedPrompt] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -53,10 +61,13 @@ export function PromptWizardModal({
       const query = resolvedOrganizationId
         ? `?organization_id=${encodeURIComponent(resolvedOrganizationId)}`
         : '';
-      const res = await fetch(`/api/v1/prompt-wizard/check-credentials${query}`, {
-        method: 'GET',
-        credentials: 'include',
-      });
+      const res = await fetch(
+        `/api/v1/prompt-wizard/check-credentials${query}`,
+        {
+          method: 'GET',
+          credentials: 'include',
+        },
+      );
       if (res.ok) {
         const data = await res.json();
         setHasCredentials(data.has_credentials);
@@ -84,7 +95,9 @@ export function PromptWizardModal({
     }
 
     if (isOrganizationScopePending) {
-      setError('워크플로우 조직 정보를 불러오는 중입니다. 잠시 후 다시 시도해주세요.');
+      setError(
+        '워크플로우 조직 정보를 불러오는 중입니다. 잠시 후 다시 시도해주세요.',
+      );
       return;
     }
 
@@ -94,7 +107,7 @@ export function PromptWizardModal({
 
     try {
       const resolvedOrganizationId = getWizardOrganizationId();
-      const res = await fetch('/api/v1/prompt-wizard/improve', {
+      const res = await csrfFetch('/api/v1/prompt-wizard/improve', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
@@ -107,7 +120,10 @@ export function PromptWizardModal({
 
       if (!res.ok) {
         const errorData = await res.json();
-        const message = errorData.detail?.message || errorData.detail || '프롬프트 개선에 실패했습니다.';
+        const message =
+          errorData.detail?.message ||
+          errorData.detail ||
+          '프롬프트 개선에 실패했습니다.';
         throw new Error(message);
       }
 
@@ -183,7 +199,8 @@ export function PromptWizardModal({
         <div className="px-6 py-2.5 bg-amber-50 border-b border-amber-100 flex items-center gap-2">
           <Info className="w-4 h-4 text-amber-600 flex-shrink-0" />
           <p className="text-xs text-amber-700">
-            이 기능은 등록하신 Provider API Key를 통해 AI를 호출하며, 호출 시 소량의 토큰 비용이 발생할 수 있습니다.
+            이 기능은 등록하신 Provider API Key를 통해 AI를 호출하며, 호출 시
+            소량의 토큰 비용이 발생할 수 있습니다.
           </p>
         </div>
 
@@ -200,7 +217,7 @@ export function PromptWizardModal({
               placeholder="개선할 프롬프트를 입력하세요..."
               className="flex-1 w-full p-3 text-sm border border-gray-300 rounded-lg resize-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
             />
-            
+
             {/* 왼쪽 하단 버튼 영역 */}
             <div className="mt-4">
               {hasCredentials === false ? (
@@ -215,7 +232,11 @@ export function PromptWizardModal({
                 <button
                   onClick={handleImprove}
                   data-testid="prompt-wizard-submit"
-                  disabled={isLoading || isOrganizationScopePending || !currentPrompt.trim()}
+                  disabled={
+                    isLoading ||
+                    isOrganizationScopePending ||
+                    !currentPrompt.trim()
+                  }
                   className="w-full py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-md hover:shadow-lg"
                 >
                   {isLoading ? (
@@ -239,12 +260,14 @@ export function PromptWizardModal({
             <label className="text-sm font-semibold text-gray-700 mb-2">
               AI 개선 결과
             </label>
-            
+
             <div className="flex-1 w-full p-3 text-sm border border-gray-200 rounded-lg bg-white overflow-y-auto">
               {isLoading ? (
                 <div className="h-full flex flex-col items-center justify-center text-gray-400">
                   <Loader2 className="w-8 h-8 animate-spin mb-3 text-blue-500" />
-                  <p className="text-sm">AI가 프롬프트를 분석하고 있습니다...</p>
+                  <p className="text-sm">
+                    AI가 프롬프트를 분석하고 있습니다...
+                  </p>
                 </div>
               ) : error ? (
                 <div className="h-full flex items-center justify-center">
@@ -286,8 +309,7 @@ export function PromptWizardModal({
                   onClick={handleApply}
                   className="flex-1 py-2.5 px-4 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors flex items-center justify-center gap-2 shadow-md"
                 >
-                  <Check className="w-4 h-4" />
-                  이 프롬프트 적용
+                  <Check className="w-4 h-4" />이 프롬프트 적용
                 </button>
               </div>
             )}

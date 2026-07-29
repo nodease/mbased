@@ -2,14 +2,12 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { Search, Send, Bot, X, Loader2, Settings } from 'lucide-react';
-import axios from 'axios';
 import {
   ACTIVE_ORGANIZATION_CHANGED_EVENT,
   activeOrganizationHeaders,
   getStoredActiveOrganizationId,
 } from '@/lib/activeOrganization';
-
-const BASE_URL = '';
+import { apiClient } from '@/lib/apiClient';
 
 interface RAGReference {
   content: string;
@@ -149,9 +147,9 @@ export default function KnowledgeSearchModal({
 
         const json: unknown = await res.json();
         if (cancelled || !Array.isArray(json)) return;
-        const chatModels = json.filter(isModelOption).filter(
-          (model) => model.type === 'chat',
-        );
+        const chatModels = json
+          .filter(isModelOption)
+          .filter((model) => model.type === 'chat');
         setModelOptions(chatModels);
 
         const defaultModel =
@@ -204,8 +202,8 @@ export default function KnowledgeSearchModal({
     try {
       const endpoint =
         requestTab === 'chat'
-          ? '/api/v1/rag/search-test/chat'
-          : '/api/v1/rag/search-test/pure';
+          ? '/rag/search-test/chat'
+          : '/rag/search-test/pure';
       const payload: {
         query: string;
         knowledge_base_id: string;
@@ -221,11 +219,10 @@ export default function KnowledgeSearchModal({
       }
 
       // Call Backend API
-      const res = await axios.post<RAGResponse | RAGReference[]>(
-        `${BASE_URL}${endpoint}`,
+      const res = await apiClient.post<RAGResponse | RAGReference[]>(
+        endpoint,
         payload,
         {
-          withCredentials: true,
           headers: activeOrganizationHeaders(requestOrganizationId),
         },
       );

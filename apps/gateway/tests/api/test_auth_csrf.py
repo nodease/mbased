@@ -1,0 +1,106 @@
+from fastapi import FastAPI, HTTPException
+from fastapi.testclient import TestClient
+
+from apps.gateway.api.v1.endpoints import auth as auth_endpoint
+from apps.gateway.application.csrf.token import (
+    CSRF_ANON_COOKIE_NAME,
+    CSRF_COOKIE_NAME,
+    CsrfTokenService,
+)
+from apps.gateway.services.auth_service import AuthService
+from apps.shared.db.session import get_db
+
+
+def _client() -> TestClient:
+    app = FastAPI()
+    app.include_router(auth_endpoint.router, prefix="/auth")
+    app.dependency_overrides[get_db] = lambda: object()
+    return TestClient(app, base_url="http://localhost")
+
+
+def test_anonymous_csrf_bootstrap_sets_host_only_http_only_cookies(monkeypatch):
+    monkeypatch.setattr(
+        auth_endpoint,
+        "csrf_token_service",
+        lambda: CsrfTokenService.from_root_secret("csrf-endpoint-test-secret"),
+    )
+
+    with _client() as client:
+        response = client.get("/auth/csrf")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert isinstance(payload["token"], str)
+    assert payload["token"] == response.cookies[CSRF_COOKIE_NAME]
+    assert "anonymous" not in response.text.lower()
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["pragma"] == "no-cache"
+    cookies = response.headers.get_list("set-cookie")
+    assert any(
+        cookie.startswith(f"{CSRF_COOKIE_NAME}=")
+        and "HttpOnly" in cookie
+        and "Path=/api/v1" in cookie
+        and "Domain=" not in cookie
+        for cookie in cookies
+    )
+    assert any(
+        cookie.startswith(f"{CSRF_ANON_COOKIE_NAME}=")
+        and "HttpOnly" in cookie
+        and "Domain=" not in cookie
+        for cookie in cookies
+    )
+
+
+def test_authenticated_csrf_bootstrap_validates_cookie_and_clears_anon_seed(
+    monkeypatch,
+):
+    monkeypatch.setattr(AuthService, "get_user_from_token", lambda db, token: object())
+    monkeypatch.setattr(
+        auth_endpoint,
+        "csrf_token_service",
+        lambda: CsrfTokenService.from_root_secret("csrf-endpoint-test-secret"),
+    )
+
+    with _client() as client:
+        client.cookies.set("auth_token", "valid-auth-token")
+        client.cookies.set(CSRF_ANON_COOKIE_NAME, "stale-anonymous-seed")
+        response = client.get(
+            "/auth/csrf",
+            headers={"X-Organization-Id": "organization-a"},
+        )
+
+    assert response.status_code == 200
+    assert response.cookies[CSRF_COOKIE_NAME] == response.json()["token"]
+    assert any(
+        cookie.startswith(f"{CSRF_ANON_COOKIE_NAME}=") and "Max-Age=0" in cookie
+        for cookie in response.headers.get_list("set-cookie")
+    )
+
+
+def test_invalid_auth_cookie_cannot_fall_back_to_anonymous_bootstrap(monkeypatch):
+    def reject_invalid_cookie(_db, _token):
+        raise HTTPException(status_code=401, detail="invalid")
+
+    monkeypatch.setattr(AuthService, "get_user_from_token", reject_invalid_cookie)
+
+    with _client() as client:
+        client.cookies.set("auth_token", "invalid-auth-token")
+        response = client.get("/auth/csrf")
+
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "auth.invalid"
+    cookies = response.headers.get_list("set-cookie")
+    assert any(cookie.startswith("auth_token=") for cookie in cookies)
+    assert any(cookie.startswith(f"{CSRF_COOKIE_NAME}=") for cookie in cookies)
+    assert any(cookie.startswith(f"{CSRF_ANON_COOKIE_NAME}=") for cookie in cookies)
+
+
+def test_logout_clears_auth_and_csrf_cookie_families():
+    with _client() as client:
+        response = client.post("/auth/logout")
+
+    assert response.status_code == 200
+    cookies = response.headers.get_list("set-cookie")
+    assert any(cookie.startswith("auth_token=") for cookie in cookies)
+    assert any(cookie.startswith(f"{CSRF_COOKIE_NAME}=") for cookie in cookies)
+    assert any(cookie.startswith(f"{CSRF_ANON_COOKIE_NAME}=") for cookie in cookies)

@@ -50,6 +50,13 @@ from apps.gateway.application.resource_permissions.mutation import (
 from apps.gateway.composition.authentication import (
     validate_login_security_configuration,
 )
+from apps.gateway.composition.csrf import (
+    build_csrf_route_policy_registry,
+    csrf_enforcement_enabled,
+    csrf_token_service,
+    record_csrf_auth_required,
+    record_csrf_denial,
+)
 from apps.gateway.core.http_security import (
     parse_credentialed_cors_origins,
     resolve_session_signing_secret,
@@ -61,6 +68,7 @@ from apps.gateway.middleware.webhook_query_redaction import (
 from apps.gateway.middleware.public_conversation_cors import (
     PublicConversationCorsBoundaryMiddleware,
 )
+from apps.gateway.middleware.csrf import CsrfProtectionMiddleware
 from apps.gateway.utils.api_errors import error_response
 from apps.shared.audit import record_audit
 from apps.shared.audit.actions import AuditAction
@@ -149,7 +157,9 @@ async def validation_failed(request: Request, exc: RequestValidationError):
                 "code": "validation.failed",
                 "message": "Request validation failed.",
                 "request_id": getattr(request.state, "request_id", None),
-                "details": {"errors": _strip_validation_input(jsonable_encoder(exc.errors()))},
+                "details": {
+                    "errors": _strip_validation_input(jsonable_encoder(exc.errors()))
+                },
             }
         },
     )
@@ -174,36 +184,6 @@ origins = parse_credentialed_cors_origins(
     node_env=os.getenv("NODE_ENV"),
 )
 
-# CORS 설정 (withCredentials 지원)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins,  # .env에서 CORS_ORIGINS로 설정 가능
-    allow_credentials=True,  # 쿠키 전송 허용
-    allow_methods=["*"],
-    allow_headers=["*"],
-    expose_headers=["Retry-After"],
-)
-
-# 세션 미들웨어 추가 (OAuth 상태 저장용)
-app.add_middleware(
-    SessionMiddleware,
-    secret_key=resolve_session_signing_secret(
-        os.getenv("SECRET_KEY"),
-        node_env=os.getenv("NODE_ENV"),
-    ),
-    https_only=os.getenv("NODE_ENV") == "production",  # 배포 환경에서는 Secure 쿠키
-)
-
-# Must be outer than the legacy credentialed CORS middleware.  Public
-# Conversation lifecycle calls are iframe-document same-origin only; the
-# deployment parent allowlist remains a CSP frame-ancestors policy.
-app.add_middleware(PublicConversationCorsBoundaryMiddleware)
-
-# Added last so this transport sanitizer remains outermost and earlier
-# middleware failures cannot expose legacy webhook query credentials through
-# the ASGI server access log.
-app.add_middleware(WebhookQueryRedactionMiddleware)
-
 # 정적 파일 서빙 (widget.js) - 옵션
 STATIC_DIR = BASE_DIR / "static"
 if STATIC_DIR.exists():
@@ -211,6 +191,45 @@ if STATIC_DIR.exists():
 
 # API 라우터 등록
 app.include_router(api_router, prefix="/api/v1")
+
+# Unsafe routes are classified after router inclusion. Startup fails closed if
+# a new mutation has no explicit cookie/public/server policy.
+csrf_route_policy_registry = build_csrf_route_policy_registry(app)
+
+# Middleware is registered from inner to outer because Starlette prepends each
+# new entry. CORS must wrap CSRF so allowed browser origins can read 401/403,
+# while the public conversation boundary must remain outside legacy CORS.
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=resolve_session_signing_secret(
+        os.getenv("SECRET_KEY"),
+        node_env=os.getenv("NODE_ENV"),
+    ),
+    https_only=os.getenv("NODE_ENV") == "production",
+)
+app.add_middleware(
+    CsrfProtectionMiddleware,
+    registry=csrf_route_policy_registry,
+    token_service=csrf_token_service(),
+    allowed_origins=tuple(origins),
+    enforcement_enabled=csrf_enforcement_enabled(),
+    on_denied=record_csrf_denial,
+    on_auth_required=record_csrf_auth_required,
+)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["Retry-After"],
+)
+app.add_middleware(PublicConversationCorsBoundaryMiddleware)
+
+# Added last so this transport sanitizer remains outermost and earlier
+# middleware failures cannot expose legacy webhook query credentials through
+# the ASGI server access log.
+app.add_middleware(WebhookQueryRedactionMiddleware)
 
 
 @app.get("/")

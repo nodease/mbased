@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { attachActiveOrganizationHeader } from '@/lib/activeOrganization';
+import { attachCsrfProtection } from '@/lib/csrfToken';
 
 const API_BASE_URL = '/api/v1';
 
@@ -9,6 +10,7 @@ const api = axios.create({
   withCredentials: true,
 });
 
+attachCsrfProtection(api);
 attachActiveOrganizationHeader(api);
 
 // 401 에러 인터셉터

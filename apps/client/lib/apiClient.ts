@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { attachActiveOrganizationHeader } from './activeOrganization';
+import { attachCsrfProtection } from './csrfToken';
 import { claimLoginRedirectPath, getCurrentAuthReturnPath } from './authReturn';
 import { resolvePublicApiBaseUrl } from './publicApiOrigin';
 
@@ -42,6 +43,10 @@ export const publicApiClient = createApiClient();
 
 export const apiClient = createApiClient();
 
+// Axios request interceptors run last-in-first-out. Register CSRF first so the
+// active organization header exists before the scoped token is bootstrapped.
+attachCsrfProtection(publicApiClient);
+attachCsrfProtection(apiClient);
 attachActiveOrganizationHeader(apiClient);
 
 attachAuthRedirectInterceptor(publicApiClient);

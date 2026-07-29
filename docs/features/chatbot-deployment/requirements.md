@@ -31,7 +31,7 @@ Public Chatbot의 현재 계약은 [ADR-0074](../../decisions/ADR-0074-public-ch
 - CBOT-REQ-003c: 비로그인 사용자가 내부 챗봇 실행 링크를 열어 run-info에서 `401`을 받으면 클라이언트는 `/auth/login?next=<원래 path+query+hash>`로 이동한다. 이메일/비밀번호와 Google OAuth 로그인 모두 같은 origin의 안전한 `next`로 복귀하고, 외부·프로토콜 상대·malformed/중첩-encoded URL은 `/dashboard`로 fallback한다. Google OAuth 복귀 컨텍스트는 서명 session에서 10분 안에 한 번만 소비한다.
 - CBOT-REQ-003d: 인증 실행 요청은 업무 `inputs`와 별도의 top-level `conversation.client_id`에 canonical UUID를 전달한다. Gateway는 이 값을 deployment와 current user에 결박한 versioned internal namespace로 바꾸며, raw client id를 workflow input, response, audit 또는 log에 노출하지 않는다.
 - CBOT-REQ-003e: 인증 실행의 `conversation.client_id`는 Chatbot deployment에서만 허용한다. `inputs`에 선언된 `conversation_id` 또는 `memory_mode` workflow 변수는 업무 입력으로 보존하며, typed control과 선언되지 않은 legacy reserved control이 동시에 오면 모호한 요청으로 거부한다.
-- CBOT-REQ-003f: 현재 인증 실행 mutation은 `Content-Type: application/json`만 허용하고, 누락·`text/plain`·form-urlencoded·multipart는 workflow dispatch 전에 `415`로 거부한다. Credentialed CORS는 명시적 HTTP(S) allowlist를 사용하고 wildcard 구성을 거부한다. 이는 현행 browser 경계이며 Target의 별도 CSRF token/exact-Origin/access grant를 대체하지 않는다.
+- CBOT-REQ-003f: 인증 실행 mutation은 route inventory의 JSON 계약, 명시적 credentialed CORS allowlist와 ADR-0073의 exact Origin, Fetch Metadata, signed CSRF token을 workflow dispatch 전에 검증해야 한다. 이 공통 browser 경계는 별도 내부 Chatbot access grant를 대체하지 않는다.
 - CBOT-REQ-003g: 인증 내부 챗봇의 text 응답은 raw HTML 실행 없이 GitHub Flavored Markdown의 제목, 강조, 목록, 인용, inline code, link와 table을 렌더링한다. Markdown 이미지는 렌더링하지 않아 응답 열람이 외부 이미지 요청을 발생시키지 않는다. 질문 composer는 IME 조합 중이 아닐 때 `Enter`로 전송하고 `Shift+Enter`로 줄바꿈한다. 내부 실행 화면의 제목, 메시지, 상태, 입력과 전송 control은 일반 workflow 실행 화면과 같은 기본 크기를 사용한다.
 - CBOT-REQ-004: 공개 챗봇 Client는 현재 React state의 완료된 `user`/`assistant` pair만 `conversation.history`에 담아 전용 `/run-public/{url_slug}/chat` 경로로 보낸다. 첫 요청은 빈 history다.
 - CBOT-REQ-005: Gateway는 Public history의 exact shape, role 교대, 20 turn, message 크기, UTF-8과 현재 inputs를 포함한 4,096-token 상한을 provider dispatch 전에 검증한다. 오래된 맥락 제거는 완료 turn 단위로만 수행한다.
@@ -60,7 +60,7 @@ Public Chatbot의 현재 계약은 [ADR-0074](../../decisions/ADR-0074-public-ch
 - Public `conversation.history`는 prompt injection/secret-like marker를 정제하되 허용된 message 크기를 별도의 더 작은 런타임 상한으로 다시 자르지 않는다.
 - Public WorkflowRun/NodeRun/Trace는 운영 상태, token, latency와 routing 결과 같은 content-free metadata만 유지하고 input/history/prompt/completion 원문은 저장하지 않는다.
 - 현재 인증 실행은 typed conversation control을 사용해 신규 내부 호출의 reserved-input collision을 제거한다. Legacy authenticated compatibility는 Public client-held contract와 분리한다.
-- 현재 내부 실행 UI는 first-party configured CORS origin에서 JSON 요청만 보낸다. 브라우저의 unlisted-origin JSON 요청은 preflight에서 차단되고 simple cross-site content type은 `415`로 dispatch 전에 차단되지만, 별도 CSRF token과 exact-Origin 검사는 아직 Target이다.
+- 현재 내부 실행 UI의 cookie mutation은 first-party configured CORS, exact Origin, Fetch Metadata, route-owned content type과 signed CSRF token을 모두 통과한다. 별도 내부 Chatbot access grant와 durable session namespace는 후속 범위다.
 
 ## User-visible Citations
 

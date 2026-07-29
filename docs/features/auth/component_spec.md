@@ -219,6 +219,36 @@ Status: Draft
   - 성공 시 로컬 저장소에서 `moduly_session_token`과 `moduly_user`를 제거하고 `/auth/login`으로 이동한다.
   - 실패 시 `로그아웃 실패:`를 기록하고 이동하지 않는다.
 
+## CSRF Browser Boundary
+
+### Gateway Route Policy Registry
+
+- Gateway composition은 모든 unsafe route를 `cookie_authenticated`, `pre_auth_session`, `public_anonymous`, `server_credential` 중 하나로 분류한다.
+- `get_current_user` dependency route는 자동으로 cookie policy가 되며, 자체 cookie helper를 사용하는 Team/Permission route와 Public/server 예외는 exact method/path inventory로 관리한다.
+- 미분류 route, stale 예외, duplicate unsafe route와 승인되지 않은 protected media type은 application startup과 architecture test를 실패시킨다.
+- OAuth login/callback GET은 custom header 대신 signed one-time state를 사용하는 별도 safe-method 예외다.
+
+### Gateway CSRF Guard
+
+- Guard는 endpoint보다 먼저 Origin, Fetch Metadata, content type, double-submit equality와 HMAC/session/scope를 검증한다.
+- 실패 body는 고정 `auth.csrf_validation_failed`만 노출한다. Bounded reason은 metric/audit adapter 내부에서만 사용한다.
+- 인증 cookie가 없는 protected mutation은 token을 identity로 사용하지 않고 `401 auth.required`로 종료한다.
+- CORS는 guard 바깥에서 허용 origin이 오류 응답을 읽게 하고, Public Conversation CORS와 webhook query redaction의 더 바깥 경계를 유지한다.
+
+### Client CSRF Token Manager
+
+- `csrfToken.ts`는 `/auth/csrf` 응답을 runtime 검증하고 token, expiry와 organization/account scope를 module memory에만 저장한다.
+- 같은 scope의 동시 요청은 하나의 bootstrap Promise를 공유한다. Reload와 tab은 token을 공유하지 않는다.
+- Axios request interceptor는 active organization header가 결정된 뒤 unsafe request에 `X-CSRF-Token`을 추가한다. Response interceptor는 고정 CSRF error에서 cache를 지우며 PUT/DELETE 또는 idempotency key 요청만 최대 한 번 재시도한다.
+- `csrfFetch`는 Settings, Wizard, RAG stream과 Workflow stream처럼 Axios를 통하지 않는 protected mutation에 같은 계약을 제공한다. Public Chatbot/Public run, app-secret 실행과 presigned object upload에는 적용하지 않는다.
+- Signup/login/logout 성공, OAuth navigation과 `nodease-active-organization-changed` event는 cached token을 폐기한다. Invalid HttpOnly auth cookie bootstrap `401`은 cookie 삭제 반영을 위해 최대 한 번만 재시도한다.
+
+### Workflow Stream Proxy
+
+- Browser는 same-origin `/stream-api/workflows/{workflowId}`에 CSRF header를 보낸다.
+- Next route는 original Origin, `Sec-Fetch-Site`, CSRF token, organization과 bounded request context만 전달한다.
+- API host-only CSRF cookie가 Next host에 전달되지 않는 경우를 위해 strict 문자·길이 검사를 통과한 header token만 outbound `csrf_token` cookie로 복제한다. 기존 `csrf_token` cookie는 제거한 뒤 하나만 전달하며 Authorization은 전달하지 않는다.
+- Gateway가 최종 signature/session/organization 검증을 수행하므로 proxy 복제는 인증이나 권한 판단을 대체하지 않는다.
 ## Accessibility
 
 ### LoginPage

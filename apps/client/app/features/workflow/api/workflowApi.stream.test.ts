@@ -7,6 +7,11 @@ import {
   type MockedFunction,
 } from 'vitest';
 
+vi.mock('@/lib/csrfToken', () => ({
+  attachCsrfProtection: vi.fn(),
+  csrfFetch: (input: RequestInfo | URL, init?: RequestInit) =>
+    fetch(input, init),
+}));
 import { workflowApi } from './workflowApi';
 import { setActiveOrganizationId } from '@/lib/activeOrganization';
 

@@ -7,6 +7,11 @@ import {
 } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('@/lib/csrfToken', () => ({
+  csrfFetch: (input: RequestInfo | URL, init?: RequestInit) =>
+    fetch(input, init),
+}));
+
 const activeOrganizationMock = vi.hoisted(() => ({
   organizationId: 'org-1',
   setActiveOrganizationId: vi.fn(),
