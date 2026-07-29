@@ -117,6 +117,48 @@ Status: Draft
 | AUTH-TC-I007 | HMAC rotation overlap은 old limit을 우회하지 않아야 한다. | Old version bucket을 소진한 뒤 new primary/old previous keyring으로 admission한다. | New bucket이 비어 있어도 blocked; all-or-nothing 계약에 따라 어떤 version/dimension state도 추가 소비하지 않음. |
 | AUTH-TC-I008 | Success reset은 active version account/pair key만 제거해야 한다. | Current+previous keyring에서 성공 reset한다. | 두 version account/pair 삭제, network key 유지. |
 
+## CSRF Boundary Tests
+
+| ID | 검증 조건 | 최소 실패 조건 | 기대 결과 |
+| --- | --- | --- | --- |
+| AUTH-TC-CS001 | Signed token은 session/organization 원문을 포함하지 않고 canonical version/expiry/nonce/MAC만 사용해야 한다. | Token에서 auth cookie 또는 organization sentinel을 검색하거나 비정규 expiry/Base64를 검증한다. | 원문 없음, 비정규 encoding은 `token_invalid`. |
+| AUTH-TC-CS002 | Header/cookie double-submit 값은 constant-time equality와 signature를 모두 통과해야 한다. | Header/cookie 누락·불일치·MAC 변조 중 하나를 보낸다. | Fixed `403 auth.csrf_validation_failed`, endpoint 미진입. |
+| AUTH-TC-CS003 | Token은 다른 auth cookie, anonymous seed, binding kind와 organization/account scope에서 replay되지 않아야 한다. | 한 binding에서 발급한 token을 다른 binding/scope에 사용한다. | `token_invalid`. |
+| AUTH-TC-CS004 | Expired token과 현재 시각보다 TTL+skew를 초과해 미래인 token을 거부해야 한다. | 만료 뒤 또는 발급 시각보다 31초 이전 시각에서 검증한다. | `token_expired` 또는 `token_invalid`. |
+| AUTH-TC-CS005 | Browser-proven anonymous `/auth/csrf` bootstrap은 no-store body token과 host-only HttpOnly token/seed cookie를 발급해야 한다. | Bootstrap header와 same-origin Fetch Metadata를 포함하고 Auth cookie 없이 GET한다. | `200`, body/cookie token 일치, Domain 미설정, Path `/api/v1`. |
+| AUTH-TC-CS006 | Authenticated bootstrap은 auth cookie를 검증하고 stale anonymous seed를 삭제해야 한다. | Valid auth cookie와 기존 seed를 함께 보낸다. | Auth-bound token, seed `Max-Age=0`. |
+| AUTH-TC-CS007 | Invalid 또는 inactive-session auth cookie bootstrap은 anonymous로 같은 응답에서 전환하지 않아야 한다. | Invalid JWT와 inactive account cookie로 각각 GET한다. | 모두 `401 auth.invalid`, auth/CSRF cookie 삭제; Client는 한 번만 재bootstrap. |
+| AUTH-TC-CS008 | Signup/login/logout은 pre-auth 또는 auth-bound token 없이 credential/DB lifecycle에 진입하지 않아야 한다. | Exact Origin은 있지만 token이 없거나 forged token이다. | Fixed 403, endpoint effect 0. |
+| AUTH-TC-CS009 | Login/signup/OAuth success와 logout은 stale CSRF cookie family를 삭제해야 한다. | 각 성공 응답의 Set-Cookie를 검사한다. | `csrf_token`, `csrf_anon_seed` 삭제. |
+| AUTH-TC-CS010 | 모든 unsafe route는 정확히 하나의 route policy를 가져야 한다. | 신규 unauthenticated POST를 registry 없이 추가하거나 명시 예외를 삭제한다. | Startup/architecture test 실패. |
+| AUTH-TC-CS011 | Public run/Chatbot과 app-secret run/webhook은 login cookie가 있어도 cookie policy로 바뀌지 않아야 한다. | Login/CSRF cookie를 예외 route에 함께 보낸다. | 기존 anonymous/server credential audience 유지. |
+| AUTH-TC-CS012 | Missing/null/unlisted Origin은 body parsing과 side effect 전에 거부해야 한다. | Valid token에 Origin을 누락하거나 attacker Origin을 보낸다. | Fixed 403, body/endpoint effect 0. |
+| AUTH-TC-CS013 | Fetch Metadata가 있으면 same-origin/same-site만 허용해야 한다. | `Sec-Fetch-Site: cross-site`를 보낸다. | Fixed 403; header가 없고 다른 증거가 valid이면 호환 허용. |
+| AUTH-TC-CS014 | JSON route는 UTF-8 JSON만 허용해야 한다. | text/plain, form, JSON profile/latin1 parameter를 보낸다. | `content_type_invalid`, body/endpoint effect 0. |
+| AUTH-TC-CS015 | 승인 multipart와 bodyless route만 해당 content 예외를 사용해야 한다. | Valid multipart upload, malformed boundary, form media type과 명시적 zero length인 빈 Axios POST, non-empty form POST를 각각 보낸다. | Valid multipart/zero-length POST 성공, malformed multipart와 non-empty form POST는 403. |
+| AUTH-TC-CS016 | 인증 cookie 없는 cookie-authenticated mutation은 token으로 identity를 만들지 않아야 한다. | Origin과 payload만 보호 route에 보낸다. | Side effect 전 `401 auth.required`. |
+| AUTH-TC-CS017 | CSRF denial 관측값은 bounded label만 포함해야 한다. | Token/Origin/session/org/path sentinel을 실패 요청에 주입한다. | Response/log/audit/metric에 sentinel 없음; reason/policy/method/request ID만 기록. |
+| AUTH-TC-CS018 | Production/development enforcement는 기본 활성화되고 test만 disable할 수 있어야 한다. | Production disabled 또는 unknown mode로 구성한다. | Startup 오류; `NODE_ENV=test` disabled만 허용. |
+| AUTH-TC-CS019 | Client token manager는 origin별 current-scope token 하나, same-origin-and-scope single-flight와 memory-only storage를 유지해야 한다. | 같은 scope로 web/API origin mutation을 보내고, 같은 origin에서 A→B→A scope로 전환하며 storage spy를 사용한다. | Origin별 bootstrap/cookie 분리, 같은 origin의 이전 scope cache 재사용 없음, local/session storage write 0회. |
+| AUTH-TC-CS020 | Organization/auth lifecycle은 cached token을 폐기해야 한다. | Organization 변경, signup/login/logout/OAuth 전환 뒤 다음 mutation을 보낸다. | 새 scope/session bootstrap; old token replay 실패. |
+| AUTH-TC-CS021 | Fixed CSRF 오류의 자동 replay는 안전한 요청 한 번으로 제한해야 한다. | PUT과 idempotency 없는 POST에서 첫 요청을 403으로 만든다. | PUT 최대 1회 재시도, POST 재시도 0회, 무한 loop 없음. |
+| AUTH-TC-CS022 | 보호 direct fetch는 token과 active organization header를 함께 보내야 한다. | Settings/Wizard/RAG stream mutation을 호출한다. | `X-CSRF-Token`, credential, 동일 organization scope 포함. |
+| AUTH-TC-CS023 | Workflow stream proxy는 browser security context와 host-only token cookie를 안전하게 중계해야 한다. | Origin, Fetch Metadata, header token, stale cookie와 Authorization을 함께 보낸다. | Context/token 전달, stale CSRF cookie 교체, Authorization 미전달; Gateway가 최종 검증. |
+| AUTH-TC-CS024 | Middleware 순서는 허용된 Client가 안전한 CSRF 오류를 읽고 Public/webhook 외곽 경계를 유지해야 한다. | `app.user_middleware` 순서를 검사한다. | Webhook redaction → Public CORS → credentialed CORS → CSRF → Session 순서. |
+| AUTH-TC-CS025 | Ambient cross-site GET은 bootstrap cookie를 회전시키지 않아야 한다. | Custom bootstrap header 없이 cross-site image/navigation 요청을 보내거나 unlisted same-site Origin에서 header를 보낸다. | Fixed 403, Set-Cookie 없음, token service/DB 미진입. |
+| AUTH-TC-CS026 | Auth/organization lifecycle 전환 전의 in-flight bootstrap은 stale token을 되살리지 않아야 한다. | Bootstrap A가 pending인 동안 cache를 invalidate하고 같은 origin/scope bootstrap B를 시작한 뒤 A를 늦게 완료한다. | A caller는 mutation 전 실패, B는 A 정리 뒤 발급되어 최종 cookie/cache를 소유하고 이후 요청이 B를 재사용. |
+| AUTH-TC-CS027 | 동일한 만료 token을 사용한 동시 안전 요청은 refresh를 서로 무효화하지 않아야 한다. | 두 PUT/DELETE가 같은 token으로 403을 받고 첫 refresh가 pending인 동안 두 번째 403을 처리한다. | Generation 폐기와 bootstrap 각 1회, 두 요청 모두 새 token으로 한 번만 재시도해 성공. |
+| AUTH-TC-CS028 | 비ASCII double-submit token은 exception 없이 거부해야 한다. | Header/cookie에 같은 비ASCII 문자열을 보낸다. | `compare_digest` 전에 `token_invalid`, fixed 403, endpoint effect 0. |
+| AUTH-TC-CS029 | CSRF 감사 request ID는 token/PII header를 반사하지 않아야 한다. | 유효한 CSRF token 또는 임의 문자열을 `X-Request-ID`에도 넣고 거부를 유도한다. | 응답과 audit에는 새 canonical UUID만 있고 입력 원문은 없음. |
+| AUTH-TC-CS030 | 동기 CSRF 거부 감사 persistence는 event loop를 점유하지 않아야 한다. | Sync callback에서 DB/I/O 대기를 모사하고 callback thread를 기록한다. | Callback은 bounded worker thread에서 실행되고 고정 403 계약 유지. |
+| AUTH-TC-CS031 | Auth API endpoint 행은 endpoint inventory에만 있어야 한다. | `/auth/csrf` endpoint 행을 field/cookie/error table에 중복한다. | 문서 구조 테스트 실패; endpoint 행 정확히 1개. |
+| AUTH-TC-CS032 | Wizard mutation의 리소스 organization과 CSRF scope가 일치해야 한다. | LocalStorage는 조직 A지만 Workflow prop은 조직 B인 상태에서 Code/Prompt/Template 요청을 보낸다. | Body와 `X-Organization-Id`가 모두 조직 B이고 bootstrap/token scope도 B. |
+| AUTH-TC-CS033 | Malformed bootstrap organization scope는 고정 CSRF 오류로 닫혀야 한다. | 129자 scope 또는 제어 문자를 포함한 scope로 bootstrap한다. | Token/cookie/DB effect 0, `organization_scope_invalid` 감사와 fixed 403. |
+| AUTH-TC-CS034 | Bootstrap과 middleware 거부 감사는 같은 bounded 실행 경계를 사용해야 한다. | 동기 callback을 동시에 limiter 초과 실행하고 bootstrap request thread를 기록한다. | 동시 callback 최대 4, bootstrap 검증 thread와 audit worker thread 분리, 고정 오류 유지. |
+| AUTH-TC-CS035 | 같은 session/scope의 여러 탭 bootstrap은 기존 유효 token을 공유해야 한다. | 탭 A의 token cookie가 있는 상태에서 탭 B가 같은 auth cookie와 organization으로 bootstrap한다. | 탭 B body/cookie token과 expiry가 탭 A와 동일하며 탭 A의 mutation이 계속 유효하다. |
+| AUTH-TC-CS036 | 기존 token 재사용은 binding/scope/expiry를 우회하지 않아야 한다. | 다른 auth cookie, organization, binding kind와 만료 token으로 bootstrap한다. | 기존 token 미재사용, 새 binding/scope token 발급; 이전 token replay 실패. |
+| AUTH-TC-CS037 | Malformed organization scope reason은 관측 경계에서도 보존해야 한다. | `organization_scope_invalid` denial과 미등록 sentinel reason을 각각 기록한다. | 전자는 metric/log에 같은 bounded label, sentinel은 `unknown`; scope 원문 미기록. |
+
 ## Component And Hook Tests
 
 | ID | 검증 조건 | 최소 실패 조건 | 기대 결과 |

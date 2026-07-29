@@ -11,6 +11,9 @@ from apps.shared.audit.actions import AuditAction
 from apps.shared.db.session import get_db
 
 
+REQUEST_ID = "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b"
+
+
 class TestPermissionDeniedAudit(unittest.TestCase):
     def setUp(self):
         self.client = TestClient(app)
@@ -25,7 +28,7 @@ class TestPermissionDeniedAudit(unittest.TestCase):
         with patch("apps.gateway.main.record_audit") as record_audit:
             response = self.client.get(
                 "/api/v1/auth/me",
-                headers={"X-Request-ID": "req-test"},
+                headers={"X-Request-ID": REQUEST_ID},
             )
 
         self.assertEqual(response.status_code, 401)
@@ -36,7 +39,7 @@ class TestPermissionDeniedAudit(unittest.TestCase):
         self.assertEqual(event["metadata"]["method"], "GET")
         self.assertEqual(event["metadata"]["path"], "/api/v1/auth/me")
         self.assertEqual(event["metadata"]["status_code"], 401)
-        self.assertEqual(event["metadata"]["request_id"], "req-test")
+        self.assertEqual(event["metadata"]["request_id"], REQUEST_ID)
 
     def test_forbidden_request_records_audit(self):
         mock_db_session = MagicMock()
@@ -53,7 +56,7 @@ class TestPermissionDeniedAudit(unittest.TestCase):
                 json={},
                 headers={
                     "Authorization": "Bearer wrong-token",
-                    "X-Request-ID": "req-test",
+                    "X-Request-ID": REQUEST_ID,
                 },
             )
 
@@ -65,7 +68,7 @@ class TestPermissionDeniedAudit(unittest.TestCase):
         self.assertEqual(event["metadata"]["method"], "POST")
         self.assertEqual(event["metadata"]["path"], "/api/v1/hooks/test-slug")
         self.assertEqual(event["metadata"]["status_code"], 403)
-        self.assertEqual(event["metadata"]["request_id"], "req-test")
+        self.assertEqual(event["metadata"]["request_id"], REQUEST_ID)
 
     def test_already_recorded_permission_denial_skips_global_auth_audit(self):
         request = Request(

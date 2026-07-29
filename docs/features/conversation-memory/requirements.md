@@ -112,7 +112,7 @@ Public Chatbot은 서버에 익명 transcript를 영구 저장하지 않고 Clie
 - MEM-REQ-046: Public history는 browser memory에만 유지하고 localStorage/sessionStorage에 자동 복구용 원문을 저장하지 않아야 한다.
 - MEM-REQ-047: Public request/response와 validation error는 'Cache-Control: no-store', 'Referrer-Policy: no-referrer'를 유지하고 CORS grant를 제공하지 않아야 한다.
 - MEM-REQ-048: Workflow task args representation, application log, audit, trace와 metric label에 Public history 원문을 남기지 않아야 한다.
-- MEM-REQ-049: 인증형 내부 Chatbot durable Memory는 RBAC, CSRF/Origin, retention/legal policy와 operator transcript authorization을 별도 후속 이슈에서 완결해야 한다.
+- MEM-REQ-049: 인증형 내부 Chatbot durable Memory는 ADR-0073의 공통 CSRF/Origin admission을 상속하고, 별도 RBAC, retention/legal policy와 operator transcript authorization을 후속 이슈에서 완결해야 한다.
 
 ### Context, Summary And Cost (Authenticated Internal Target)
 
@@ -200,7 +200,7 @@ Public 값을 완화하려면 별도 보안·비용 검토가 필요하다. Auth
 
 MBA-318은 Public client-held history, legacy Public memory control 차단, content-free Workflow logging과 Embed Chat 전달을 구현한다. MBA-316/317의 durable persistence 및 public lifecycle foundation은 active API에 등록하지 않고 보존한다.
 
-남은 범위는 authenticated internal Chatbot의 RBAC/CSRF/Origin, durable session/turn/entry, transcript lifecycle, retention/legal hold, provider admission/lease/fencing과 운영 UI다. 이 후속 구현은 active durable Memory domain contract를 최신 `dev`와 ADR-0074 경계에 맞게 선별 적용한다.
+남은 범위는 authenticated internal Chatbot의 별도 RBAC, durable session/turn/entry, transcript lifecycle, retention/legal hold, provider admission/lease/fencing과 운영 UI다. Cookie mutation은 ADR-0073의 공통 CSRF/Origin admission을 상속하며, 후속 구현은 active durable Memory domain contract를 최신 `dev`와 ADR-0074 경계에 맞게 선별 적용한다.
 
 ## MBA-318 Boundary Completion Requirements
 

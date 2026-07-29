@@ -144,7 +144,7 @@ class TestPermissionsApi(unittest.TestCase):
                 "auth_state": "builder",
             },
         )
-        self.assertEqual(audit.audit_metadata["request_id"], "req-test")
+        self.assertEqual(audit.audit_metadata["request_id"], "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b")
         self.assertEqual(audit.audit_metadata["actor"]["id"], str(user_id))
 
     def test_put_team_workflow_permission_rejects_primary_changed_while_waiting(self):
@@ -580,7 +580,7 @@ class TestPermissionsApi(unittest.TestCase):
         self.assertEqual(audit.after["user_id"], str(target_user_id))
         self.assertEqual(audit.after["auth_state"], "builder")
         self.assertNotIn("assigned_at", audit.after)
-        self.assertEqual(audit.audit_metadata["request_id"], "req-test")
+        self.assertEqual(audit.audit_metadata["request_id"], "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b")
         self.assertEqual(audit.audit_metadata["actor"]["id"], str(user_id))
         self.assertEqual(
             audit.audit_metadata["organization_id"], str(organization_id)
@@ -1086,7 +1086,7 @@ class TestPermissionsApi(unittest.TestCase):
         self.assertEqual(audit.before["team_id"], str(team_id))
         self.assertNotIn("assigned_by", audit.before)
         self.assertNotIn("assigned_at", audit.before)
-        self.assertEqual(audit.audit_metadata["request_id"], "req-test")
+        self.assertEqual(audit.audit_metadata["request_id"], "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b")
         self.assertEqual(audit.audit_metadata["actor"]["id"], str(user_id))
 
     def test_put_team_workflow_permission_rejects_member_without_manage(self):
@@ -1551,7 +1551,7 @@ class TestPermissionsApi(unittest.TestCase):
 
         self.assertEqual(response.status_code, 422)
         self.assertEqual(response.json()["error"]["code"], "validation.failed")
-        self.assertEqual(response.json()["error"]["request_id"], "req-test")
+        self.assertEqual(response.json()["error"]["request_id"], "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b")
         self.assertEqual(
             response.json()["error"]["details"]["errors"][0]["loc"],
             ["body", "auth_state"],
@@ -2054,7 +2054,7 @@ class TestPermissionsApi(unittest.TestCase):
 
         self.assertEqual(response.status_code, 422)
         self.assertEqual(response.json()["error"]["code"], "validation.failed")
-        self.assertEqual(response.json()["error"]["request_id"], "req-test")
+        self.assertEqual(response.json()["error"]["request_id"], "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b")
         self.assertEqual(
             response.json()["error"]["details"]["errors"][0]["loc"],
             ["body", "auth_state"],
@@ -2636,7 +2636,7 @@ class TestPermissionsApi(unittest.TestCase):
         self.assertEqual(audit.before["workflow_id"], str(workflow_id))
         self.assertEqual(audit.before["team_id"], str(team_id))
         self.assertIsNone(audit.after)
-        self.assertEqual(audit.audit_metadata["request_id"], "req-test")
+        self.assertEqual(audit.audit_metadata["request_id"], "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b")
         self.assertEqual(audit.audit_metadata["actor"]["id"], str(user_id))
 
     def test_delete_team_workflow_permission_allows_workflow_manager(self):
@@ -2843,7 +2843,7 @@ class TestPermissionsApi(unittest.TestCase):
         self.assertEqual(audit.before["team_id"], str(team_id))
         self.assertEqual(audit.before["auth_state"], "operator")
         self.assertIsNone(audit.after)
-        self.assertEqual(audit.audit_metadata["request_id"], "req-test")
+        self.assertEqual(audit.audit_metadata["request_id"], "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b")
         self.assertEqual(audit.audit_metadata["actor"]["id"], str(user_id))
 
     def test_delete_team_llm_permission_allows_credential_manager(self):
@@ -3068,7 +3068,7 @@ class TestPermissionsApi(unittest.TestCase):
         self.assertEqual(
             audit.audit_metadata["organization_id"], str(organization_id)
         )
-        self.assertEqual(audit.audit_metadata["request_id"], "req-test")
+        self.assertEqual(audit.audit_metadata["request_id"], "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b")
         _assert_audit_added_before_commit(self, session)
 
     def test_delete_user_workflow_permission_locks_subject_before_app_scope(self):
@@ -3332,7 +3332,7 @@ class TestPermissionsApi(unittest.TestCase):
             audit.audit_metadata["organization_id"], str(organization_id)
         )
         self.assertIsNone(audit.after)
-        self.assertEqual(audit.audit_metadata["request_id"], "req-test")
+        self.assertEqual(audit.audit_metadata["request_id"], "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b")
         _assert_audit_added_before_commit(self, session)
 
     def test_delete_user_llm_permission_allows_credential_manager(self):
@@ -3511,7 +3511,7 @@ class TestPermissionsApi(unittest.TestCase):
         _ensure_active_user_row(session, user_id)
         app.dependency_overrides[get_db] = lambda: session
         headers = {
-            "X-Request-ID": "req-test",
+            "X-Request-ID": "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b",
         }
         if include_auth_cookie:
             headers["Cookie"] = "auth_token=token"
@@ -3548,7 +3548,7 @@ class TestPermissionsApi(unittest.TestCase):
         """fake DB session과 fake 인증 결과로 workflow permission 목록 endpoint를 호출한다."""
         app.dependency_overrides[get_db] = lambda: session
         headers = {
-            "X-Request-ID": "req-test",
+            "X-Request-ID": "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b",
         }
         if include_auth_cookie:
             headers["Cookie"] = "auth_token=token"
@@ -3584,7 +3584,7 @@ class TestPermissionsApi(unittest.TestCase):
         """fake DB session과 fake 인증 결과로 KB permission 목록 endpoint를 호출한다."""
         app.dependency_overrides[get_db] = lambda: session
         headers = {
-            "X-Request-ID": "req-test",
+            "X-Request-ID": "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b",
         }
         if include_auth_cookie:
             headers["Cookie"] = "auth_token=token"
@@ -3622,7 +3622,7 @@ class TestPermissionsApi(unittest.TestCase):
         """fake DB session과 fake 인증 결과로 user 권한 PUT endpoint를 호출한다."""
         app.dependency_overrides[get_db] = lambda: session
         headers = {
-            "X-Request-ID": "req-test",
+            "X-Request-ID": "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b",
         }
         if include_auth_cookie:
             headers["Cookie"] = "auth_token=token"
@@ -3662,7 +3662,7 @@ class TestPermissionsApi(unittest.TestCase):
         _ensure_active_user_row(session, user_id)
         app.dependency_overrides[get_db] = lambda: session
         headers = {
-            "X-Request-ID": "req-test",
+            "X-Request-ID": "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b",
         }
         if include_auth_cookie:
             headers["Cookie"] = "auth_token=token"
@@ -3701,7 +3701,7 @@ class TestPermissionsApi(unittest.TestCase):
         """fake DB session과 fake 인증 결과로 KB user 직접 권한 PUT endpoint를 호출한다."""
         app.dependency_overrides[get_db] = lambda: session
         headers = {
-            "X-Request-ID": "req-test",
+            "X-Request-ID": "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b",
         }
         if include_auth_cookie:
             headers["Cookie"] = "auth_token=token"
@@ -3741,7 +3741,7 @@ class TestPermissionsApi(unittest.TestCase):
         _ensure_active_user_row(session, user_id)
         app.dependency_overrides[get_db] = lambda: session
         headers = {
-            "X-Request-ID": "req-test",
+            "X-Request-ID": "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b",
         }
         if include_auth_cookie:
             headers["Cookie"] = "auth_token=token"
@@ -3780,7 +3780,7 @@ class TestPermissionsApi(unittest.TestCase):
         """fake DB session과 fake 인증 결과로 LLM credential user 권한 PUT endpoint를 호출한다."""
         app.dependency_overrides[get_db] = lambda: session
         headers = {
-            "X-Request-ID": "req-test",
+            "X-Request-ID": "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b",
         }
         if include_auth_cookie:
             headers["Cookie"] = "auth_token=token"
@@ -3818,7 +3818,7 @@ class TestPermissionsApi(unittest.TestCase):
         """fake DB session과 fake 인증 결과로 권한 DELETE endpoint를 호출한다."""
         app.dependency_overrides[get_db] = lambda: session
         headers = {
-            "X-Request-ID": "req-test",
+            "X-Request-ID": "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b",
         }
         if include_auth_cookie:
             headers["Cookie"] = "auth_token=token"
@@ -3855,7 +3855,7 @@ class TestPermissionsApi(unittest.TestCase):
         """fake DB session과 fake 인증 결과로 LLM credential team 권한 DELETE endpoint를 호출한다."""
         app.dependency_overrides[get_db] = lambda: session
         headers = {
-            "X-Request-ID": "req-test",
+            "X-Request-ID": "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b",
         }
         if include_auth_cookie:
             headers["Cookie"] = "auth_token=token"
@@ -3892,7 +3892,7 @@ class TestPermissionsApi(unittest.TestCase):
         """fake DB session과 fake 인증 결과로 user 권한 DELETE endpoint를 호출한다."""
         app.dependency_overrides[get_db] = lambda: session
         headers = {
-            "X-Request-ID": "req-test",
+            "X-Request-ID": "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b",
         }
         if include_auth_cookie:
             headers["Cookie"] = "auth_token=token"
@@ -3929,7 +3929,7 @@ class TestPermissionsApi(unittest.TestCase):
         """fake DB session과 fake 인증 결과로 KB team 권한 DELETE endpoint를 호출한다."""
         app.dependency_overrides[get_db] = lambda: session
         headers = {
-            "X-Request-ID": "req-test",
+            "X-Request-ID": "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b",
         }
         if include_auth_cookie:
             headers["Cookie"] = "auth_token=token"
@@ -3966,7 +3966,7 @@ class TestPermissionsApi(unittest.TestCase):
         """fake DB session과 fake 인증 결과로 KB user 직접 권한 DELETE endpoint를 호출한다."""
         app.dependency_overrides[get_db] = lambda: session
         headers = {
-            "X-Request-ID": "req-test",
+            "X-Request-ID": "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b",
         }
         if include_auth_cookie:
             headers["Cookie"] = "auth_token=token"
@@ -4003,7 +4003,7 @@ class TestPermissionsApi(unittest.TestCase):
         """fake DB session과 fake 인증 결과로 LLM credential user 권한 DELETE endpoint를 호출한다."""
         app.dependency_overrides[get_db] = lambda: session
         headers = {
-            "X-Request-ID": "req-test",
+            "X-Request-ID": "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b",
         }
         if include_auth_cookie:
             headers["Cookie"] = "auth_token=token"
@@ -5299,7 +5299,7 @@ def _error(code, message, details=None):
         "error": {
             "code": code,
             "message": message,
-            "request_id": "req-test",
+            "request_id": "98d6d88b-8d7a-46fd-8d12-f2024d2fac4b",
             "details": details or {},
         }
     }

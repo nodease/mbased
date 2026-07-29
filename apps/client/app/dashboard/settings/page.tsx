@@ -19,6 +19,7 @@ import {
   resolveActiveOrganizationId,
   setActiveOrganizationId,
 } from '@/lib/activeOrganization';
+import { csrfFetch } from '@/lib/csrfToken';
 import { ActiveOrganizationMemberPicker } from '@/app/features/organization/components/ActiveOrganizationMemberPicker';
 import { OrganizationAuthBadge } from '@/app/features/organization/components/OrganizationAuthBadge';
 import type {
@@ -107,7 +108,7 @@ const AUTH_STATES: AuthState[] = ['viewer', 'operator', 'builder', 'manager'];
 
 async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const organizationId = getStoredActiveOrganizationId();
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const response = await csrfFetch(`${API_BASE_URL}${path}`, {
     credentials: 'include',
     ...init,
     headers: {
@@ -285,7 +286,9 @@ export default function SettingsPage() {
           apiRequest<LLMProviderResponse[]>('/llm/providers'),
           apiRequest<LLMCredentialResponse[]>('/llm/credentials'),
           apiRequest<AppResponse[]>('/apps'),
-          org.is_manager ? knowledgeApi.getKnowledgeBases().catch(() => []) : [],
+          org.is_manager
+            ? knowledgeApi.getKnowledgeBases().catch(() => [])
+            : [],
         ]);
 
       setProviders(providerData);
@@ -299,7 +302,8 @@ export default function SettingsPage() {
         '';
       const firstKnowledgeBaseId =
         selectedKnowledgeBaseId || knowledgeData[0]?.id || '';
-      const firstCredentialId = selectedCredentialId || credentialData[0]?.id || '';
+      const firstCredentialId =
+        selectedCredentialId || credentialData[0]?.id || '';
       setSelectedWorkflowId(firstWorkflowId);
       setSelectedKnowledgeBaseId(firstKnowledgeBaseId);
       setSelectedCredentialId(firstCredentialId);
@@ -318,7 +322,9 @@ export default function SettingsPage() {
 
       const [memberData, teamData] = await Promise.all([
         apiRequest<OrganizationMember[]>(`/organizations/${org.id}/members`),
-        apiRequest<TeamResponse[]>(`/teams?organization_id=${org.id}&limit=100`),
+        apiRequest<TeamResponse[]>(
+          `/teams?organization_id=${org.id}&limit=100`,
+        ),
       ]);
       setOrganizationMembers(memberData);
       setTeams(teamData);
@@ -337,7 +343,8 @@ export default function SettingsPage() {
       );
       setTeamMembers(Object.fromEntries(teamMemberEntries));
       setMemberForm((prev) => ({
-        teamId: prev.teamId || teamData.find((team) => team.is_active)?.id || '',
+        teamId:
+          prev.teamId || teamData.find((team) => team.is_active)?.id || '',
         userId: prev.userId,
       }));
       setPermissionForm((prev) => ({
@@ -345,7 +352,8 @@ export default function SettingsPage() {
         granteeId:
           prev.granteeId ||
           teamData.find((team) => team.is_active)?.id ||
-          memberData.find((member) => member.membership_state === 'active')?.user_id ||
+          memberData.find((member) => member.membership_state === 'active')
+            ?.user_id ||
           '',
       }));
 
@@ -370,7 +378,11 @@ export default function SettingsPage() {
         ),
       ]);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '설정 데이터를 불러오지 못했습니다.');
+      setError(
+        err instanceof Error
+          ? err.message
+          : '설정 데이터를 불러오지 못했습니다.',
+      );
     } finally {
       setLoading(false);
     }
@@ -484,7 +496,9 @@ export default function SettingsPage() {
 
   const handleRemoveMember = async (teamId: string, userId: string) => {
     if (!organization?.is_manager) return;
-    await apiRequest(`/teams/${teamId}/members/${userId}`, { method: 'DELETE' });
+    await apiRequest(`/teams/${teamId}/members/${userId}`, {
+      method: 'DELETE',
+    });
     const refreshed = await apiRequest<TeamMemberResponse[]>(
       `/teams/${teamId}/members`,
     );
@@ -589,9 +603,7 @@ export default function SettingsPage() {
             )}
           </div>
           <p className="mt-1 text-sm text-gray-600">
-            {organization
-              ? organization.name
-              : 'Organization 확인 중'}
+            {organization ? organization.name : 'Organization 확인 중'}
           </p>
         </div>
         <button
@@ -628,7 +640,9 @@ export default function SettingsPage() {
       )}
 
       {loading ? (
-        <div className="py-16 text-center text-sm text-gray-500">로딩 중...</div>
+        <div className="py-16 text-center text-sm text-gray-500">
+          로딩 중...
+        </div>
       ) : effectiveTab === 'access' && isManager ? (
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
           <section className="space-y-4">
@@ -667,53 +681,55 @@ export default function SettingsPage() {
                   </div>
                 ) : (
                   teams.map((team) => (
-                  <div
-                    key={team.id}
-                    className="border-b border-gray-100 px-4 py-4 last:border-b-0"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <p className="font-medium text-gray-900">{team.name}</p>
-                          {!team.is_active && (
-                            <span className="rounded-md bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
-                              비활성
-                            </span>
-                          )}
+                    <div
+                      key={team.id}
+                      className="border-b border-gray-100 px-4 py-4 last:border-b-0"
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="font-medium text-gray-900">
+                              {team.name}
+                            </p>
+                            {!team.is_active && (
+                              <span className="rounded-md bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">
+                                비활성
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-xs text-gray-500">
+                            {team.description || '설명 없음'}
+                          </p>
                         </div>
-                        <p className="text-xs text-gray-500">
-                          {team.description || '설명 없음'}
-                        </p>
-                      </div>
-                      <button
-                        onClick={() => handleDeactivateTeam(team.id)}
-                        disabled={!team.is_active}
-                        className="rounded-md p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-gray-400"
-                        title="팀 비활성화"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {(teamMembers[team.id] || []).map((member) => (
-                        <span
-                          key={member.id}
-                          className="inline-flex items-center gap-1 rounded-md bg-gray-100 px-2 py-1 text-xs text-gray-700"
+                        <button
+                          onClick={() => handleDeactivateTeam(team.id)}
+                          disabled={!team.is_active}
+                          className="rounded-md p-1.5 text-gray-400 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-gray-400"
+                          title="팀 비활성화"
                         >
-                          {member.name}
-                          <button
-                            onClick={() =>
-                              handleRemoveMember(team.id, member.user_id)
-                            }
-                            className="text-gray-400 hover:text-red-600"
-                            title="멤버 제거"
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {(teamMembers[team.id] || []).map((member) => (
+                          <span
+                            key={member.id}
+                            className="inline-flex items-center gap-1 rounded-md bg-gray-100 px-2 py-1 text-xs text-gray-700"
                           >
-                            <Trash2 className="h-3 w-3" />
-                          </button>
-                        </span>
-                      ))}
+                            {member.name}
+                            <button
+                              onClick={() =>
+                                handleRemoveMember(team.id, member.user_id)
+                              }
+                              className="text-gray-400 hover:text-red-600"
+                              title="멤버 제거"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </button>
+                          </span>
+                        ))}
+                      </div>
                     </div>
-                  </div>
                   ))
                 )}
               </div>
@@ -927,7 +943,9 @@ export default function SettingsPage() {
                 </select>
                 <button
                   onClick={handleGrantPermission}
-                  disabled={!selectedPermissionResourceId || !permissionForm.granteeId}
+                  disabled={
+                    !selectedPermissionResourceId || !permissionForm.granteeId
+                  }
                   className="h-10 rounded-md bg-blue-600 px-4 text-sm font-medium text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   부여
@@ -938,11 +956,15 @@ export default function SettingsPage() {
                 <div className="bg-gray-50 px-3 py-2 text-xs font-semibold uppercase text-gray-500">
                   Team permissions
                 </div>
-                {renderPermissionRows(activePermissions?.team_permissions || [])}
+                {renderPermissionRows(
+                  activePermissions?.team_permissions || [],
+                )}
                 <div className="border-t border-gray-200 bg-gray-50 px-3 py-2 text-xs font-semibold uppercase text-gray-500">
                   User direct permissions
                 </div>
-                {renderPermissionRows(activePermissions?.user_permissions || [])}
+                {renderPermissionRows(
+                  activePermissions?.user_permissions || [],
+                )}
               </div>
             </div>
           </section>
@@ -1041,8 +1063,8 @@ export default function SettingsPage() {
               Credential 접근 상태
             </h2>
             <p className="text-sm leading-6 text-gray-600">
-              이 화면에서는 접근 가능한 credential만 확인할 수 있습니다.
-              등록, 삭제, 모델 동기화는 관리 화면에서 다룹니다.
+              이 화면에서는 접근 가능한 credential만 확인할 수 있습니다. 등록,
+              삭제, 모델 동기화는 관리 화면에서 다룹니다.
             </p>
           </section>
         </div>

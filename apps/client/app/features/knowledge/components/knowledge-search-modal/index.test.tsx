@@ -1,15 +1,21 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-const axiosPostMock = vi.hoisted(() => vi.fn());
+const apiClientPostMock = vi.hoisted(() => vi.fn());
 const activeOrganizationMock = vi.hoisted(() => ({
   ACTIVE_ORGANIZATION_CHANGED_EVENT: 'nodease-active-organization-changed',
   activeOrganizationHeaders: vi.fn(),
   getStoredActiveOrganizationId: vi.fn(),
 }));
 
-vi.mock('axios', () => ({
-  default: { post: axiosPostMock },
+vi.mock('@/lib/apiClient', () => ({
+  apiClient: { post: apiClientPostMock },
 }));
 
 vi.mock('@/lib/activeOrganization', () => activeOrganizationMock);
@@ -34,14 +40,16 @@ const deferred = <T,>() => {
 
 describe('KnowledgeSearchModal', () => {
   beforeEach(() => {
-    activeOrganizationMock.getStoredActiveOrganizationId.mockReturnValue('org-1');
+    activeOrganizationMock.getStoredActiveOrganizationId.mockReturnValue(
+      'org-1',
+    );
     activeOrganizationMock.activeOrganizationHeaders.mockImplementation(
       (organizationId?: string | null) =>
-        organizationId
-          ? { 'X-Organization-Id': organizationId }
-          : {},
+        organizationId ? { 'X-Organization-Id': organizationId } : {},
     );
-    axiosPostMock.mockResolvedValue({ data: { answer: '', references: [] } });
+    apiClientPostMock.mockResolvedValue({
+      data: { answer: '', references: [] },
+    });
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({ ok: true, json: async () => [chatModel] }),
@@ -72,15 +80,14 @@ describe('KnowledgeSearchModal', () => {
     fireEvent.keyDown(textarea, { key: 'Enter' });
 
     await waitFor(() =>
-      expect(axiosPostMock).toHaveBeenCalledWith(
-        '/api/v1/rag/search-test/chat',
+      expect(apiClientPostMock).toHaveBeenCalledWith(
+        '/rag/search-test/chat',
         {
           query: '커밋 컨벤션',
           knowledge_base_id: '10200000-0000-0000-0000-000000000334',
           generation_model: 'gpt-4o-mini',
         },
         {
-          withCredentials: true,
           headers: { 'X-Organization-Id': 'org-1' },
         },
       ),
@@ -103,7 +110,7 @@ describe('KnowledgeSearchModal', () => {
         similarity_score: number;
       }>;
     }>();
-    axiosPostMock.mockReturnValueOnce(searchRequest.promise);
+    apiClientPostMock.mockReturnValueOnce(searchRequest.promise);
 
     render(
       <KnowledgeSearchModal
@@ -116,9 +123,11 @@ describe('KnowledgeSearchModal', () => {
     const textarea = screen.getByPlaceholderText('검색어를 입력하세요...');
     fireEvent.change(textarea, { target: { value: '기존 조직 자료' } });
     fireEvent.keyDown(textarea, { key: 'Enter' });
-    await waitFor(() => expect(axiosPostMock).toHaveBeenCalledOnce());
+    await waitFor(() => expect(apiClientPostMock).toHaveBeenCalledOnce());
 
-    activeOrganizationMock.getStoredActiveOrganizationId.mockReturnValue('org-2');
+    activeOrganizationMock.getStoredActiveOrganizationId.mockReturnValue(
+      'org-2',
+    );
     act(() => {
       window.dispatchEvent(
         new Event(activeOrganizationMock.ACTIVE_ORGANIZATION_CHANGED_EVENT),
@@ -137,8 +146,12 @@ describe('KnowledgeSearchModal', () => {
       await searchRequest.promise;
     });
 
-    expect(screen.queryByText('OLD_ORGANIZATION_RESULT')).not.toBeInTheDocument();
-    expect(screen.getByText('검색어를 입력하면 관련 문서 청크를 찾습니다.')).toBeVisible();
+    expect(
+      screen.queryByText('OLD_ORGANIZATION_RESULT'),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByText('검색어를 입력하면 관련 문서 청크를 찾습니다.'),
+    ).toBeVisible();
   });
 
   it('discards an in-flight search result after the knowledge base changes', async () => {
@@ -149,7 +162,7 @@ describe('KnowledgeSearchModal', () => {
         similarity_score: number;
       }>;
     }>();
-    axiosPostMock.mockReturnValueOnce(searchRequest.promise);
+    apiClientPostMock.mockReturnValueOnce(searchRequest.promise);
 
     const { rerender } = render(
       <KnowledgeSearchModal
@@ -161,7 +174,7 @@ describe('KnowledgeSearchModal', () => {
     const textarea = screen.getByPlaceholderText('검색어를 입력하세요...');
     fireEvent.change(textarea, { target: { value: '이전 KB 자료' } });
     fireEvent.keyDown(textarea, { key: 'Enter' });
-    await waitFor(() => expect(axiosPostMock).toHaveBeenCalledOnce());
+    await waitFor(() => expect(apiClientPostMock).toHaveBeenCalledOnce());
 
     rerender(
       <KnowledgeSearchModal
@@ -199,11 +212,13 @@ describe('KnowledgeSearchModal', () => {
     );
     const textarea = screen.getByPlaceholderText('검색어를 입력하세요...');
     fireEvent.change(textarea, { target: { value: '조직 전환 직후 검색' } });
-    activeOrganizationMock.getStoredActiveOrganizationId.mockReturnValue('org-2');
+    activeOrganizationMock.getStoredActiveOrganizationId.mockReturnValue(
+      'org-2',
+    );
 
     fireEvent.keyDown(textarea, { key: 'Enter' });
 
-    expect(axiosPostMock).not.toHaveBeenCalled();
+    expect(apiClientPostMock).not.toHaveBeenCalled();
   });
 
   it('does not submit chat without an available generation model', async () => {
@@ -231,7 +246,7 @@ describe('KnowledgeSearchModal', () => {
       expect(screen.getByRole('button', { name: '검색 실행' })).toBeDisabled(),
     );
     fireEvent.keyDown(textarea, { key: 'Enter' });
-    expect(axiosPostMock).not.toHaveBeenCalled();
+    expect(apiClientPostMock).not.toHaveBeenCalled();
     expect(alert).toHaveBeenCalledWith(
       'AI 답변에 사용할 모델을 먼저 설정해 주세요.',
     );

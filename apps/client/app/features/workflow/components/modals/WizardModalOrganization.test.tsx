@@ -1,5 +1,16 @@
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+vi.mock('@/lib/csrfToken', () => ({
+  csrfFetch: (input: RequestInfo | URL, init?: RequestInit) =>
+    fetch(input, init),
+}));
 
 import { CodeWizardModal } from './CodeWizardModal';
 import { PromptWizardModal } from './PromptWizardModal';
@@ -22,6 +33,12 @@ const lastPostBody = () => {
   const postCall = fetchCalls().find((call) => call.init?.method === 'POST');
   expect(postCall).toBeTruthy();
   return JSON.parse(String(postCall?.init?.body));
+};
+
+const lastPostOrganizationId = () => {
+  const postCall = fetchCalls().find((call) => call.init?.method === 'POST');
+  expect(postCall).toBeTruthy();
+  return new Headers(postCall?.init?.headers).get('X-Organization-Id');
 };
 
 const createFetchMock = () =>
@@ -88,6 +105,7 @@ describe('Wizard modals organization scope', () => {
     expect(lastPostBody()).toMatchObject({
       organization_id: activeOrganizationId,
     });
+    expect(lastPostOrganizationId()).toBe(activeOrganizationId);
   });
 
   it('falls back to stored active organization when organizationId prop is omitted', async () => {
@@ -159,6 +177,7 @@ describe('Wizard modals organization scope', () => {
     expect(lastPostBody()).toMatchObject({
       organization_id: activeOrganizationId,
     });
+    expect(lastPostOrganizationId()).toBe(activeOrganizationId);
   });
 
   it('passes organizationId prop to template wizard check and improve requests', async () => {
@@ -191,6 +210,7 @@ describe('Wizard modals organization scope', () => {
     expect(lastPostBody()).toMatchObject({
       organization_id: activeOrganizationId,
     });
+    expect(lastPostOrganizationId()).toBe(activeOrganizationId);
   });
 
   it('rechecks credentials when prompt wizard organizationId changes', async () => {

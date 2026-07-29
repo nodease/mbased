@@ -205,6 +205,7 @@ import {
   getStoredActiveOrganizationId,
 } from '@/lib/activeOrganization';
 import { apiBaseUrl, apiClient } from '@/lib/apiClient';
+import { csrfFetch } from '@/lib/csrfToken';
 
 const API_BASE_URL = apiBaseUrl;
 
@@ -860,15 +861,18 @@ export const knowledgeApi = {
     },
     onEvent: (event: RAGAgentStreamEvent) => void,
   ): Promise<void> => {
-    const response = await fetch(`${API_BASE_URL}/rag/agent/answer/stream`, {
-      method: 'POST',
-      credentials: 'include',
-      headers: {
-        'Content-Type': 'application/json',
-        ...activeOrganizationHeaders(getStoredActiveOrganizationId()),
+    const response = await csrfFetch(
+      `${API_BASE_URL}/rag/agent/answer/stream`,
+      {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          ...activeOrganizationHeaders(getStoredActiveOrganizationId()),
+        },
+        body: JSON.stringify(data),
       },
-      body: JSON.stringify(data),
-    });
+    );
 
     if (!response.ok) {
       let message = `요청 실패 (${response.status})`;

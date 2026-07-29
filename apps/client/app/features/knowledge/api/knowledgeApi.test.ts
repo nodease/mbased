@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('@/lib/csrfToken', () => ({
+  csrfFetch: (input: RequestInfo | URL, init?: RequestInit) =>
+    fetch(input, init),
+}));
+
 vi.mock('@/lib/activeOrganization', () => ({
   activeOrganizationHeaders: vi.fn((organizationId: string | null) =>
     organizationId ? { 'X-Organization-Id': organizationId } : {},
@@ -106,10 +111,7 @@ describe('knowledgeApi.getPresignedUploadUrl', () => {
       },
     });
 
-    await knowledgeApi.getPresignedUploadUrl(
-      'input.pdf',
-      'application/pdf',
-    );
+    await knowledgeApi.getPresignedUploadUrl('input.pdf', 'application/pdf');
 
     expect(apiClient.post).toHaveBeenCalledWith('/rag/upload/presigned-url', {
       filename: 'input.pdf',

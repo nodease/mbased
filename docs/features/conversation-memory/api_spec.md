@@ -21,7 +21,7 @@ Public history는 인증·인가·resource provenance·credential·billing princ
 
 Public iframe document는 relative same-origin으로 `POST /api/v1/run-public/{url_slug}/chat`을 호출한다. 응답과 endpoint 진입 전 validation error는 `Cache-Control: no-store`, `Referrer-Policy: no-referrer`이며 CORS grant를 제공하지 않는다. Client는 대화 원문을 React memory에만 두고 URL, localStorage, sessionStorage, audit, trace와 metric label에 남기지 않는다.
 
-Authenticated internal Chatbot은 Public route에 optional login을 붙이지 않고 별도 authentication/authorization, CSRF/Origin, storage namespace와 retention 계약으로 구현한다.
+Authenticated internal Chatbot은 Public route에 optional login을 붙이지 않고 별도 authentication/authorization, storage namespace와 retention 계약으로 구현한다. Cookie mutation은 ADR-0073의 공통 CSRF/exact-Origin 경계를 상속한다.
 
 ## HTTP Surface
 

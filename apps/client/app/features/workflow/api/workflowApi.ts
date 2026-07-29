@@ -3,6 +3,7 @@ import {
   claimLoginRedirectPath,
   getCurrentAuthReturnPath,
 } from '@/lib/authReturn';
+import { attachCsrfProtection, csrfFetch } from '@/lib/csrfToken';
 import {
   attachActiveOrganizationHeader,
   getStoredActiveOrganizationId,
@@ -74,6 +75,7 @@ const api = axios.create({
   withCredentials: true, // ✅ 쿠키 자동 전송
 });
 
+attachCsrfProtection(api);
 attachActiveOrganizationHeader(api);
 
 const cloneMockResponse = <T>(value: T): T => {
@@ -253,7 +255,7 @@ export const workflowApi = {
       headers.set('X-Organization-Id', activeOrganizationId);
     }
 
-    const response = await fetch(fetchUrl, {
+    const response = await csrfFetch(fetchUrl, {
       method: 'POST',
       headers,
       credentials: 'include', // 쿠키 인증 포함

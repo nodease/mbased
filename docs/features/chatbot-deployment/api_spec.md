@@ -31,7 +31,7 @@ Status: Draft
 ## Target Runtime Surface Separation
 
 - `public_chatbot`: Conversation Access Grant나 server session 없이 client-held history만 사용하고 login cookie가 있어도 anonymous public-only RAG로 평가한다.
-- `authenticated_internal_chatbot`: 현재는 cookie authentication, configured credentialed JSON/CORS 경계, active membership, workflow `execute`, current user KB permission으로 실행한다. 현재 구현을 CSRF token/exact-Origin 완료로 표현하지 않는다. Target에서는 별도 내부 Chatbot 이용 권한, CSRF token, exact Origin과 독립 Conversation Session namespace를 추가한다.
+- `authenticated_internal_chatbot`: 현재 cookie-authenticated mutation은 ADR-0073의 signed CSRF token, exact Origin, Fetch Metadata와 route-owned content-type 경계를 통과한다. 이는 공통 browser admission 완결이며 별도 내부 Chatbot 이용 권한과 독립 Conversation Session namespace를 대신하지 않는다.
 - 두 surface는 시각 Chatbot component만 재사용한다. Public route의 authentication/audience를 조건부 완화하거나 public grant를 execution subject로 승격하지 않는다.
 - Public iframe parent는 [ADR-0043](../../decisions/ADR-0043-deployment-browser-origin-and-embedding-boundary.md)의 deployment-owned versioned `browser_access_policy`와 CSP `frame-ancestors`가 소유한다. Iframe first-party API와 external direct JavaScript CORS는 별도 경계이며 client/environment fallback으로 parent를 허용하지 않는다.
 
@@ -175,7 +175,7 @@ Request body:
 - `inputs`에 workflow schema가 선언한 `conversation_id` 또는 `memory_mode`가 있으면 업무 입력으로 보존한다. typed control과 선언되지 않은 legacy `inputs.conversation_id`를 동시에 보내는 모호한 요청은 `400`으로 거부한다.
 - 기존 인증 caller의 legacy reserved input은 schema collision이 없는 범위에서만 임시 호환하며 string, 최대 255자, control character 금지 조건을 적용한다. Public 실행에는 이 호환 계약을 적용하지 않는다.
 - 요청 `Content-Type`의 media type은 정확히 `application/json`이어야 한다(`charset` parameter 허용). 누락, `text/plain`, `application/x-www-form-urlencoded`, `multipart/form-data`는 body/schema 처리나 workflow dispatch 전에 `415`로 거부한다.
-- Browser credentialed JSON 호출은 configured `CORS_ORIGINS`의 명시적 HTTP(S) origin만 preflight를 통과한다. Wildcard credentialed origin은 Gateway 구성 시 거부한다. 이 현행 경계를 별도 CSRF token/exact-Origin 구현 완료로 표현하지 않는다.
+- Browser cookie mutation은 configured `CORS_ORIGINS`의 명시적 HTTP(S) origin만 preflight를 통과하고 ADR-0073의 exact Origin, Fetch Metadata, content type와 signed CSRF token을 별도로 검증한다. Wildcard credentialed origin은 Gateway 구성 시 거부한다.
 
 Response: `{"status": "success", "results": { ... }}`.
 

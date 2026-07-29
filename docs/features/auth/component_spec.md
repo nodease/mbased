@@ -219,6 +219,40 @@ Status: Draft
   - 성공 시 로컬 저장소에서 `moduly_session_token`과 `moduly_user`를 제거하고 `/auth/login`으로 이동한다.
   - 실패 시 `로그아웃 실패:`를 기록하고 이동하지 않는다.
 
+## CSRF Browser Boundary
+
+### Gateway Route Policy Registry
+
+- Gateway composition은 모든 unsafe route를 `cookie_authenticated`, `pre_auth_session`, `public_anonymous`, `server_credential` 중 하나로 분류한다.
+- `get_current_user` dependency route는 자동으로 cookie policy가 되며, 자체 cookie helper를 사용하는 Team/Permission route와 Public/server 예외는 exact method/path inventory로 관리한다.
+- 미분류 route, stale 예외, duplicate unsafe route와 승인되지 않은 protected media type은 application startup과 architecture test를 실패시킨다.
+- OAuth login/callback GET은 custom header 대신 signed one-time state를 사용하는 별도 safe-method 예외다.
+
+### Gateway CSRF Guard
+
+- Guard는 endpoint보다 먼저 Origin, Fetch Metadata, content type, double-submit equality와 HMAC/session/scope를 검증한다.
+- Header/cookie token은 constant-time equality 전에 bounded ASCII 형식인지 확인해 비ASCII 입력을 exception 없는 `token_invalid`로 닫는다.
+- 실패 body는 고정 `auth.csrf_validation_failed`만 노출한다. Bootstrap organization scope는 token 발급 전에 길이와 제어 문자를 검증하고 실패를 `organization_scope_invalid` bounded reason으로 변환한다. 계약된 bounded reason은 metric/log allowlist에서 같은 label로 보존하고 미등록 값만 `unknown`으로 축약하며, 원문은 metric/audit adapter에 전달하지 않는다.
+- Token service는 요청 cookie를 현재 binding kind, auth cookie 또는 anonymous seed, organization/account scope와 expiry로 재검증한다. 유효하면 원래 token과 expiry를 반환하고, 실패하면 endpoint가 새 token을 발급해 동일 session/scope의 여러 탭이 공유 cookie를 서로 무효화하지 않게 한다.
+- Gateway ingress와 CSRF guard는 같은 request ID helper를 사용한다. Canonical RFC 4122 UUID만 보존하고 그 밖의 header 원문은 새 UUID로 대체한다.
+- 동기 audit/metric callback은 middleware와 bootstrap endpoint가 공유하는 process-shared 전용 capacity limiter의 worker thread에서 실행한다. 요청 coroutine은 결과를 기다리되 DB commit으로 event loop와 공용 sync worker를 막지 않으며 callback exception은 고정 응답 뒤로 격리한다.
+- 인증 cookie가 없는 protected mutation은 token을 identity로 사용하지 않고 `401 auth.required`로 종료한다.
+- CORS는 guard 바깥에서 허용 origin이 오류 응답을 읽게 하고, Public Conversation CORS와 webhook query redaction의 더 바깥 경계를 유지한다.
+
+### Client CSRF Token Manager
+
+- `csrfToken.ts`는 실제 mutation origin의 `/api/v1/auth/csrf`에 `X-CSRF-Bootstrap: 1`을 보내고 응답을 runtime 검증한 뒤 token과 expiry를 module memory에만 저장한다.
+- Origin마다 현재 organization/account scope의 token 하나만 유지한다. 같은 mutation origin과 scope의 동시 요청만 하나의 bootstrap Promise와 cached token을 공유하며, scope 전환은 같은 origin의 이전 token을 대체한다. 다른 origin, reload와 tab은 token을 공유하지 않는다.
+- Axios request interceptor는 active organization header가 결정된 뒤 unsafe request에 `X-CSRF-Token`을 추가한다. Response interceptor는 고정 CSRF error가 현재 cache의 동일 origin/scope/token을 거부한 경우에만 generation을 올린다. 동일 token을 사용한 동시 `403`은 한 refresh bootstrap을 공유하며 PUT/DELETE 또는 idempotency key 요청만 최대 한 번 재시도한다.
+- `csrfFetch`는 Settings, Wizard, RAG stream과 Workflow stream처럼 Axios를 통하지 않는 protected mutation에 같은 계약을 제공한다. Workflow organization을 받은 Code/Prompt/Template Wizard는 그 authoritative ID를 body와 `X-Organization-Id`에 함께 보내 ambient active organization fallback이 token scope를 바꾸지 못하게 한다. Public Chatbot/Public run, app-secret 실행과 presigned object upload에는 적용하지 않는다.
+- Signup/login/logout 성공, OAuth navigation과 `nodease-active-organization-changed` event는 cache generation을 올리고 cached token을 폐기한다. 이전 generation의 진행 중 bootstrap은 cache를 되살리지 못하며, 같은 origin의 새 bootstrap은 이전 요청 정리 뒤 cookie를 마지막으로 갱신한다. Invalid 또는 inactive-session HttpOnly auth cookie bootstrap `401`은 cookie 삭제 반영을 위해 최대 한 번만 재시도한다.
+
+### Workflow Stream Proxy
+
+- Browser는 same-origin `/stream-api/workflows/{workflowId}`에 CSRF header를 보낸다.
+- Next route는 original Origin, `Sec-Fetch-Site`, CSRF token, organization과 bounded request context만 전달한다.
+- API host-only CSRF cookie가 Next host에 전달되지 않는 경우를 위해 strict 문자·길이 검사를 통과한 header token만 outbound `csrf_token` cookie로 복제한다. 기존 `csrf_token` cookie는 제거한 뒤 하나만 전달하며 Authorization은 전달하지 않는다.
+- Gateway가 최종 signature/session/organization 검증을 수행하므로 proxy 복제는 인증이나 권한 판단을 대체하지 않는다.
 ## Accessibility
 
 ### LoginPage
