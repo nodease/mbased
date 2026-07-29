@@ -17,7 +17,7 @@ class _MetricSpy:
         self.increment_count += 1
 
 
-def test_organization_scope_invalid_is_preserved_and_unknown_stays_bounded(
+def test_csrf_organization_scope_invalid_is_preserved_and_unknown_stays_bounded(
     monkeypatch,
     caplog,
 ):
