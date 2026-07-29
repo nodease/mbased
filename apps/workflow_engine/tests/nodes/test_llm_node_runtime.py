@@ -899,9 +899,18 @@ def test_llm_node_rag_query_includes_bounded_client_history_for_follow_up(
     )
     node._client_override = DummyClient()  # noqa: SLF001 - provider isolation
 
-    def capture_search(query, db_session, *, candidate_resolution=None):
+    def capture_search(
+        query,
+        db_session,
+        *,
+        candidate_resolution=None,
+        candidate_resolution_latency_ms=None,
+    ):
         captured["query"] = query
         captured["candidate_resolution"] = candidate_resolution
+        captured["candidate_resolution_latency_ms"] = (
+            candidate_resolution_latency_ms
+        )
         return WorkflowRAGSearchResult(
             context="authorized evidence",
             metadata=[],
@@ -920,6 +929,7 @@ def test_llm_node_rag_query_includes_bounded_client_history_for_follow_up(
     assert "[REDACTED: possible prompt injection]" in captured["query"]
     assert len(captured["query"]) <= 1_000
     assert captured["candidate_resolution"].candidates[0].knowledge_base_id == kb_id
+    assert isinstance(captured["candidate_resolution_latency_ms"], int)
 
 
 def test_llm_node_rag_query_without_client_history_preserves_current_query():
