@@ -23,7 +23,7 @@ ORIGIN = "https://client.example"
 
 def _policy(path: str, content_kind: CsrfContentKind) -> CsrfRoutePolicy:
     return CsrfRoutePolicy(
-        method="POST" if path != "/optional" else "DELETE",
+        method="POST",
         path_template=path,
         path_pattern=re.compile(f"^{re.escape(path)}$"),
         policy_kind=CsrfRoutePolicyKind.COOKIE_AUTHENTICATED,
@@ -47,7 +47,7 @@ def _app_and_headers():
         effects["multipart"] += 1
         return {"ok": True}
 
-    @app.delete("/optional")
+    @app.post("/optional")
     async def optional_endpoint():
         effects["optional"] += 1
         return {"ok": True}
@@ -97,7 +97,15 @@ def test_json_utf8_multipart_and_empty_body_contracts_are_accepted():
             headers=headers,
             files={"file": ("document.txt", b"content", "text/plain")},
         )
-        optional_response = client.delete("/optional", headers=headers)
+        optional_response = client.post(
+            "/optional",
+            headers={
+                **headers,
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Content-Length": "0",
+            },
+            content=b"",
+        )
 
     assert json_response.status_code == 200
     assert multipart_response.status_code == 200
@@ -127,7 +135,16 @@ def test_unexpected_json_parameters_and_malformed_multipart_fail_before_effects(
             },
             content=b"sentinel",
         )
+        nonempty_optional_response = client.post(
+            "/optional",
+            headers={
+                **headers,
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            content=b"sentinel",
+        )
 
     assert json_response.status_code == 403
     assert multipart_response.status_code == 403
+    assert nonempty_optional_response.status_code == 403
     assert effects == {"json": 0, "multipart": 0, "optional": 0}

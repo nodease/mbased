@@ -237,11 +237,11 @@ Status: Draft
 
 ### Client CSRF Token Manager
 
-- `csrfToken.ts`는 `/auth/csrf` 응답을 runtime 검증하고 token, expiry와 organization/account scope를 module memory에만 저장한다.
-- 같은 scope의 동시 요청은 하나의 bootstrap Promise를 공유한다. Reload와 tab은 token을 공유하지 않는다.
+- `csrfToken.ts`는 실제 mutation origin의 `/api/v1/auth/csrf`에 `X-CSRF-Bootstrap: 1`을 보내고 응답을 runtime 검증한 뒤 token과 expiry를 module memory에만 저장한다.
+- Origin마다 현재 organization/account scope의 token 하나만 유지한다. 같은 mutation origin과 scope의 동시 요청만 하나의 bootstrap Promise와 cached token을 공유하며, scope 전환은 같은 origin의 이전 token을 대체한다. 다른 origin, reload와 tab은 token을 공유하지 않는다.
 - Axios request interceptor는 active organization header가 결정된 뒤 unsafe request에 `X-CSRF-Token`을 추가한다. Response interceptor는 고정 CSRF error에서 cache를 지우며 PUT/DELETE 또는 idempotency key 요청만 최대 한 번 재시도한다.
 - `csrfFetch`는 Settings, Wizard, RAG stream과 Workflow stream처럼 Axios를 통하지 않는 protected mutation에 같은 계약을 제공한다. Public Chatbot/Public run, app-secret 실행과 presigned object upload에는 적용하지 않는다.
-- Signup/login/logout 성공, OAuth navigation과 `nodease-active-organization-changed` event는 cached token을 폐기한다. Invalid HttpOnly auth cookie bootstrap `401`은 cookie 삭제 반영을 위해 최대 한 번만 재시도한다.
+- Signup/login/logout 성공, OAuth navigation과 `nodease-active-organization-changed` event는 cache generation을 올리고 cached token을 폐기한다. 이전 generation의 진행 중 bootstrap은 cache를 되살리지 못하며, 같은 origin의 새 bootstrap은 이전 요청 정리 뒤 cookie를 마지막으로 갱신한다. Invalid 또는 inactive-session HttpOnly auth cookie bootstrap `401`은 cookie 삭제 반영을 위해 최대 한 번만 재시도한다.
 
 ### Workflow Stream Proxy
 

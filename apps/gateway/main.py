@@ -183,6 +183,7 @@ origins = parse_credentialed_cors_origins(
     origins_str,
     node_env=os.getenv("NODE_ENV"),
 )
+app.state.credentialed_cors_origins = tuple(origins)
 
 # 정적 파일 서빙 (widget.js) - 옵션
 STATIC_DIR = BASE_DIR / "static"

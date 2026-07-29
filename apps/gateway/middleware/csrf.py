@@ -122,13 +122,23 @@ class CsrfProtectionMiddleware(BaseHTTPMiddleware):
             return True
 
         raw_content_type = request.headers.get("content-type")
+        content_length = request.headers.get("content-length")
+        has_transfer_encoding = (
+            request.headers.get("transfer-encoding") is not None
+        )
+        if (
+            content_kind is CsrfContentKind.BODY_OPTIONAL
+            and raw_content_type
+            and content_length == "0"
+            and not has_transfer_encoding
+        ):
+            return True
         if not raw_content_type:
             if content_kind is not CsrfContentKind.BODY_OPTIONAL:
                 return False
-            content_length = request.headers.get("content-length")
             return (
                 content_length in {None, "", "0"}
-                and request.headers.get("transfer-encoding") is None
+                and not has_transfer_encoding
             )
 
         media_type, *raw_parameters = raw_content_type.split(";")

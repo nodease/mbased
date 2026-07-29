@@ -13,9 +13,17 @@ from apps.shared.db.session import get_db
 
 def _client() -> TestClient:
     app = FastAPI()
+    app.state.credentialed_cors_origins = ("https://client.example",)
     app.include_router(auth_endpoint.router, prefix="/auth")
     app.dependency_overrides[get_db] = lambda: object()
     return TestClient(app, base_url="http://localhost")
+
+
+def _bootstrap_headers() -> dict[str, str]:
+    return {
+        "X-CSRF-Bootstrap": "1",
+        "Sec-Fetch-Site": "same-origin",
+    }
 
 
 def test_anonymous_csrf_bootstrap_sets_host_only_http_only_cookies(monkeypatch):
@@ -26,7 +34,14 @@ def test_anonymous_csrf_bootstrap_sets_host_only_http_only_cookies(monkeypatch):
     )
 
     with _client() as client:
-        response = client.get("/auth/csrf")
+        response = client.get(
+            "/auth/csrf",
+            headers={
+                **_bootstrap_headers(),
+                "Origin": "https://client.example",
+                "Sec-Fetch-Site": "same-site",
+            },
+        )
 
     assert response.status_code == 200
     payload = response.json()
@@ -66,7 +81,10 @@ def test_authenticated_csrf_bootstrap_validates_cookie_and_clears_anon_seed(
         client.cookies.set(CSRF_ANON_COOKIE_NAME, "stale-anonymous-seed")
         response = client.get(
             "/auth/csrf",
-            headers={"X-Organization-Id": "organization-a"},
+            headers={
+                **_bootstrap_headers(),
+                "X-Organization-Id": "organization-a",
+            },
         )
 
     assert response.status_code == 200
@@ -85,7 +103,7 @@ def test_invalid_auth_cookie_cannot_fall_back_to_anonymous_bootstrap(monkeypatch
 
     with _client() as client:
         client.cookies.set("auth_token", "invalid-auth-token")
-        response = client.get("/auth/csrf")
+        response = client.get("/auth/csrf", headers=_bootstrap_headers())
 
     assert response.status_code == 401
     assert response.json()["error"]["code"] == "auth.invalid"
@@ -93,6 +111,60 @@ def test_invalid_auth_cookie_cannot_fall_back_to_anonymous_bootstrap(monkeypatch
     assert any(cookie.startswith("auth_token=") for cookie in cookies)
     assert any(cookie.startswith(f"{CSRF_COOKIE_NAME}=") for cookie in cookies)
     assert any(cookie.startswith(f"{CSRF_ANON_COOKIE_NAME}=") for cookie in cookies)
+
+
+def test_inactive_auth_cookie_is_cleared_before_anonymous_recovery(monkeypatch):
+    def reject_inactive_cookie(_db, _token):
+        raise HTTPException(status_code=403, detail="inactive")
+
+    monkeypatch.setattr(AuthService, "get_user_from_token", reject_inactive_cookie)
+
+    with _client() as client:
+        client.cookies.set("auth_token", "inactive-auth-token")
+        response = client.get("/auth/csrf", headers=_bootstrap_headers())
+
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "auth.invalid"
+    cookies = response.headers.get_list("set-cookie")
+    assert any(
+        cookie.startswith("auth_token=") and "Max-Age=0" in cookie
+        for cookie in cookies
+    )
+    assert any(
+        cookie.startswith(f"{CSRF_COOKIE_NAME}=") and "Max-Age=0" in cookie
+        for cookie in cookies
+    )
+    assert any(
+        cookie.startswith(f"{CSRF_ANON_COOKIE_NAME}=") and "Max-Age=0" in cookie
+        for cookie in cookies
+    )
+
+
+def test_untrusted_bootstrap_requests_cannot_rotate_csrf_cookies(monkeypatch):
+    monkeypatch.setattr(
+        auth_endpoint,
+        "csrf_token_service",
+        lambda: CsrfTokenService.from_root_secret("csrf-endpoint-test-secret"),
+    )
+
+    with _client() as client:
+        missing_proof = client.get(
+            "/auth/csrf",
+            headers={"Sec-Fetch-Site": "cross-site"},
+        )
+        untrusted_origin = client.get(
+            "/auth/csrf",
+            headers={
+                "X-CSRF-Bootstrap": "1",
+                "Origin": "https://attacker.example",
+                "Sec-Fetch-Site": "same-site",
+            },
+        )
+
+    for response in (missing_proof, untrusted_origin):
+        assert response.status_code == 403
+        assert response.json()["error"]["code"] == "auth.csrf_validation_failed"
+        assert response.headers.get_list("set-cookie") == []
 
 
 def test_logout_clears_auth_and_csrf_cookie_families():

@@ -15,7 +15,7 @@ try:
     CSRF_DENIALS = (
         PrometheusCounter(
             "auth_csrf_denials_total",
-            "Rejected cookie-authenticated browser mutations.",
+            "Rejected cookie-authenticated browser requests.",
             ["reason", "policy", "method"],
         )
         if PrometheusCounter
@@ -38,7 +38,7 @@ class CsrfObservability:
         }
     )
     _POLICIES = frozenset({"cookie_authenticated", "pre_auth_session"})
-    _METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
+    _METHODS = frozenset({"GET", "POST", "PUT", "PATCH", "DELETE"})
     _local_counters: ClassVar[Counter[tuple[str, str, str]]] = Counter()
 
     @classmethod

@@ -17,6 +17,9 @@ from apps.gateway.application.authentication.errors import (
     PasswordLoginInternalError,
 )
 from apps.gateway.application.authentication.models import PasswordLoginCommand
+from apps.gateway.application.csrf.bootstrap import (
+    validate_csrf_bootstrap_request,
+)
 from apps.gateway.application.csrf.token import (
     CSRF_ANON_COOKIE_NAME,
     CSRF_COOKIE_NAME,
@@ -28,7 +31,10 @@ from apps.gateway.composition.authentication import (
     build_password_login,
     login_network_resolver,
 )
-from apps.gateway.composition.csrf import csrf_token_service
+from apps.gateway.composition.csrf import (
+    csrf_token_service,
+    record_csrf_bootstrap_denial,
+)
 from apps.gateway.services.auth_return_service import AuthReturnService
 from apps.gateway.services.auth_service import AuthService
 from apps.gateway.utils.api_errors import error_response
@@ -203,6 +209,35 @@ def bootstrap_csrf_token(
     response: Response,
     db: Session = Depends(get_db),
 ):
+    bootstrap_denial = validate_csrf_bootstrap_request(
+        request.headers,
+        allowed_origins=getattr(
+            request.app.state,
+            "credentialed_cors_origins",
+            (),
+        ),
+    )
+    if bootstrap_denial is not None:
+        try:
+            record_csrf_bootstrap_denial(
+                bootstrap_denial,
+                request_id=getattr(request.state, "request_id", None),
+            )
+        except Exception as exc:
+            logger.error(
+                "CSRF bootstrap denial telemetry failed: error_type=%s",
+                type(exc).__name__,
+            )
+        denied_response = error_response(
+            request,
+            403,
+            "auth.csrf_validation_failed",
+            "CSRF validation failed.",
+        )
+        denied_response.headers["Cache-Control"] = "no-store"
+        denied_response.headers["Pragma"] = "no-cache"
+        return denied_response
+
     auth_cookie = request.cookies.get("auth_token")
     anonymous_seed: str | None = None
     if auth_cookie:
@@ -210,7 +245,7 @@ def bootstrap_csrf_token(
         try:
             AuthService.get_user_from_token(db, auth_cookie)
         except HTTPException as exc:
-            if exc.status_code != 401:
+            if exc.status_code not in {401, 403}:
                 raise
             record_audit(
                 action=AuditAction.AUTH_PERMISSION_DENIED,

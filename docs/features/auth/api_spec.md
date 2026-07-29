@@ -22,11 +22,13 @@ Status: Draft
 
 요청 본문: 없음.
 
-선택 입력:
+필수 browser context와 선택 binding 입력:
 
 | 입력 | 의미 |
 | --- | --- |
-| `auth_token` cookie | 존재하면 유효한 사용자 session인지 검증하고 token을 그 cookie에 결박한다. Invalid cookie는 `401 auth.invalid`과 삭제 Set-Cookie를 반환하며 anonymous로 같은 응답에서 전환하지 않는다. |
+| `X-CSRF-Bootstrap: 1` | Browser script가 의도적으로 token을 요청했음을 증명한다. 단순 image/navigation GET에는 이 header가 없어 발급 전에 거부된다. |
+| `Origin` / `Sec-Fetch-Site` | 교차 출처 요청은 `CORS_ORIGINS` exact Origin을 요구한다. Origin이 생략된 same-origin GET은 `Sec-Fetch-Site: same-origin`이어야 한다. 존재하는 Fetch Metadata의 `cross-site` 값은 거부한다. |
+| `auth_token` cookie | 존재하면 유효한 활성 사용자 session인지 검증하고 token을 그 cookie에 결박한다. Invalid 또는 inactive session은 `401 auth.invalid`과 삭제 Set-Cookie를 반환하며 anonymous로 같은 응답에서 전환하지 않는다. |
 | `X-Organization-Id` | 존재하면 token MAC의 active organization scope에 포함한다. 없으면 account scope를 사용한다. |
 | `csrf_anon_seed` cookie | auth cookie가 없을 때 유효한 random seed를 재사용하며, 없거나 malformed이면 새 seed를 발급한다. |
 
@@ -39,7 +41,7 @@ Status: Draft
 }
 ```
 
-응답은 같은 token을 host-only HttpOnly `csrf_token` cookie로 설정한다. Anonymous bootstrap은 host-only HttpOnly `csrf_anon_seed`도 설정한다. `Cache-Control: no-store`, `Pragma: no-cache`가 필수다. Token은 `v1.expiry.nonce.mac` 형식이며 auth cookie, user와 organization 원문을 포함하지 않는다.
+응답은 같은 token을 host-only HttpOnly `csrf_token` cookie로 설정한다. Anonymous bootstrap은 host-only HttpOnly `csrf_anon_seed`도 설정한다. `Cache-Control: no-store`, `Pragma: no-cache`가 필수다. Token은 `v1.expiry.nonce.mac` 형식이며 auth cookie, user와 organization 원문을 포함하지 않는다. Header/Origin/Fetch Metadata 검증 실패는 cookie를 설정하거나 회전시키지 않고 `403 auth.csrf_validation_failed`를 반환한다.
 ### `POST /auth/signup`
 
 요청 본문:
@@ -149,7 +151,7 @@ OAuth 입력: Google OAuth 콜백 요청과 세션 상태.
 | `X-CSRF-Token` | `/auth/csrf` body에서 받은 token |
 | `csrf_token` cookie | Header token과 같은 host-only HttpOnly cookie |
 | `X-Organization-Id` | Organization-scoped token을 발급받은 요청은 같은 값 |
-| `Content-Type` | 기본 `application/json`(선택적 `charset=utf-8`), inventory에 등록된 multipart 또는 bodyless route만 예외 |
+| `Content-Type` | 기본 `application/json`(선택적 `charset=utf-8`), inventory에 등록된 multipart 또는 bodyless route만 예외. `BODY_OPTIONAL`은 transfer encoding 없이 `Content-Length: 0`인 경우 Axios의 빈 POST media type도 허용 |
 
 현재 명시 예외는 Public Chatbot/Public run의 `public_anonymous`, app secret run/webhook의 `server_credential`, signed one-time state를 사용하는 OAuth GET route다. Login cookie가 예외 route에 포함돼도 cookie user principal이나 private permission으로 승격하지 않는다.
 
@@ -215,7 +217,7 @@ CSRF cookie 계약:
 | `csrf_token` | `/api/v1` | 600초 | HttpOnly | 미설정(host-only) | loopback: SameSite=Lax, non-local: Secure/SameSite=None |
 | `csrf_anon_seed` | `/api/v1` | 600초 | HttpOnly | 미설정(host-only) | loopback: SameSite=Lax, non-local: Secure/SameSite=None |
 
-Signup, login, OAuth 성공과 logout은 두 CSRF cookie를 삭제한다. Invalid auth cookie가 있는 bootstrap은 auth/CSRF cookie를 삭제하고 `401`을 반환한다. Client는 삭제 반영 뒤 anonymous bootstrap을 최대 한 번 재시도한다.
+Signup, login, OAuth 성공과 logout은 두 CSRF cookie를 삭제한다. Invalid 또는 inactive auth cookie가 있는 bootstrap은 auth/CSRF cookie를 삭제하고 `401`을 반환한다. Client는 삭제 반영 뒤 anonymous bootstrap을 최대 한 번 재시도한다.
 회원가입, 로그인, Google 콜백은 `auth_token`을 `max_age` 6시간의 HTTP-only 쿠키로 설정한다.
 
 이메일/비밀번호 signup 및 login의 경우:
@@ -260,8 +262,8 @@ HTTP 예외는 다음 형식으로 반환된다.
 
 | 상태 | 엔드포인트 | 상세 / 본문 | 조건 |
 | --- | --- | --- | --- |
-| 401 | `GET /auth/csrf` | `auth.invalid` envelope과 auth/CSRF cookie 삭제 | 존재하는 `auth_token`이 유효하지 않다. Anonymous fallback은 같은 응답에서 수행하지 않는다. |
-| 403 | 모든 cookie/pre-auth unsafe route | `auth.csrf_validation_failed` 고정 envelope | Origin, Fetch Metadata, content type, token equality/signature/binding/scope/expiry 중 하나가 실패한다. |
+| 401 | `GET /auth/csrf` | `auth.invalid` envelope과 auth/CSRF cookie 삭제 | 존재하는 `auth_token`이 유효하지 않거나 비활성 계정에 결박됐다. Anonymous fallback은 같은 응답에서 수행하지 않는다. |
+| 403 | `GET /auth/csrf`와 모든 cookie/pre-auth unsafe route | `auth.csrf_validation_failed` 고정 envelope | Bootstrap proof, Origin, Fetch Metadata, content type, token equality/signature/binding/scope/expiry 중 하나가 실패한다. Bootstrap 실패는 cookie를 설정하지 않는다. |
 | GET | `/auth/csrf` | Cookie-authenticated/pre-auth mutation용 10분 signed CSRF token과 host-only HttpOnly cookie를 발급한다. | Safe bootstrap; resource permission 없음 |
 | 400 | `POST /auth/signup` | `이미 등록된 이메일입니다` | 이메일이 이미 존재한다. |
 | 400 | `GET /auth/google/callback` | `OAuth authentication failed` | token 교환, token/user info 타입, user info 조회 또는 email 검증에 실패한다. Provider exception 원문은 반환하지 않는다. |

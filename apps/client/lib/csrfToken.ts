@@ -10,6 +10,7 @@ import { ACTIVE_ORGANIZATION_CHANGED_EVENT } from './activeOrganizationEvent';
 import { resolvePublicApiBaseUrl } from './publicApiOrigin';
 
 const CSRF_HEADER_NAME = 'X-CSRF-Token';
+const CSRF_BOOTSTRAP_HEADER_NAME = 'X-CSRF-Bootstrap';
 const ORGANIZATION_HEADER_NAME = 'X-Organization-Id';
 const CSRF_FAILURE_CODE = 'auth.csrf_validation_failed';
 const EXPIRY_SKEW_MS = 30_000;
@@ -28,15 +29,72 @@ type CachedToken = {
   scope: string;
 };
 
+type BootstrapTarget = {
+  cacheKey: string;
+  url: string;
+};
+
 type RetryableRequestConfig = InternalAxiosRequestConfig & {
   _csrfRetried?: boolean;
 };
 
-let cachedToken: CachedToken | null = null;
-const inFlightByScope = new Map<string, Promise<string>>();
+type InFlightBootstrap = {
+  generation: number;
+  scope: string;
+  promise: Promise<string>;
+};
+
+const cachedTokenByOrigin = new Map<string, CachedToken>();
+const inFlightByOrigin = new Map<string, InFlightBootstrap>();
+let cacheGeneration = 0;
 
 const normalizeScope = (organizationId?: string | null) =>
   organizationId?.trim() || '';
+
+const sameOriginBootstrapTarget = (): BootstrapTarget => ({
+  cacheKey:
+    typeof window !== 'undefined' ? window.location.origin : 'same-origin',
+  url: '/api/v1/auth/csrf',
+});
+
+const absoluteBootstrapTarget = (value: string): BootstrapTarget | null => {
+  try {
+    const parsed = new URL(value);
+    if (!['http:', 'https:'].includes(parsed.protocol)) return null;
+    return {
+      cacheKey: parsed.origin,
+      url: `${parsed.origin}/api/v1/auth/csrf`,
+    };
+  } catch {
+    return null;
+  }
+};
+
+const requestTargetValue = (target: RequestInfo | URL): string =>
+  typeof target === 'string'
+    ? target
+    : target instanceof URL
+      ? target.toString()
+      : target.url;
+
+const resolveBootstrapTarget = (
+  requestTarget?: RequestInfo | URL,
+): BootstrapTarget => {
+  if (requestTarget !== undefined) {
+    return (
+      absoluteBootstrapTarget(requestTargetValue(requestTarget)) ??
+      sameOriginBootstrapTarget()
+    );
+  }
+  return absoluteBootstrapTarget(apiBaseUrl) ?? sameOriginBootstrapTarget();
+};
+
+const axiosRequestTarget = (
+  config: InternalAxiosRequestConfig,
+): string | undefined => {
+  if (config.url && absoluteBootstrapTarget(config.url)) return config.url;
+  return config.baseURL ?? config.url;
+};
 
 const isUnsafeMethod = (method?: string) =>
   UNSAFE_METHODS.has((method || 'GET').toUpperCase());
@@ -98,29 +156,48 @@ const parseBootstrapResponse = async (
 };
 
 export const invalidateCsrfToken = () => {
-  cachedToken = null;
-  inFlightByScope.clear();
+  cacheGeneration += 1;
+  cachedTokenByOrigin.clear();
 };
 
 export const getCsrfToken = async (
   organizationId?: string | null,
+  requestTarget?: RequestInfo | URL,
 ): Promise<string> => {
   const scope = normalizeScope(organizationId);
+  const target = resolveBootstrapTarget(requestTarget);
+  const generation = cacheGeneration;
+  const cachedToken = cachedTokenByOrigin.get(target.cacheKey);
   if (
-    cachedToken?.scope === scope &&
+    cachedToken &&
+    cachedToken.scope === scope &&
     cachedToken.expiresAtMs > Date.now() + EXPIRY_SKEW_MS
   ) {
     return cachedToken.token;
   }
 
-  const existing = inFlightByScope.get(scope);
-  if (existing) return existing;
+  const existing = inFlightByOrigin.get(target.cacheKey);
+  if (
+    existing &&
+    existing.generation === generation &&
+    existing.scope === scope
+  ) {
+    return existing.promise;
+  }
 
-  const bootstrap = (async () => {
-    const headers = new Headers({ Accept: 'application/json' });
+  const predecessor = existing?.promise.catch(() => undefined);
+  const bootstrapWork = async () => {
+    if (predecessor) await predecessor;
+    if (generation !== cacheGeneration) {
+      throw new Error('CSRF token bootstrap was invalidated');
+    }
+    const headers = new Headers({
+      Accept: 'application/json',
+      [CSRF_BOOTSTRAP_HEADER_NAME]: '1',
+    });
     if (scope) headers.set(ORGANIZATION_HEADER_NAME, scope);
     const requestToken = () =>
-      fetch(`${apiBaseUrl}/auth/csrf`, {
+      fetch(target.url, {
         method: 'GET',
         headers,
         credentials: 'include',
@@ -131,13 +208,23 @@ export const getCsrfToken = async (
     // Retry once so the browser can establish an anonymous pre-auth binding.
     if (response.status === 401) response = await requestToken();
     const parsed = await parseBootstrapResponse(response, scope);
-    cachedToken = parsed;
+    if (generation !== cacheGeneration) {
+      throw new Error('CSRF token bootstrap was invalidated');
+    }
+    cachedTokenByOrigin.set(target.cacheKey, parsed);
     return parsed.token;
-  })().finally(() => {
-    inFlightByScope.delete(scope);
-  });
+  };
 
-  inFlightByScope.set(scope, bootstrap);
+  const bootstrap = bootstrapWork().finally(() => {
+    if (inFlightByOrigin.get(target.cacheKey)?.promise === bootstrap) {
+      inFlightByOrigin.delete(target.cacheKey);
+    }
+  });
+  inFlightByOrigin.set(target.cacheKey, {
+    generation,
+    scope,
+    promise: bootstrap,
+  });
   return bootstrap;
 };
 
@@ -148,6 +235,7 @@ export const attachCsrfProtection = (client: AxiosInstance) => {
     const organizationId = headers.get(ORGANIZATION_HEADER_NAME);
     const token = await getCsrfToken(
       typeof organizationId === 'string' ? organizationId : null,
+      axiosRequestTarget(config),
     );
     headers.set(CSRF_HEADER_NAME, token);
     config.headers = headers;
@@ -200,7 +288,7 @@ export const csrfFetch = async (
     if (organizationId && !headers.has(ORGANIZATION_HEADER_NAME)) {
       headers.set(ORGANIZATION_HEADER_NAME, organizationId);
     }
-    headers.set(CSRF_HEADER_NAME, await getCsrfToken(organizationId));
+    headers.set(CSRF_HEADER_NAME, await getCsrfToken(organizationId, input));
     return fetch(input, {
       ...init,
       method,

@@ -272,6 +272,30 @@ def record_csrf_auth_required(
     )
 
 
+def record_csrf_bootstrap_denial(
+    reason: CsrfValidationReason,
+    *,
+    request_id: str | None,
+) -> None:
+    CsrfObservability.record(
+        reason=reason.value,
+        policy=CsrfRoutePolicyKind.PRE_AUTH_SESSION.value,
+        method="GET",
+    )
+    record_audit(
+        action=AuditAction.AUTH_PERMISSION_DENIED,
+        category="action",
+        actor_type="system",
+        status="failure",
+        metadata={
+            "reason": f"auth.csrf.{reason.value}",
+            "policy": CsrfRoutePolicyKind.PRE_AUTH_SESSION.value,
+            "method": "GET",
+            "request_id": request_id,
+        },
+    )
+
+
 def record_csrf_denial(
     reason: CsrfValidationReason,
     policy: CsrfRoutePolicy,
