@@ -15,3 +15,15 @@ Audit cursor 항목은 운영 목록과 동일하게 `audit_metadata ->> 'organi
 Trace 항목은 실제 visibility policy join 전체가 아니라 `5,000건 fetch 후 필터`와 `SQL에서 visible 20건 제한`의 조회량 차이를 단순화해 측정한다. 실제 `/api/v1/traces` 응답 시간으로 해석하지 않는다.
 
 측정 결과는 `reports/`에 데이터 규모와 실행 날짜별 JSON으로 보관한다. 같은 날짜에 데이터 규모가 다르면 파일명에 `100k`처럼 행 수를 표시한다.
+
+## RAG Retrieval Fan-out
+
+사전 계산 query embedding을 사용하는 KB 1/2/4/10/20개 검색의 순차 기준과 bounded native-thread fan-out을 합성 blocking I/O로 비교한다. Provider, PostgreSQL과 실제 query/vector는 사용하지 않으며 절대 latency는 merge gate가 아니다. Overlap, 최대 active worker 5개, candidate당 검색 1회와 query embedding provider model당 1회 계약을 확인하기 위한 보조 측정이다.
+
+```bash
+PYTHONPATH=$(git rev-parse --show-toplevel) apps/workflow_engine/.venv/bin/python \
+  tests/performance/benchmark_rag_retrieval_fanout.py \
+  --candidates 1,2,4,10,20 --delay-ms 20 --iterations 20
+```
+
+출력에는 p50/p95, 최대 active worker와 호출 수만 포함한다. Raw query, vector, resource identifier와 provider/DB 오류는 기록하지 않는다.

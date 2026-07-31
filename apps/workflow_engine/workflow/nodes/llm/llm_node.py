@@ -5,7 +5,7 @@ import re
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from jinja2 import Environment
 from sqlalchemy.exc import SQLAlchemyError
@@ -99,6 +99,12 @@ from apps.workflow_engine.application.query_embedding_execution import (
     QueryEmbeddingPlan,
     QueryEmbeddingPreflight,
 )
+from apps.workflow_engine.application.rag_retrieval_fanout import (
+    DEFAULT_RAG_FANOUT_MAX_WORKERS,
+    RAGRetrievalCancellation,
+    RAGRetrievalFanoutScheduler,
+    RAGRetrievalFanoutTask,
+)
 from apps.workflow_engine.application.runtime_retrieval.knowledge_candidates import (
     KnowledgeRuntimeCandidateInfrastructureError,
     KnowledgeRuntimeCandidateResolver,
@@ -117,7 +123,6 @@ from apps.workflow_engine.services.model_routing_judge_first_policy import (
     build_judge_first_active_policy,
     select_runtime_judge_model_id,
 )
-from apps.workflow_engine.services.retrieval import RetrievalService
 from apps.workflow_engine.workflow.errors import (
     NonRetryableWorkflowError,
     ProviderOutcomeUnknownWorkflowError,
@@ -130,14 +135,30 @@ from .entities import (
     LLMNodeData,
 )
 
+if TYPE_CHECKING:
+    from apps.workflow_engine.adapters.rag_retrieval_session import (
+        RAGRetrievalSessionRunner,
+    )
+    from apps.workflow_engine.services.retrieval import RetrievalService
+
 logger = logging.getLogger(__name__)
 
 _jinja_env = Environment(autoescape=False)
 MEMORY_RUN_LIMIT = 5  # 최근 실행 몇 건을 기억 컨텍스트에 반영할지 결정
 MAX_RAG_TRACE_RETRIEVED_CHUNKS = 20
-MAX_RAG_FANOUT_CONCURRENCY = 5
+MAX_RAG_FANOUT_CONCURRENCY = DEFAULT_RAG_FANOUT_MAX_WORKERS
 RAG_FANOUT_AGGREGATE_TIMEOUT_SECONDS = 30.0
 RAG_FANOUT_PER_KB_TIMEOUT_SECONDS = 10.0
+MAX_RAG_STAGE_LATENCY_MS = 300_000
+RAG_TRACE_STAGE_LATENCY_FIELDS = frozenset(
+    {
+        "candidate_resolution_latency_ms",
+        "query_embedding_latency_ms",
+        "retrieval_fanout_latency_ms",
+        "slowest_search_latency_ms",
+        "evidence_policy_latency_ms",
+    }
+)
 MAX_RAG_REWRITTEN_QUERY_LENGTH = 1000
 QUERY_REWRITE_PLACEHOLDER_RE = re.compile(r"\{\{\s*query\s*\}\}|\{query\}")
 PROVIDER_HTTP_STATUS_RE = re.compile(r"\bstatus\s*[=:]?\s*(\d{3})\b", re.IGNORECASE)
@@ -232,6 +253,7 @@ class WorkflowRAGFanoutResult:
     results: List[tuple[str, List[ChunkPreview]]]
     failed_count: int
     timeout_count: int = 0
+    slowest_search_latency_ms: int | None = None
 
 
 @dataclass(frozen=True)
@@ -1346,13 +1368,18 @@ class LLMNode(Node[LLMNodeData]):
                 temp_session = db_session
 
         candidate_resolution: KnowledgeRuntimeCandidateResolution | None = None
+        candidate_resolution_latency_ms: int | None = None
         if knowledge_enabled:
+            candidate_resolution_started_at = time.perf_counter()
             try:
                 candidate_resolution = self._resolve_runtime_knowledge_candidates()
             except Exception:
                 if temp_session is not None:
                     temp_session.close()
                 raise
+            candidate_resolution_latency_ms = self._elapsed_stage_latency_ms(
+                candidate_resolution_started_at
+            )
             if not candidate_resolution.candidates:
                 knowledge_result = self._knowledge_candidate_safe_no_result(
                     candidate_resolution
@@ -1445,6 +1472,9 @@ class LLMNode(Node[LLMNodeData]):
                             query=rag_search_query,
                             db_session=db_session,
                             candidate_resolution=candidate_resolution,
+                            candidate_resolution_latency_ms=(
+                                candidate_resolution_latency_ms
+                            ),
                         )
                         knowledge_context = knowledge_result.context
                         knowledge_metadata = knowledge_result.metadata
@@ -2603,6 +2633,7 @@ class LLMNode(Node[LLMNodeData]):
         *,
         candidate_resolution: KnowledgeRuntimeCandidateResolution | None = None,
         query_embedding_plan: QueryEmbeddingPlan | None = None,
+        candidate_resolution_latency_ms: int | None = None,
     ) -> WorkflowRAGSearchResult:
         """
         연결된 지식 베이스에서 문서를 검색합니다.
@@ -2624,11 +2655,14 @@ class LLMNode(Node[LLMNodeData]):
                 "RAG retrieval requires an active organization context."
             ) from exc
 
-        resolution = (
-            candidate_resolution
-            if candidate_resolution is not None
-            else self._resolve_runtime_knowledge_candidates()
-        )
+        if candidate_resolution is None:
+            candidate_resolution_started_at = time.perf_counter()
+            resolution = self._resolve_runtime_knowledge_candidates()
+            candidate_resolution_latency_ms = self._elapsed_stage_latency_ms(
+                candidate_resolution_started_at
+            )
+        else:
+            resolution = candidate_resolution
         candidate_summary = self._knowledge_candidate_trace_summary(resolution)
         candidate_kind_by_kb_id = {
             str(candidate.knowledge_base_id): candidate.provenance.kind
@@ -2638,6 +2672,7 @@ class LLMNode(Node[LLMNodeData]):
         kb_ids = list(candidate_kind_by_kb_id)
         if not kb_ids:
             return self._knowledge_candidate_safe_no_result(resolution)
+        query_embedding_started_at = time.perf_counter()
         if query_embedding_plan is None:
             query_embedding_plan = self._preflight_query_embedding(
                 organization_id=organization_uuid,
@@ -2674,13 +2709,16 @@ class LLMNode(Node[LLMNodeData]):
             organization_id=organization_uuid,
             knowledge_base_ids=kb_ids,
         )
+        query_embedding_latency_ms = self._elapsed_stage_latency_ms(
+            query_embedding_started_at
+        )
         fanout_kb_ids = kb_ids
         if precomputed_vectors:
             fanout_kb_ids = [kb_id for kb_id in kb_ids if kb_id in query_vectors_by_kb]
 
+        fanout_started_at = time.perf_counter()
         fanout = self._run_rag_retrieval_fanout(
             query=search_query,
-            fallback_db_session=db_session,
             user_id=retrieval_user_id,
             organization_id=organization_uuid,
             knowledge_base_ids=fanout_kb_ids,
@@ -2691,11 +2729,15 @@ class LLMNode(Node[LLMNodeData]):
                 model_bindings_by_kb if precomputed_vectors else None
             ),
         )
+        retrieval_fanout_latency_ms = self._elapsed_stage_latency_ms(
+            fanout_started_at
+        )
         if embedding_failed_count:
             fanout = WorkflowRAGFanoutResult(
                 results=fanout.results,
                 failed_count=fanout.failed_count + embedding_failed_count,
                 timeout_count=fanout.timeout_count,
+                slowest_search_latency_ms=fanout.slowest_search_latency_ms,
             )
 
         for kb_id, chunks in fanout.results:
@@ -2703,6 +2745,7 @@ class LLMNode(Node[LLMNodeData]):
             for chunk in chunks:
                 all_chunks.append((kb_id, chunk))
 
+        evidence_policy_started_at = time.perf_counter()
         source_tier_policy = getattr(self.data, "sourceTierPolicy", "tie_break")
         # source_tier는 권한을 통과한 evidence 안에서만 동점 정렬 힌트로 사용한다.
         sorted_chunks = sorted(
@@ -2742,6 +2785,10 @@ class LLMNode(Node[LLMNodeData]):
             fanout.failed_count,
             successful_candidate_count=len(kb_ids) - fanout.failed_count,
         )
+        policy_block_reason = blocked_evidence_reason_for_chunks(selected_chunks)
+        evidence_policy_latency_ms = self._elapsed_stage_latency_ms(
+            evidence_policy_started_at
+        )
         trace_summary = self._rag_runtime_trace_summary(
             authorized_kb_count=len(kb_ids),
             retrieved_chunk_count=len(top_chunks),
@@ -2753,7 +2800,15 @@ class LLMNode(Node[LLMNodeData]):
             bucket_kb_counts=bucket_kb_counts,
         )
         trace_summary.update(candidate_summary)
-        policy_block_reason = blocked_evidence_reason_for_chunks(selected_chunks)
+        trace_summary.update(
+            self._rag_stage_latency_summary(
+                candidate_resolution_latency_ms=candidate_resolution_latency_ms,
+                query_embedding_latency_ms=query_embedding_latency_ms,
+                retrieval_fanout_latency_ms=retrieval_fanout_latency_ms,
+                slowest_search_latency_ms=fanout.slowest_search_latency_ms,
+                evidence_policy_latency_ms=evidence_policy_latency_ms,
+            )
+        )
         if policy_block_reason:
             # 정책상 외부 LLM에 전달할 수 없는 evidence는 근거 충분성과 무관하게 차단한다.
             self._record_rag_policy_block_audit(
@@ -2769,12 +2824,24 @@ class LLMNode(Node[LLMNodeData]):
                     results=[],
                     failed_count=fanout.failed_count,
                     timeout_count=fanout.timeout_count,
+                    slowest_search_latency_ms=fanout.slowest_search_latency_ms,
                 ),
                 query_rewrite_applied=query_rewrite_applied,
                 query_rewrite_strategy=query_rewrite_strategy,
                 bucket_kb_counts=bucket_kb_counts,
             )
             blocked_trace_summary.update(candidate_summary)
+            blocked_trace_summary.update(
+                self._rag_stage_latency_summary(
+                    candidate_resolution_latency_ms=(
+                        candidate_resolution_latency_ms
+                    ),
+                    query_embedding_latency_ms=query_embedding_latency_ms,
+                    retrieval_fanout_latency_ms=retrieval_fanout_latency_ms,
+                    slowest_search_latency_ms=fanout.slowest_search_latency_ms,
+                    evidence_policy_latency_ms=evidence_policy_latency_ms,
+                )
+            )
             blocked_trace_summary["safe_exclusion_summary"] = {
                 "policy_filtered": True,
                 "reason_code": policy_block_reason,
@@ -2901,7 +2968,6 @@ class LLMNode(Node[LLMNodeData]):
         self,
         *,
         query: str,
-        fallback_db_session,
         user_id: uuid.UUID | None,
         organization_id: uuid.UUID,
         knowledge_base_ids: List[str],
@@ -2919,131 +2985,69 @@ class LLMNode(Node[LLMNodeData]):
                 "kb_count_bucket=%s",
                 self._bucket_count(len(knowledge_base_ids)),
             )
-            return self._run_rag_retrieval_fanout_sequential(
-                query=query,
-                db_session=fallback_db_session,
-                user_id=user_id,
-                organization_id=organization_id,
-                knowledge_base_ids=knowledge_base_ids,
-                top_k=top_k,
-                threshold=threshold,
-                query_vectors_by_kb=query_vectors_by_kb,
-                model_bindings_by_kb=model_bindings_by_kb,
-            )
 
-        gevent_modules = self._rag_gevent_modules()
-        if gevent_modules is None:
-            return self._run_rag_retrieval_fanout_sequential(
-                query=query,
-                db_session=fallback_db_session,
-                user_id=user_id,
-                organization_id=organization_id,
-                knowledge_base_ids=knowledge_base_ids,
-                top_k=top_k,
-                threshold=threshold,
-                query_vectors_by_kb=query_vectors_by_kb,
-                model_bindings_by_kb=model_bindings_by_kb,
-            )
+        tasks = tuple(
+            RAGRetrievalFanoutTask(ordinal=index, resource_ref=knowledge_base_id)
+            for index, knowledge_base_id in enumerate(knowledge_base_ids)
+        )
 
-        gevent, pool_cls = gevent_modules
-        pool = pool_cls(size=min(MAX_RAG_FANOUT_CONCURRENCY, len(knowledge_base_ids)))
-        jobs = {
-            pool.spawn(
-                self._search_single_rag_kb_with_new_session,
+        def search(
+            task: RAGRetrievalFanoutTask,
+            cancellation: RAGRetrievalCancellation,
+            timeout_ms: int,
+        ) -> List[ChunkPreview]:
+            knowledge_base_id = task.resource_ref
+            return self._search_single_rag_kb_with_new_session(
                 query=query,
                 user_id=user_id,
                 organization_id=organization_id,
-                knowledge_base_id=kb_id,
+                knowledge_base_id=knowledge_base_id,
                 top_k=top_k,
                 threshold=threshold,
-                query_vector=query_vectors_by_kb.get(kb_id)
-                if query_vectors_by_kb
-                else None,
-                embedding_model_binding=model_bindings_by_kb.get(kb_id)
-                if model_bindings_by_kb
-                else None,
-            ): kb_id
-            for kb_id in knowledge_base_ids
-        }
-        gevent.joinall(
-            list(jobs),
-            timeout=RAG_FANOUT_AGGREGATE_TIMEOUT_SECONDS,
-        )
-
-        results: List[tuple[str, List[ChunkPreview]]] = []
-        failed_count = 0
-        timeout_count = 0
-        for job, kb_id in jobs.items():
-            if not job.ready():
-                timeout_count += 1
-                failed_count += 1
-                job.kill(block=False)
-                continue
-            if job.exception is not None:
-                if self.data.ragFailurePolicy == "fail_node":
-                    pool.kill(block=False)
-                    raise job.exception
-                if isinstance(job.exception, TimeoutError):
-                    timeout_count += 1
-                failed_count += 1
-                continue
-            results.append((kb_id, job.value or []))
-
-        pool.kill(block=False)
-        return WorkflowRAGFanoutResult(
-            results=results,
-            failed_count=failed_count,
-            timeout_count=timeout_count,
-        )
-
-    def _run_rag_retrieval_fanout_sequential(
-        self,
-        *,
-        query: str,
-        db_session,
-        user_id: uuid.UUID | None,
-        organization_id: uuid.UUID,
-        knowledge_base_ids: List[str],
-        top_k: int,
-        threshold: float,
-        query_vectors_by_kb: Optional[Dict[str, List[float]]] = None,
-        model_bindings_by_kb: Optional[Dict[str, EmbeddingModelBinding]] = None,
-    ) -> WorkflowRAGFanoutResult:
-        retrieval = RetrievalService(
-            db_session,
-            user_id,
-            organization_id=organization_id,
-        )
-        results: List[tuple[str, List[ChunkPreview]]] = []
-        failed_count = 0
-        timeout_count = 0
-        for kb_id in knowledge_base_ids:
-            try:
-                chunks = self._search_single_rag_kb_with_timeout(
-                    retrieval,
-                    query=query,
-                    knowledge_base_id=kb_id,
-                    top_k=top_k,
-                    threshold=threshold,
-                    query_vector=query_vectors_by_kb.get(kb_id)
+                query_vector=(
+                    query_vectors_by_kb.get(knowledge_base_id)
                     if query_vectors_by_kb
-                    else None,
-                    embedding_model_binding=model_bindings_by_kb.get(kb_id)
+                    else None
+                ),
+                embedding_model_binding=(
+                    model_bindings_by_kb.get(knowledge_base_id)
                     if model_bindings_by_kb
-                    else None,
-                )
-            except Exception as exc:
-                if self.data.ragFailurePolicy == "fail_node":
-                    raise
-                if isinstance(exc, TimeoutError):
-                    timeout_count += 1
-                failed_count += 1
-                continue
-            results.append((kb_id, chunks))
+                    else None
+                ),
+                cancellation=cancellation,
+                timeout_ms=timeout_ms,
+            )
+
+        scheduled = self._get_rag_retrieval_fanout_scheduler().execute(
+            tasks=tasks,
+            worker=search,
+            fail_fast=self.data.ragFailurePolicy == "fail_node",
+        )
         return WorkflowRAGFanoutResult(
-            results=results,
-            failed_count=failed_count,
-            timeout_count=timeout_count,
+            results=[
+                (task.resource_ref, chunks) for task, chunks in scheduled.results
+            ],
+            failed_count=scheduled.failed_count,
+            timeout_count=scheduled.timeout_count,
+            slowest_search_latency_ms=scheduled.slowest_search_latency_ms,
+        )
+
+    def _get_rag_retrieval_fanout_scheduler(self) -> RAGRetrievalFanoutScheduler:
+        override = getattr(self, "_rag_retrieval_fanout_scheduler_override", None)
+        if override is not None:
+            return override
+        from apps.workflow_engine.adapters.rag_retrieval_executor import (
+            GeventNativeThreadRAGRetrievalExecutor,
+            NativeThreadRAGRetrievalCancellation,
+        )
+
+        return RAGRetrievalFanoutScheduler(
+            executor_factory=GeventNativeThreadRAGRetrievalExecutor,
+            cancellation_factory=NativeThreadRAGRetrievalCancellation,
+            max_workers=MAX_RAG_FANOUT_CONCURRENCY,
+            per_task_timeout_seconds=RAG_FANOUT_PER_KB_TIMEOUT_SECONDS,
+            aggregate_timeout_seconds=RAG_FANOUT_AGGREGATE_TIMEOUT_SECONDS,
+            cleanup_reserve_seconds=1.0,
         )
 
     def _search_single_rag_kb_with_new_session(
@@ -3057,46 +3061,17 @@ class LLMNode(Node[LLMNodeData]):
         threshold: float,
         query_vector: Optional[List[float]] = None,
         embedding_model_binding: Optional[EmbeddingModelBinding] = None,
+        cancellation: RAGRetrievalCancellation,
+        timeout_ms: int,
     ) -> List[ChunkPreview]:
-        session = SessionLocal()
-        try:
+        def search(session) -> List[ChunkPreview]:
+            from apps.workflow_engine.services.retrieval import RetrievalService
+
             retrieval = RetrievalService(
                 session,
                 user_id,
                 organization_id=organization_id,
             )
-            return self._search_single_rag_kb_with_timeout(
-                retrieval,
-                query=query,
-                knowledge_base_id=knowledge_base_id,
-                top_k=top_k,
-                threshold=threshold,
-                query_vector=query_vector,
-                embedding_model_binding=embedding_model_binding,
-            )
-        finally:
-            session.close()
-
-    def _search_single_rag_kb_with_timeout(
-        self,
-        retrieval: RetrievalService,
-        *,
-        query: str,
-        knowledge_base_id: str,
-        top_k: int,
-        threshold: float,
-        query_vector: Optional[List[float]] = None,
-        embedding_model_binding: Optional[EmbeddingModelBinding] = None,
-    ) -> List[ChunkPreview]:
-        gevent_modules = self._rag_gevent_modules()
-        if gevent_modules is None:
-            # workflow_engine은 gevent 의존성을 갖는다. guard가 없으면 RAG 호출을
-            # 무제한으로 붙잡지 않도록 operational failure로 닫는다.
-            raise TimeoutError("RAG retrieval timeout guard is unavailable.")
-        gevent, _pool_cls = gevent_modules
-        timer = gevent.Timeout(RAG_FANOUT_PER_KB_TIMEOUT_SECONDS)
-        timer.start()
-        try:
             return self._search_single_rag_kb(
                 retrieval,
                 query=query,
@@ -3106,16 +3081,32 @@ class LLMNode(Node[LLMNodeData]):
                 query_vector=query_vector,
                 embedding_model_binding=embedding_model_binding,
             )
-        except gevent.Timeout as exc:
-            if exc is timer:
-                raise TimeoutError("RAG retrieval timed out.") from None
-            raise
-        finally:
-            timer.cancel()
+
+        return self._get_rag_retrieval_session_runner().run(
+            timeout_ms=timeout_ms,
+            cancellation=cancellation,
+            operation=search,
+        )
+
+    def _get_rag_retrieval_session_runner(self) -> "RAGRetrievalSessionRunner":
+        override = getattr(self, "_rag_retrieval_session_runner_override", None)
+        if override is not None:
+            return override
+        from apps.workflow_engine.adapters.rag_retrieval_session import (
+            RAGRetrievalSessionError,
+            RAGRetrievalSessionRunner,
+        )
+
+        session_factory = self.execution_context.get("db_session_factory")
+        if session_factory is None:
+            session_factory = SessionLocal
+        elif not callable(session_factory):
+            raise RAGRetrievalSessionError()
+        return RAGRetrievalSessionRunner(session_factory=session_factory)
 
     def _search_single_rag_kb(
         self,
-        retrieval: RetrievalService,
+        retrieval: "RetrievalService",
         *,
         query: str,
         knowledge_base_id: str,
@@ -3241,16 +3232,6 @@ class LLMNode(Node[LLMNodeData]):
         else:
             rendered = f"{query} {template}"
         return " ".join(rendered.split())
-
-    @staticmethod
-    def _rag_gevent_modules():
-        try:
-            import gevent
-            from gevent.pool import Pool
-
-            return gevent, Pool
-        except ImportError:
-            return None
 
     def _rag_runtime_trace_summary(
         self,
@@ -3481,6 +3462,7 @@ class LLMNode(Node[LLMNodeData]):
         self,
         resolution: KnowledgeRuntimeCandidateResolution,
     ) -> WorkflowRAGSearchResult:
+        trace_summary = self._knowledge_candidate_trace_summary(resolution)
         return WorkflowRAGSearchResult(
             context="",
             metadata=[],
@@ -3490,8 +3472,35 @@ class LLMNode(Node[LLMNodeData]):
             ),
             should_invoke_llm=False,
             answer_override=RAG_NO_EVIDENCE_MESSAGE,
-            trace_summary=self._knowledge_candidate_trace_summary(resolution),
+            trace_summary=trace_summary,
         )
+
+    @staticmethod
+    def _elapsed_stage_latency_ms(started_at: float) -> int:
+        elapsed_ms = max(0, int((time.perf_counter() - started_at) * 1000))
+        return min(elapsed_ms, MAX_RAG_STAGE_LATENCY_MS)
+
+    @staticmethod
+    def _rag_stage_latency_summary(
+        *,
+        candidate_resolution_latency_ms: int | None = None,
+        query_embedding_latency_ms: int | None = None,
+        retrieval_fanout_latency_ms: int | None = None,
+        slowest_search_latency_ms: int | None = None,
+        evidence_policy_latency_ms: int | None = None,
+    ) -> Dict[str, int]:
+        values = {
+            "candidate_resolution_latency_ms": candidate_resolution_latency_ms,
+            "query_embedding_latency_ms": query_embedding_latency_ms,
+            "retrieval_fanout_latency_ms": retrieval_fanout_latency_ms,
+            "slowest_search_latency_ms": slowest_search_latency_ms,
+            "evidence_policy_latency_ms": evidence_policy_latency_ms,
+        }
+        return {
+            key: min(value, MAX_RAG_STAGE_LATENCY_MS)
+            for key, value in values.items()
+            if type(value) is int and value >= 0
+        }
 
     @staticmethod
     def _knowledge_candidate_trace_summary(
@@ -3663,6 +3672,8 @@ class LLMNode(Node[LLMNodeData]):
             if isinstance(knowledge_result.trace_summary, dict)
             else {}
         )
+        for key in RAG_TRACE_STAGE_LATENCY_FIELDS:
+            summary.pop(key, None)
         summary.update(self._rag_evidence_summary(knowledge_result.evidence_decision))
         return summary
 

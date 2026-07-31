@@ -2,6 +2,7 @@ import logging
 import os
 import re
 
+from gevent.monkey import get_original
 from sqlalchemy import and_, bindparam, or_, select
 from sqlalchemy.orm import Session, aliased
 
@@ -46,6 +47,7 @@ logger = logging.getLogger(__name__)
 RAG_RERANK_ENABLED_ENV = "RAG_CROSS_ENCODER_RERANK_ENABLED"
 RAG_RERANK_MODEL_ENV = "RAG_CROSS_ENCODER_MODEL"
 DEFAULT_RAG_RERANK_MODEL = "cross-encoder/ms-marco-MiniLM-L-12-v2"
+_allocate_native_lock = get_original("_thread", "allocate_lock")
 
 
 def _env_flag(name: str, default: bool = False) -> bool:
@@ -58,6 +60,7 @@ def _env_flag(name: str, default: bool = False) -> bool:
 class RetrievalService:
     _cross_encoder_model = None
     _cross_encoder_model_name = None
+    _cross_encoder_model_lock = _allocate_native_lock()
 
     def __init__(self, db: Session, user_id, organization_id=None):
         self.db = db
@@ -78,11 +81,19 @@ class RetrievalService:
             model_name = DEFAULT_RAG_RERANK_MODEL
 
         if (
-            cls._cross_encoder_model is None
-            or cls._cross_encoder_model_name != model_name
+            cls._cross_encoder_model is not None
+            and cls._cross_encoder_model_name == model_name
         ):
-            cls._cross_encoder_model = CrossEncoder(model_name, max_length=512)
-            cls._cross_encoder_model_name = model_name
+            return cls._cross_encoder_model
+
+        with cls._cross_encoder_model_lock:
+            if (
+                cls._cross_encoder_model is None
+                or cls._cross_encoder_model_name != model_name
+            ):
+                model = CrossEncoder(model_name, max_length=512)
+                cls._cross_encoder_model = model
+                cls._cross_encoder_model_name = model_name
         return cls._cross_encoder_model
 
     def _get_efficient_rewrite_model(self) -> str:
@@ -812,9 +823,9 @@ class RetrievalService:
                         if item["score"] > all_candidates[chunk_id]["score"]:
                             all_candidates[chunk_id] = item
 
-        except Exception as e:
-            logger.error(f"Search Failed: {e}")
-            raise e
+        except Exception as exc:
+            logger.error("Search failed: error_type=%s", type(exc).__name__)
+            raise
 
         final_list = []
         merged_candidates = sorted(
@@ -1037,6 +1048,9 @@ class RetrievalService:
         if not knowledge_base_id:
             logger.error("Missing knowledge_base_id")
             return []
+        if self.organization_id is None:
+            logger.error("Missing organization_id for synchronous retrieval")
+            return []
         hierarchy_mode = normalize_hierarchy_mode(hierarchy_mode)
         source_tier_policy = normalize_source_tier_policy(source_tier_policy)
 
@@ -1045,7 +1059,10 @@ class RetrievalService:
         try:
             kb = (
                 self.db.query(KnowledgeBase)
-                .filter(KnowledgeBase.id == knowledge_base_id)
+                .filter(
+                    KnowledgeBase.id == knowledge_base_id,
+                    KnowledgeBase.organization_id == self.organization_id,
+                )
                 .first()
             )
             if not kb or not kb.embedding_model:
@@ -1222,9 +1239,9 @@ class RetrievalService:
                     if item["score"] > all_candidates[chunk_id]["score"]:
                         all_candidates[chunk_id] = item
 
-        except Exception as e:
-            logger.error(f"Search Failed: {e}")
-            raise e
+        except Exception as exc:
+            logger.error("Search failed: error_type=%s", type(exc).__name__)
+            raise
 
         final_list = []
         merged_candidates = sorted(

@@ -69,6 +69,16 @@ from apps.workflow_engine.application.query_embedding_execution import (  # noqa
 from apps.workflow_engine.application.provider_execution import (  # noqa: E402
     ProviderExecutionConfigurationError,
 )
+from apps.workflow_engine.application.rag_retrieval_fanout import (  # noqa: E402
+    RAGRetrievalFanoutError,
+    RAGRetrievalFanoutResult as ApplicationRAGRetrievalFanoutResult,
+)
+from apps.workflow_engine.adapters.rag_retrieval_executor import (  # noqa: E402
+    NativeThreadRAGRetrievalCancellation,
+)
+from apps.workflow_engine.adapters.rag_retrieval_session import (  # noqa: E402
+    RAGRetrievalSessionError,
+)
 from apps.workflow_engine.composition.provider_execution import (  # noqa: E402
     build_provider_execution_runtime,
     build_provider_usage_recorder,
@@ -481,51 +491,54 @@ class CapturingRuntimeCandidateResolver:
 
 
 def _patch_rag_gevent_inline(monkeypatch, node):
-    """RAG fanout unit test에서 gevent 의존성 없이 bounded path를 동기 실행한다."""
+    """기존 테스트 이름을 유지하면서 fanout scheduler를 동기 실행한다."""
 
-    class FakeTimeout(Exception):
-        def __init__(self, seconds):
-            self.seconds = seconds
+    class InlineScheduler:
+        def execute(self, *, tasks, worker, fail_fast=False):
+            results = []
+            failed_count = 0
+            timeout_count = 0
+            for task in tasks:
+                try:
+                    value = worker(
+                        task,
+                        NativeThreadRAGRetrievalCancellation(),
+                        10_000,
+                    )
+                except Exception as exc:
+                    if fail_fast:
+                        raise RAGRetrievalFanoutError() from None
+                    failed_count += 1
+                    if isinstance(exc, TimeoutError):
+                        timeout_count += 1
+                    continue
+                results.append((task, value))
+            return ApplicationRAGRetrievalFanoutResult(
+                results=tuple(results),
+                failed_count=failed_count,
+                timeout_count=timeout_count,
+                slowest_search_latency_ms=0,
+            )
 
-        def start(self):
-            return None
+    class InlineSessionRunner:
+        def run(self, *, cancellation, operation, **_kwargs):
+            if cancellation.cancelled:
+                raise TimeoutError("cancelled")
+            session = node.execution_context.get("db", SimpleNamespace())
+            return operation(session)
 
-        def cancel(self):
-            return None
-
-    class FakeJob:
-        def __init__(self, fn, kwargs):
-            try:
-                self.value = fn(**kwargs)
-                self.exception = None
-            except Exception as exc:  # pragma: no cover - assertion에서 검증
-                self.value = None
-                self.exception = exc
-
-        def ready(self):
-            return True
-
-        def kill(self, block=False):
-            return None
-
-    class FakePool:
-        def __init__(self, size):
-            self.size = size
-
-        def spawn(self, fn, **kwargs):
-            return FakeJob(fn, kwargs)
-
-        def kill(self, block=False):
-            return None
-
-    class FakeGevent:
-        Timeout = FakeTimeout
-
-        @staticmethod
-        def joinall(jobs, timeout=None):
-            return jobs
-
-    monkeypatch.setattr(node, "_rag_gevent_modules", lambda: (FakeGevent, FakePool))
+    monkeypatch.setattr(
+        node,
+        "_rag_retrieval_fanout_scheduler_override",
+        InlineScheduler(),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        node,
+        "_rag_retrieval_session_runner_override",
+        InlineSessionRunner(),
+        raising=False,
+    )
 
 
 class FakeRuntimePriorityQuery:
@@ -886,9 +899,18 @@ def test_llm_node_rag_query_includes_bounded_client_history_for_follow_up(
     )
     node._client_override = DummyClient()  # noqa: SLF001 - provider isolation
 
-    def capture_search(query, db_session, *, candidate_resolution=None):
+    def capture_search(
+        query,
+        db_session,
+        *,
+        candidate_resolution=None,
+        candidate_resolution_latency_ms=None,
+    ):
         captured["query"] = query
         captured["candidate_resolution"] = candidate_resolution
+        captured["candidate_resolution_latency_ms"] = (
+            candidate_resolution_latency_ms
+        )
         return WorkflowRAGSearchResult(
             context="authorized evidence",
             metadata=[],
@@ -907,6 +929,7 @@ def test_llm_node_rag_query_includes_bounded_client_history_for_follow_up(
     assert "[REDACTED: possible prompt injection]" in captured["query"]
     assert len(captured["query"]) <= 1_000
     assert captured["candidate_resolution"].candidates[0].knowledge_base_id == kb_id
+    assert isinstance(captured["candidate_resolution_latency_ms"], int)
 
 
 def test_llm_node_rag_query_without_client_history_preserves_current_query():
@@ -2905,7 +2928,8 @@ def test_llm_node_rag_no_evidence_skips_llm_call(monkeypatch):
     monkeypatch.setattr(
         LLMNode,
         "_execute_knowledge_search",
-        lambda self, query, db_session, *, candidate_resolution=None: (
+        lambda self, query, db_session, *, candidate_resolution=None,
+        candidate_resolution_latency_ms=None: (
             WorkflowRAGSearchResult(
                 context="",
                 metadata=[],
@@ -2947,7 +2971,14 @@ def test_llm_node_rag_operational_failure_uses_safe_no_result(monkeypatch):
     client = DummyClient()
     node._client_override = client  # noqa: SLF001 - 테스트용 주입
 
-    def raise_retrieval_error(self, query, db_session, *, candidate_resolution=None):
+    def raise_retrieval_error(
+        self,
+        query,
+        db_session,
+        *,
+        candidate_resolution=None,
+        candidate_resolution_latency_ms=None,
+    ):
         raise RuntimeError("vector store unavailable")
 
     monkeypatch.setattr(LLMNode, "_execute_knowledge_search", raise_retrieval_error)
@@ -3024,7 +3055,7 @@ def test_llm_node_rag_partial_retrieval_failure_uses_safe_partial_result(
             ]
 
     monkeypatch.setattr(
-        "apps.workflow_engine.workflow.nodes.llm.llm_node.RetrievalService",
+        "apps.workflow_engine.services.retrieval.RetrievalService",
         FakeRetrievalService,
     )
     monkeypatch.setattr(
@@ -3107,7 +3138,7 @@ def test_llm_node_rag_preserves_explicit_zero_score_threshold(monkeypatch):
             ]
 
     monkeypatch.setattr(
-        "apps.workflow_engine.workflow.nodes.llm.llm_node.RetrievalService",
+        "apps.workflow_engine.services.retrieval.RetrievalService",
         FakeRetrievalService,
     )
     monkeypatch.setattr(
@@ -3194,7 +3225,7 @@ def test_llm_node_rag_source_tier_breaks_equal_score_ties(monkeypatch):
             ]
 
     monkeypatch.setattr(
-        "apps.workflow_engine.workflow.nodes.llm.llm_node.RetrievalService",
+        "apps.workflow_engine.services.retrieval.RetrievalService",
         FakeRetrievalService,
     )
     monkeypatch.setattr(
@@ -3284,7 +3315,7 @@ def test_llm_node_rag_source_tier_policy_off_preserves_score_order(monkeypatch):
             ]
 
     monkeypatch.setattr(
-        "apps.workflow_engine.workflow.nodes.llm.llm_node.RetrievalService",
+        "apps.workflow_engine.services.retrieval.RetrievalService",
         FakeRetrievalService,
     )
     monkeypatch.setattr(
@@ -3359,7 +3390,7 @@ def test_llm_node_reuses_query_embedding_across_same_model_kbs(monkeypatch):
             ]
 
     monkeypatch.setattr(
-        "apps.workflow_engine.workflow.nodes.llm.llm_node.RetrievalService",
+        "apps.workflow_engine.services.retrieval.RetrievalService",
         FakeRetrievalService,
     )
     monkeypatch.setattr(
@@ -4086,7 +4117,7 @@ def test_rag_audit_omits_unscoped_invalid_organization(monkeypatch, audit_method
     assert audit_calls == []
 
 
-def test_llm_node_rag_fanout_uses_bounded_pool(monkeypatch):
+def test_llm_node_rag_fanout_uses_scheduler_and_preserves_candidate_order(monkeypatch):
     node = LLMNode(
         "llm-1",
         LLMNodeData(
@@ -4097,34 +4128,7 @@ def test_llm_node_rag_fanout_uses_bounded_pool(monkeypatch):
         ),
     )
     kb_ids = [str(uuid.uuid4()) for _ in range(7)]
-    pool_sizes = []
     search_calls = []
-
-    class FakeJob:
-        def __init__(self, value):
-            self.value = value
-            self.exception = None
-
-        def ready(self):
-            return True
-
-        def kill(self, block=False):
-            return None
-
-    class FakePool:
-        def __init__(self, size):
-            pool_sizes.append(size)
-
-        def spawn(self, fn, **kwargs):
-            return FakeJob(fn(**kwargs))
-
-        def kill(self, block=False):
-            return None
-
-    class FakeGevent:
-        @staticmethod
-        def joinall(jobs, timeout=None):
-            return jobs
 
     def fake_search(**kwargs):
         search_calls.append(kwargs["knowledge_base_id"])
@@ -4138,11 +4142,7 @@ def test_llm_node_rag_fanout_uses_bounded_pool(monkeypatch):
             )
         ]
 
-    monkeypatch.setattr(
-        node,
-        "_rag_gevent_modules",
-        lambda: (FakeGevent, FakePool),
-    )
+    _patch_rag_gevent_inline(monkeypatch, node)
     monkeypatch.setattr(
         node,
         "_search_single_rag_kb_with_new_session",
@@ -4151,7 +4151,6 @@ def test_llm_node_rag_fanout_uses_bounded_pool(monkeypatch):
 
     result = node._run_rag_retrieval_fanout(  # noqa: SLF001
         query="query",
-        fallback_db_session=object(),
         user_id=uuid.uuid4(),
         organization_id=uuid.uuid4(),
         knowledge_base_ids=kb_ids,
@@ -4159,20 +4158,29 @@ def test_llm_node_rag_fanout_uses_bounded_pool(monkeypatch):
         threshold=0.5,
     )
 
-    assert pool_sizes == [5]
     assert search_calls == kb_ids
+    assert [kb_id for kb_id, _chunks in result.results] == kb_ids
     assert result.failed_count == 0
     assert len(result.results) == len(kb_ids)
 
 
 def test_precomputed_fanout_log_uses_bucketed_candidate_count(monkeypatch, caplog):
-    node = LLMNode.__new__(LLMNode)
+    node = LLMNode(
+        "llm-1",
+        LLMNodeData(
+            title="LLM",
+            provider="openai",
+            model_id="gpt-4o",
+            user_prompt="user",
+        ),
+    )
     kb_ids = [str(uuid.uuid4()) for _ in range(3)]
-    expected = WorkflowRAGFanoutResult(results=[], failed_count=0)
+    search_calls = []
+    _patch_rag_gevent_inline(monkeypatch, node)
     monkeypatch.setattr(
         node,
-        "_run_rag_retrieval_fanout_sequential",
-        lambda **kwargs: expected,
+        "_search_single_rag_kb_with_new_session",
+        lambda **kwargs: search_calls.append(kwargs) or [],
     )
 
     with caplog.at_level(
@@ -4181,7 +4189,6 @@ def test_precomputed_fanout_log_uses_bucketed_candidate_count(monkeypatch, caplo
     ):
         result = node._run_rag_retrieval_fanout(  # noqa: SLF001 - safe log contract
             query="query",
-            fallback_db_session=object(),
             user_id=uuid.uuid4(),
             organization_id=uuid.uuid4(),
             knowledge_base_ids=kb_ids,
@@ -4190,7 +4197,9 @@ def test_precomputed_fanout_log_uses_bucketed_candidate_count(monkeypatch, caplo
             query_vectors_by_kb={kb_id: [0.1] for kb_id in kb_ids},
         )
 
-    assert result is expected
+    assert result.failed_count == 0
+    assert [call["knowledge_base_id"] for call in search_calls] == kb_ids
+    assert [call["query_vector"] for call in search_calls] == [[0.1]] * 3
     log_text = " ".join(caplog.messages)
     assert "kb_count_bucket=2-10" in log_text
     assert "kb_count=3" not in log_text
@@ -4249,7 +4258,7 @@ def test_query_vector_precompute_log_uses_only_count_buckets(monkeypatch, caplog
     assert "failed_count=0" not in log_text
 
 
-def test_llm_node_rag_single_kb_uses_bounded_pool(monkeypatch):
+def test_llm_node_rag_single_kb_uses_scheduler(monkeypatch):
     node = LLMNode(
         "llm-1",
         LLMNodeData(
@@ -4260,44 +4269,13 @@ def test_llm_node_rag_single_kb_uses_bounded_pool(monkeypatch):
         ),
     )
     kb_id = str(uuid.uuid4())
-    pool_sizes = []
     search_calls = []
-
-    class FakeJob:
-        def __init__(self, value):
-            self.value = value
-            self.exception = None
-
-        def ready(self):
-            return True
-
-        def kill(self, block=False):
-            return None
-
-    class FakePool:
-        def __init__(self, size):
-            pool_sizes.append(size)
-
-        def spawn(self, fn, **kwargs):
-            return FakeJob(fn(**kwargs))
-
-        def kill(self, block=False):
-            return None
-
-    class FakeGevent:
-        @staticmethod
-        def joinall(jobs, timeout=None):
-            return jobs
 
     def fake_search(**kwargs):
         search_calls.append(kwargs["knowledge_base_id"])
         return []
 
-    monkeypatch.setattr(
-        node,
-        "_rag_gevent_modules",
-        lambda: (FakeGevent, FakePool),
-    )
+    _patch_rag_gevent_inline(monkeypatch, node)
     monkeypatch.setattr(
         node,
         "_search_single_rag_kb_with_new_session",
@@ -4306,7 +4284,6 @@ def test_llm_node_rag_single_kb_uses_bounded_pool(monkeypatch):
 
     result = node._run_rag_retrieval_fanout(  # noqa: SLF001
         query="query",
-        fallback_db_session=object(),
         user_id=uuid.uuid4(),
         organization_id=uuid.uuid4(),
         knowledge_base_ids=[kb_id],
@@ -4314,12 +4291,54 @@ def test_llm_node_rag_single_kb_uses_bounded_pool(monkeypatch):
         threshold=0.5,
     )
 
-    assert pool_sizes == [1]
     assert search_calls == [kb_id]
     assert result.failed_count == 0
 
 
-def test_llm_node_rag_fails_closed_when_timeout_guard_unavailable(monkeypatch):
+def test_llm_node_rag_session_runner_uses_injected_session_factory(monkeypatch):
+    def injected_factory():
+        return object()
+
+    node = LLMNode(
+        "llm-1",
+        LLMNodeData(
+            title="LLM",
+            provider="openai",
+            model_id="gpt-4o",
+            user_prompt="user",
+        ),
+        execution_context={"db_session_factory": injected_factory},
+    )
+    captured_factories = []
+    runner = object()
+
+    monkeypatch.setattr(
+        "apps.workflow_engine.adapters.rag_retrieval_session."
+        "RAGRetrievalSessionRunner",
+        lambda *, session_factory: captured_factories.append(session_factory) or runner,
+    )
+
+    assert node._get_rag_retrieval_session_runner() is runner  # noqa: SLF001
+    assert captured_factories == [injected_factory]
+
+
+def test_llm_node_rag_session_runner_rejects_invalid_injected_factory():
+    node = LLMNode(
+        "llm-1",
+        LLMNodeData(
+            title="LLM",
+            provider="openai",
+            model_id="gpt-4o",
+            user_prompt="user",
+        ),
+        execution_context={"db_session_factory": "invalid"},
+    )
+
+    with pytest.raises(RAGRetrievalSessionError):
+        node._get_rag_retrieval_session_runner()  # noqa: SLF001
+
+
+def test_llm_node_rag_fails_closed_when_scheduler_is_unavailable(monkeypatch):
     node = LLMNode(
         "llm-1",
         LLMNodeData(
@@ -4330,21 +4349,61 @@ def test_llm_node_rag_fails_closed_when_timeout_guard_unavailable(monkeypatch):
         ),
     )
 
-    monkeypatch.setattr(node, "_rag_gevent_modules", lambda: None)
+    class FailingScheduler:
+        def execute(self, **_kwargs):
+            raise RAGRetrievalFanoutError()
 
-    result = node._run_rag_retrieval_fanout(  # noqa: SLF001
-        query="query",
-        fallback_db_session=object(),
-        user_id=uuid.uuid4(),
-        organization_id=uuid.uuid4(),
-        knowledge_base_ids=[str(uuid.uuid4())],
-        top_k=3,
-        threshold=0.5,
+    monkeypatch.setattr(
+        node,
+        "_rag_retrieval_fanout_scheduler_override",
+        FailingScheduler(),
+        raising=False,
     )
 
-    assert result.results == []
-    assert result.failed_count == 1
-    assert result.timeout_count == 1
+    with pytest.raises(RAGRetrievalFanoutError):
+        node._run_rag_retrieval_fanout(  # noqa: SLF001
+            query="query",
+            user_id=uuid.uuid4(),
+            organization_id=uuid.uuid4(),
+            knowledge_base_ids=[str(uuid.uuid4())],
+            top_k=3,
+            threshold=0.5,
+        )
+
+
+def test_rag_stage_latencies_are_trace_only_not_result_metadata():
+    node = LLMNode(
+        "llm-1",
+        LLMNodeData(title="LLM", model_id="gpt-4o", user_prompt="user"),
+    )
+    stage_latencies = {
+        "candidate_resolution_latency_ms": 1,
+        "query_embedding_latency_ms": 2,
+        "retrieval_fanout_latency_ms": 3,
+        "slowest_search_latency_ms": 4,
+        "evidence_policy_latency_ms": 5,
+    }
+    knowledge_result = WorkflowRAGSearchResult(
+        context="",
+        metadata=[],
+        evidence_decision=RAGEvidenceDecision(
+            evidence_sufficient=False,
+            insufficiency_reason="no_evidence",
+        ),
+        should_invoke_llm=False,
+        trace_summary={"retrieval_strategy": "safe", **stage_latencies},
+    )
+
+    result_metadata = node._rag_result_metadata(knowledge_result)  # noqa: SLF001
+    trace_payload = node._rag_retrieval_trace_payload(  # noqa: SLF001
+        [],
+        evidence_decision=knowledge_result.evidence_decision,
+        runtime_summary=knowledge_result.trace_summary,
+    )
+
+    assert result_metadata["retrieval_strategy"] == "safe"
+    assert not set(stage_latencies).intersection(result_metadata)
+    assert {key: trace_payload[key] for key in stage_latencies} == stage_latencies
 
 
 def test_llm_node_rag_partial_retrieval_failure_respects_fail_node_policy(
@@ -4374,7 +4433,7 @@ def test_llm_node_rag_partial_retrieval_failure_respects_fail_node_policy(
             raise RuntimeError("vector store unavailable")
 
     monkeypatch.setattr(
-        "apps.workflow_engine.workflow.nodes.llm.llm_node.RetrievalService",
+        "apps.workflow_engine.services.retrieval.RetrievalService",
         FakeRetrievalService,
     )
 
@@ -4400,8 +4459,9 @@ def test_llm_node_rag_partial_retrieval_failure_respects_fail_node_policy(
     )
     _patch_rag_gevent_inline(monkeypatch, node)
 
-    with pytest.raises(RuntimeError, match="vector store unavailable"):
+    with pytest.raises(RAGRetrievalFanoutError) as captured:
         node._execute_knowledge_search("query", db_session=FakeDb())  # noqa: SLF001
+    assert "vector store unavailable" not in str(captured.value)
 
 
 def test_llm_runtime_permission_denied_uses_detailed_reason_and_unknown_target(
@@ -6096,6 +6156,7 @@ def test_llm_run_resolves_candidates_once_and_reuses_resolution_for_search(
         db_session,
         *,
         candidate_resolution=None,
+        candidate_resolution_latency_ms=None,
     ):
         captured_resolutions.append(candidate_resolution)
         return WorkflowRAGSearchResult(
@@ -6281,6 +6342,8 @@ def test_collection_only_zero_candidates_skips_retrieval_embedding_and_provider(
     assert result["metadata"]["rag"]["candidate_resolution_status"] == (
         "safe_no_result"
     )
+    trace_payload = node._trace_payloads[0]["payload"]  # noqa: SLF001
+    assert "candidate_resolution_latency_ms" not in trace_payload
     safe_output = json.dumps(
         {
             "result": result,
@@ -6357,6 +6420,8 @@ def test_empty_rendered_rag_query_never_invokes_provider():
     assert len(resolver.calls) == 1
     assert client.calls == []
     assert result["text"] == RAG_NO_EVIDENCE_MESSAGE
+    trace_payload = node._trace_payloads[0]["payload"]  # noqa: SLF001
+    assert "candidate_resolution_latency_ms" not in trace_payload
 
 
 def test_runtime_candidate_infrastructure_error_bypasses_rag_failure_policy():
@@ -6730,7 +6795,7 @@ def test_workflow_llm_node_empty_retrieval_result_skips_llm_call(monkeypatch):
             return []
 
     monkeypatch.setattr(
-        "apps.workflow_engine.workflow.nodes.llm.llm_node.RetrievalService",
+        "apps.workflow_engine.services.retrieval.RetrievalService",
         FakeRetrievalService,
     )
     fake_db = _patch_allowed_knowledge_permissions(monkeypatch, [kb_id])
@@ -6795,7 +6860,7 @@ def test_workflow_llm_node_wraps_prompt_injection_chunk_as_untrusted_knowledge(
             ]
 
     monkeypatch.setattr(
-        "apps.workflow_engine.workflow.nodes.llm.llm_node.RetrievalService",
+        "apps.workflow_engine.services.retrieval.RetrievalService",
         FakeRetrievalService,
     )
     monkeypatch.setattr(
@@ -6874,7 +6939,7 @@ def test_workflow_llm_node_rag_trace_redacts_raw_content_and_sensitive_metadata(
             ]
 
     monkeypatch.setattr(
-        "apps.workflow_engine.workflow.nodes.llm.llm_node.RetrievalService",
+        "apps.workflow_engine.services.retrieval.RetrievalService",
         FakeRetrievalService,
     )
     monkeypatch.setattr(
@@ -6963,7 +7028,7 @@ def test_knowledge_search_limits_context_chars_across_multiple_kbs(monkeypatch):
             ]
 
     monkeypatch.setattr(
-        "apps.workflow_engine.workflow.nodes.llm.llm_node.RetrievalService",
+        "apps.workflow_engine.services.retrieval.RetrievalService",
         FakeRetrievalService,
     )
     monkeypatch.setattr(
@@ -7037,7 +7102,7 @@ def test_workflow_llm_node_embedding_credential_failure_returns_safe_no_result(
             )
 
     monkeypatch.setattr(
-        "apps.workflow_engine.workflow.nodes.llm.llm_node.RetrievalService",
+        "apps.workflow_engine.services.retrieval.RetrievalService",
         FakeRetrievalService,
     )
     fake_db = _patch_allowed_knowledge_permissions(monkeypatch, [kb_id])
@@ -7097,7 +7162,7 @@ def test_workflow_graph_llm_nodes_use_only_their_assigned_kbs(monkeypatch):
             raise AssertionError(f"unexpected KB: {kwargs['knowledge_base_id']}")
 
     monkeypatch.setattr(
-        "apps.workflow_engine.workflow.nodes.llm.llm_node.RetrievalService",
+        "apps.workflow_engine.services.retrieval.RetrievalService",
         FakeRetrievalService,
     )
     monkeypatch.setattr(
@@ -7178,7 +7243,7 @@ def test_workflow_graph_llm_nodes_use_only_their_assigned_kbs(monkeypatch):
         ),
     ],
 )
-def test_workflow_llm_node_fail_node_propagates_retrieval_failures(
+def test_workflow_llm_node_fail_node_redacts_retrieval_failures(
     monkeypatch,
     exception,
 ):
@@ -7195,7 +7260,7 @@ def test_workflow_llm_node_fail_node_propagates_retrieval_failures(
             raise exception
 
     monkeypatch.setattr(
-        "apps.workflow_engine.workflow.nodes.llm.llm_node.RetrievalService",
+        "apps.workflow_engine.services.retrieval.RetrievalService",
         FakeRetrievalService,
     )
     node = LLMNode(
@@ -7221,8 +7286,10 @@ def test_workflow_llm_node_fail_node_propagates_retrieval_failures(
     _patch_rag_gevent_inline(monkeypatch, node)
     node._client_override = StaticTextClient("unused")  # noqa: SLF001
 
-    with pytest.raises(type(exception), match=str(exception)):
+    with pytest.raises(RAGRetrievalFanoutError) as captured:
         node.execute({})
+
+    assert str(exception) not in str(captured.value)
 
 
 def test_knowledge_search_partial_timeout_trace_summary_is_safe(monkeypatch):
@@ -7296,7 +7363,7 @@ def test_workflow_llm_node_ignores_stale_kb_display_name_at_runtime(monkeypatch)
             return [_chunk_preview("현재 근거", filename="current.md")]
 
     monkeypatch.setattr(
-        "apps.workflow_engine.workflow.nodes.llm.llm_node.RetrievalService",
+        "apps.workflow_engine.services.retrieval.RetrievalService",
         FakeRetrievalService,
     )
     monkeypatch.setattr(
@@ -7373,7 +7440,7 @@ def test_knowledge_search_deduplicates_retrieved_context_when_enabled(monkeypatc
             ]
 
     monkeypatch.setattr(
-        "apps.workflow_engine.workflow.nodes.llm.llm_node.RetrievalService",
+        "apps.workflow_engine.services.retrieval.RetrievalService",
         FakeRetrievalService,
     )
     fake_db = _patch_allowed_knowledge_permissions(monkeypatch, [kb_id])
@@ -7441,7 +7508,7 @@ def test_knowledge_search_limits_retrieved_context_chars(monkeypatch):
             ]
 
     monkeypatch.setattr(
-        "apps.workflow_engine.workflow.nodes.llm.llm_node.RetrievalService",
+        "apps.workflow_engine.services.retrieval.RetrievalService",
         FakeRetrievalService,
     )
     fake_db = _patch_allowed_knowledge_permissions(monkeypatch, [kb_id])
@@ -7519,7 +7586,7 @@ def test_knowledge_search_compresses_retrieved_context_by_query(monkeypatch):
             ]
 
     monkeypatch.setattr(
-        "apps.workflow_engine.workflow.nodes.llm.llm_node.RetrievalService",
+        "apps.workflow_engine.services.retrieval.RetrievalService",
         FakeRetrievalService,
     )
     fake_db = _patch_allowed_knowledge_permissions(monkeypatch, [kb_id])
@@ -7585,7 +7652,7 @@ def test_llm_node_records_answer_grounding_check_metadata(monkeypatch):
             ]
 
     monkeypatch.setattr(
-        "apps.workflow_engine.workflow.nodes.llm.llm_node.RetrievalService",
+        "apps.workflow_engine.services.retrieval.RetrievalService",
         FakeRetrievalService,
     )
     fake_db = _patch_allowed_knowledge_permissions(monkeypatch, [kb_id])
