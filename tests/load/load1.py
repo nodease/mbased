@@ -54,7 +54,7 @@ class WorkflowUser(HttpUser):
     def run_workflow(self):
         """배포된 워크플로우 실행 테스트"""
         headers = {
-            "X-Auth-Secret": self.auth_token,
+            "Authorization": f"Bearer {self.auth_token}",
             "Content-Type": "application/json",
         }
 
@@ -97,14 +97,12 @@ class WorkflowUser(HttpUser):
 def on_test_start(environment, **kwargs):
     """테스트 시작 시 설정 정보 출력"""
     slug = os.getenv("LOAD_TEST_DEPLOYMENT_SLUG_1", "NOT SET")
-    token = os.getenv("LOAD_TEST_AUTH_TOKEN_1", "NOT SET")
-    token_preview = f"{token[:10]}..." if token != "NOT SET" else "NOT SET"
 
     print(f"\n{'=' * 50}")
     print("🚀 Locust 부하 테스트 시작")
     print(f"{'=' * 50}")
     print(f"📍 대상 URL Slug: {slug}")
-    print(f"🔑 인증 토큰: {token_preview}")
+    print("🔑 인증 토큰: 값 비노출")
     print(f"{'=' * 50}\n")
 
 

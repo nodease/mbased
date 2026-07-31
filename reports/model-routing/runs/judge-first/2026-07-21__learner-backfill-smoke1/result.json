@@ -1,0 +1,312 @@
+{
+  "executed_at": "2026-07-21T14:10:04.943183+00:00",
+  "workflow_id": "98000000-0000-0000-0000-000000000002",
+  "node_id": "llm-triage",
+  "case_count": 1,
+  "latest_batch": {
+    "offset": 30,
+    "count": 1,
+    "completed_case_count": 1
+  },
+  "available_models": [
+    "gpt-4o-mini",
+    "gpt-4.1-mini",
+    "gpt-4.1",
+    "gpt-4o",
+    "gpt-5-mini",
+    "gpt-5.4-mini",
+    "gpt-5.4",
+    "gpt-5.6-sol",
+    "gpt-5.6-luna",
+    "gpt-5.6-terra",
+    "o3"
+  ],
+  "routing_judge_model": "gpt-5.4-mini",
+  "quality_judge_model": "gpt-5-mini",
+  "runs": [
+    {
+      "case_id": "algorithmic_reasoning-69",
+      "category": "algorithmic_reasoning",
+      "expected_difficulty": "advanced",
+      "customer_tier": "enterprise",
+      "input": {
+        "request": "세 서비스 A, B, C의 배포 순서에는 A 이전 DB migration, B와 C의 동시 배포 금지, C 이전 A health check 통과 조건이 있습니다. 가능한 순서를 검증하고 실패 시 되돌리는 절차를 JSON으로 정리해 주세요.",
+        "context": "제공된 조건만 사용하고, 누락된 전제는 가정으로 분리해야 합니다.",
+        "constraints": [
+          "근거 없는 사실을 확정하지 않습니다.",
+          "누락된 정보는 assumptions에 분리합니다.",
+          "필수 JSON 필드를 모두 반환합니다.",
+          "위험하거나 되돌리기 어려운 조치는 승인 전제로 보수적으로 제안합니다."
+        ],
+        "output_mode": "analysis"
+      },
+      "execution_order": [
+        "automatic"
+      ],
+      "arms": {
+        "automatic": {
+          "arm": "automatic",
+          "selected_model": "gpt-5.4-mini-[REDACTED]",
+          "task_cost_usd": 0.003733,
+          "task_latency_ms": 12983,
+          "workflow_latency_ms": 13296,
+          "prompt_tokens": 537,
+          "completion_tokens": 740,
+          "total_tokens": 1277,
+          "output_text": "{\"분류\":\"배포 절차/릴리스 오케스트레이션\",\"우선순위\":\"high\",\"승인필요\":false,\"대응계획\":[\"주어진 조건을 제약으로 해석해 배포 순서 후보를 검증한다: 1) A 이전 DB migration 선행, 2) B와 C는 동시 배포 금지, 3) C 이전 A health check 통과 필요.\",\"가능한 순서의 핵심은 A를 먼저 배포하거나 최소한 A 관련 선행 조건을 만족시킨 뒤 C를 배포하는 것이다. B는 C와 동시에만 피하면 되므로 A와의 상대적 순서는 조건만으로는 고정되지 않는다.\",\"검증 가능한 순서를 JSON으로 표현한다: 예) [DB migration, A deploy, A health check pass, B deploy, C deploy] 또는 [DB migration, A deploy, A health check pass, C deploy, B deploy]. 단, C는 A health check 통과 이후에만 허용한다.\",\"실패 시 되돌림 절차는 보수적으로 설계한다: 실패 지점 직전의 안정 버전으로 해당 서비스만 롤백하고, DB migration은 역마이그레이션 가능 여부를 사전 확인한 경우에만 되돌린다. 데이터 손실 위험이 있으면 즉시 롤백 대신 배포 중단 및 승인 대기 상태로 전환한다.\",\"동시 배포 금지 조건을 운영 절차에 반영해 B와 C는 서로 시간 간격을 두고 순차 배포한다.\",\"누락된 전제는 assumptions로 분리한다: DB migration이 A만 영향 주는지, 각 서비스의 롤백 가능 여부, health check의 판정 기준, 배포 성공/실패 판정 시점은 명시되지 않았으므로 가정하지 않는다.\"],\"답변초안\":\"아래 조건만으로 검증하면, 가능한 순서는 다음과 같습니다.\\n\\n1) DB migration 선행\\n2) A 배포\\n3) A health check 통과\\n4) B와 C를 동시가 아닌 순차로 배포\\n\\n허용 가능한 예시 순서:\\n- DB migration → A → A health check pass → B → C\\n- DB migration → A → A health check pass → C → B\\n\\n금지되는 경우:\\n- A 이전에 DB migration이 없는 순서\\n- A health check 통과 전에 C를 배포하는 경우\\n- B와 C를 동시에 배포하는 경우\\n\\n실패 시 되돌림 절차:\\n- 배포 실패 서비스는 즉시 직전 안정 버전으로 롤백\\n- A health check 실패 시 A 배포 중단 및 A 롤백\\n- C 배포 실패 시 C만 롤백하고 B 상태는 유지\\n- DB migration 롤백은 역마이그레이션 가능성과 데이터 무결성 영향이 확인된 경우에만 수행\\n- 역마이그레이션이 불명확하면 추가 승인 전까지 롤백 보류\\n\\nassumptions:\\n- DB migration은 A 배포 전에만 필요하다고 해석했지만, 실제 영향 범위는 미상\\n- 각 서비스는 별도 롤백이 가능하다고 가정하지 않음\\n- health check의 구체 기준과 타임아웃은 미상\\n- 배포 도구의 자동 롤백 기능 유무는 미상\"}",
+          "schema_pass": true,
+          "workflow_success": true,
+          "error": null,
+          "routing": {
+            "judge": {
+              "cost": 0.0055899999999999995,
+              "model": "gpt-5.[REDACTED]",
+              "usage": {
+                "latency_ms": 5026,
+                "total_tokens": 2870,
+                "prompt_tokens": 2756,
+                "completion_tokens": 114
+              },
+              "status": "selected",
+              "attempted": true,
+              "confidence": 0.89,
+              "reason_code": "requirement_judge_ambiguous",
+              "reason_short": "요구 수준이 모호해 기본 모델 사용",
+              "learning_error": "TypeError",
+              "reason_factors": [
+                "multi_step_reasoning",
+                "broad_context_synthesis"
+              ],
+              "rubric_version": "routing-requirements-v2",
+              "selected_model": "gpt-5.4-mini-[REDACTED]",
+              "ambiguity_flags": [
+                "insufficient_context"
+              ],
+              "selection_source": "server_requirement_selection",
+              "adjudicator_model": "gpt-5.[REDACTED]",
+              "task_requirements": {
+                "decision_impact": 1,
+                "task_complexity": 2,
+                "evidence_synthesis": 2
+              },
+              "candidate_model_count": 19,
+              "adjudication_attempted": true
+            },
+            "enabled": true,
+            "policy_id": "6317963e-1700-40bf-b812-9f1911b292c5",
+            "learner_id": "5885eecf-2c62-440e-a089-3dee36683a14",
+            "rag_context": {
+              "used": false,
+              "source_count": 0,
+              "partial_result": false,
+              "source_tier_used": null,
+              "evidence_sufficient": false,
+              "insufficiency_reason": null,
+              "query_rewrite_applied": false,
+              "retrieved_chunk_count": 0,
+              "retrieved_context_chars": 0,
+              "retrieved_context_token_estimate": "[REDACTED]"
+            },
+            "reason_code": "requirement_judge_ambiguous",
+            "strategy_id": "judge_bootstrap_incremental_v1",
+            "judge_called": true,
+            "execution_mode": "deployed",
+            "fallback_model": "gpt-4.[REDACTED]",
+            "policy_version": "judge-first-economics-v1",
+            "selected_model": "gpt-5.4-mini-[REDACTED]",
+            "decision_source": "runtime_judge",
+            "learner_version": null,
+            "matched_rule_id": null,
+            "runtime_context": {
+              "intent": "generate",
+              "node_task": "generate",
+              "risk_level": "medium",
+              "input_length": 373,
+              "output_format": "json",
+              "prompt_length": 385,
+              "has_file_input": false,
+              "customer_facing": false,
+              "schema_required": true,
+              "knowledge_enabled": false,
+              "input_length_bucket": "short",
+              "prompt_length_bucket": "short"
+            },
+            "decision_factors": {
+              "learning_mode": "judge_first",
+              "judged_request_count": 0,
+              "candidate_model_count": 19
+            },
+            "included_in_routing_learning": false
+          },
+          "routing_judge_cost_usd": 0.00129,
+          "routing_judge_tokens": 1435,
+          "routing_judge_latency_ms": 2794
+        }
+      },
+      "routing_accuracy": {
+        "classification": "unclassified",
+        "selected_model": "gpt-5.4-mini-[REDACTED]",
+        "acceptable_model_ids": [
+          "o3",
+          "gpt-5.6-sol",
+          "gpt-5.4"
+        ],
+        "underpowered_model_ids": [
+          "gpt-4o-mini",
+          "gpt-4.1-mini",
+          "gpt-5.6-luna"
+        ],
+        "overprovisioned_model_ids": []
+      },
+      "quality": {
+        "automatic": {
+          "quality_score": 92.0,
+          "contract_pass": true,
+          "reason": "출력물은 요청 조건에 맞춰 분류·우선순위·승인필요·대응계획·답변초안 등 요구 필드를 모두 포함하고 있으며, 가정(assumptions)을 별도로 분리해 누락된 전제를 명시했습니다. 대응계획은 실행 가능한 단계로 구체적이고, 위험한 조치(특히 DB 역마이그레이션)는 보수적으로 처리되어 있습니다. 다만 아래 사유로 완벽점수에서 감점했습니다: health check의 실패 처리와 롤백 시점(예: 트래픽 차단, 캐시 무효화 등) 관련",
+          "evaluation_status": "completed"
+        }
+      },
+      "quality_evaluation": {
+        "model": "gpt-5-mini",
+        "prompt_tokens": 1175,
+        "completion_tokens": 245,
+        "total_tokens": 1420,
+        "cost_usd": 0.00078375,
+        "latency_ms": 6281,
+        "attempt_count": 1,
+        "evaluation_status": "completed"
+      }
+    }
+  ],
+  "arm_summary": {
+    "automatic": {
+      "run_count": 1,
+      "task_cost_usd": 0.003733,
+      "routing_judge_cost_usd": 0.00129,
+      "total_product_cost_usd": 0.005023,
+      "average_task_latency_ms": 12983.0,
+      "average_end_to_end_latency_ms": 13296.0,
+      "p95_task_latency_ms": 12983.0,
+      "total_tokens": 1277,
+      "schema_pass_rate": 1.0,
+      "workflow_success_rate": 1.0,
+      "quality_score_average": 92.0,
+      "quality_pass_rate": 1.0,
+      "quality_evaluation_failure_count": 0,
+      "model_distribution": {
+        "gpt-5.4-mini-[REDACTED]": 1
+      },
+      "runtime_judge_call_count": 1
+    }
+  },
+  "learning_summary": {
+    "judge_label_count": 1,
+    "distinct_selected_model_count": 1,
+    "selected_models": {
+      "gpt-5.4-mini-[REDACTED]": 1
+    },
+    "decision_source_distribution": {
+      "runtime_judge": 1
+    },
+    "local_router_takeover_count": 0,
+    "local_router_uncertain_count": 0,
+    "local_confidence_threshold": 0.78,
+    "judge_confidence_average": 0.89,
+    "judge_confidence_p95": 0.89,
+    "interpretation": "local_router_takeover_count가 0이면, 현재 학습 표본 또는 confidence가 임계값에 도달하지 않아 모든 요청이 Runtime Judge로 처리된 것입니다.",
+    "persisted": {
+      "policy_status": "active",
+      "policy_version": "judge-first-economics-v1",
+      "learning_mode": "judge_first",
+      "judged_request_count": 0,
+      "operational_run_count": null,
+      "selected_model_ids": [],
+      "artifact_kind": null,
+      "artifact_encoder": null,
+      "artifact_label_models": [],
+      "artifact_trained_example_count": 0,
+      "last_learning_error": null
+    }
+  },
+  "policy_checkpoint": {
+    "policy": {
+      "status": "active",
+      "policy_version": "judge-first-economics-v1",
+      "active_policy": {
+        "learning": {
+          "mode": "judge_first",
+          "selected_model_ids": [],
+          "judged_request_count": 0,
+          "local_confidence_threshold": 0.78
+        },
+        "strategy_id": "judge_bootstrap_incremental_v1",
+        "judge_model_id": "gpt-5.4-mini",
+        "default_model_id": "gpt-5.4-mini",
+        "fallback_model_id": "gpt-4.1",
+        "global_profile_catalog": {
+          "candidates": [
+            {
+              "model_id": "gpt-4o-mini"
+            },
+            {
+              "model_id": "gpt-4.1-mini"
+            },
+            {
+              "model_id": "gpt-4.1"
+            },
+            {
+              "model_id": "gpt-4o"
+            },
+            {
+              "model_id": "gpt-5-mini"
+            },
+            {
+              "model_id": "gpt-5.4-mini"
+            },
+            {
+              "model_id": "gpt-5.4"
+            },
+            {
+              "model_id": "gpt-5.6-sol"
+            },
+            {
+              "model_id": "gpt-5.6-luna"
+            },
+            {
+              "model_id": "gpt-5.6-terra"
+            },
+            {
+              "model_id": "o3"
+            }
+          ]
+        }
+      },
+      "performance_checkpoint": {},
+      "pending_policy": null,
+      "refresh_every_runs": 100,
+      "eligible_runs_since_last_refresh": 1,
+      "refresh_requested_at": null,
+      "last_refresh_result": null
+    },
+    "performances": [
+      {
+        "model_id": "gpt-5.4-mini-2026-03-17",
+        "input_profile": "unknown",
+        "run_count": 1,
+        "success_count": 1,
+        "schema_pass_count": 1,
+        "schema_eval_count": 1,
+        "downstream_success_count": 1,
+        "downstream_eval_count": 1,
+        "fallback_count": 0,
+        "retry_count": 0,
+        "total_cost": 0.003733,
+        "total_tokens": 1277,
+        "total_latency_ms": 0
+      }
+    ]
+  },
+  "quality_judge_total_cost_usd": 0.00078375,
+  "quality_judge_call_count": 1,
+  "quality_judge_errors": []
+}

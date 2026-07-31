@@ -1,9 +1,9 @@
 {
-  // Pylance가 라이브러리를 찾을 추가 경로 지정
-  "python.analysis.extraPaths": ["${workspaceFolder}/apps/server"],
+  // `apps.*` 절대 import를 저장소 루트에서 해석합니다.
+  "python.analysis.extraPaths": ["${workspaceFolder}"],
 
-  // 기본 인터프리터 경로 고정
-  "python.defaultInterpreterPath": "${workspaceFolder}/apps/workflow_engine/.venv/bin/python",
+  // 실행 파일명이 다른 Windows/Linux 모두에서 Gateway 가상환경을 찾습니다.
+  "python.defaultInterpreterPath": "${workspaceFolder}/apps/gateway/.venv",
 
   "[typescript]": {
     "editor.defaultFormatter": "esbenp.prettier-vscode",

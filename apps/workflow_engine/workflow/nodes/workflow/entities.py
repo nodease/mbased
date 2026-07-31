@@ -11,7 +11,7 @@ class WorkflowNodeInput(BaseModel):
 
 
 class WorkflowNodeData(BaseNodeData):
-    workflowId: str = Field(..., description="타겟 워크플로우 ID")
+    workflowId: str = Field(default="", description="타겟 워크플로우 ID")
     appId: str = Field(..., description="타겟 앱 ID")
     inputs: List[WorkflowNodeInput] = Field(default=[], description="입력 매핑 목록")
     # 지금은 사용이 안되는 것 같은데 혹시 모를 나중을 위해서 남겨 놓습니다..

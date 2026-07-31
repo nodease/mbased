@@ -1,92 +1,5 @@
 import React from 'react';
-import {
-  BaseEdge,
-  EdgeProps,
-  getBezierPath,
-  Position,
-  useStore,
-} from '@xyflow/react';
-
-// BaseNode와 공통 상수
-const TAB_SIZE = 34;
-const TAB_HEIGHT = 14;
-
-// 퍼즐 탭(돌기) 모양을 그리는 함수
-// 엣지의 끝부분에 부착되어 물리적인 결합 느낌을 줍니다.
-const PuzzleTab = ({
-  x,
-  y,
-  position, // 탭이 연결되는 핸들의 위치 (Source=Right, Target=Left)
-  color = '#d1d5db',
-}: {
-  x: number;
-  y: number;
-  position: Position;
-  color?: string;
-}) => {
-  // 시각적 로직:
-  // Source 노드(오른쪽 함몰) --- [ 탭 ] --- 엣지 선 --- [ 탭 ] --- Target 노드(왼쪽 함몰)
-  // 탭은 엣지의 헤드 부분 역할을 합니다.
-
-  return (
-    <g transform={`translate(${x}, ${y})`}>
-      {/* 
-        회전 로직: 
-        Source(오른쪽 핸들)에 연결될 때는 탭이 왼쪽(노드 안쪽)을 향해야 합니다.
-        Target(왼쪽 핸들)에 연결될 때는 탭이 오른쪽(노드 안쪽)을 향해야 합니다.
-        
-        React Flow 'position' prop은 노드 상의 핸들 위치를 알려줍니다.
-        Source Handle은 Position.Right.
-        Target Handle은 Position.Left.
-      */}
-      <PuzzleTabShape
-        orientation={position === Position.Right ? 'left' : 'right'}
-        color={color}
-      />
-    </g>
-  );
-};
-
-const PuzzleTabShape = ({
-  orientation,
-  color,
-}: {
-  orientation: 'left' | 'right';
-  color: string;
-}) => {
-  // 퍼즐 탭 모양의 경로(Path)를 그립니다.
-  // BaseNode의 함몰(Hole) 곡선과 일치하도록 구성합니다.
-
-  // 탭 너비와 높이는 BaseNode와 동일하게 설정
-  // TAB_SIZE = 34, TAB_HEIGHT = 14
-
-  // 오른쪽을 향하는 탭 경로 (Target 노드에 결합)
-  // 탭의 뾰족한 부분이 오른쪽(x+)을 향함
-  const pathRight = `
-    M 0 ${-TAB_SIZE / 2}
-    C 0 ${-TAB_SIZE / 6}, ${TAB_HEIGHT} ${-TAB_SIZE / 2}, ${TAB_HEIGHT} 0
-    C ${TAB_HEIGHT} ${TAB_SIZE / 2}, 0 ${TAB_SIZE / 6}, 0 ${TAB_SIZE / 2}
-    Z
-  `;
-
-  // 왼쪽을 향하는 탭 경로 (Source 노드에 결합)
-  // 탭의 뾰족한 부분이 왼쪽(x-)을 향함
-  const pathLeft = `
-    M 0 ${-TAB_SIZE / 2}
-    C 0 ${-TAB_SIZE / 6}, ${-TAB_HEIGHT} ${-TAB_SIZE / 2}, ${-TAB_HEIGHT} 0
-    C ${-TAB_HEIGHT} ${TAB_SIZE / 2}, 0 ${TAB_SIZE / 6}, 0 ${TAB_SIZE / 2}
-    Z
-  `;
-
-  return (
-    <path
-      d={orientation === 'right' ? pathRight : pathLeft}
-      fill={color}
-      stroke={color} // 엣지와 동일한 색상의 테두리
-      strokeWidth={1}
-    />
-  );
-};
+import { BaseEdge, EdgeProps, getBezierPath, useStore } from '@xyflow/react';
 
 export const PuzzleEdge = ({
   id,
@@ -99,7 +12,6 @@ export const PuzzleEdge = ({
   sourcePosition,
   targetPosition,
   style = {},
-  markerEnd,
   selected,
 }: EdgeProps) => {
   const [edgePath] = getBezierPath({

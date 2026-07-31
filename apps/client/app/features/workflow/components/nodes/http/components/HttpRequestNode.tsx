@@ -17,7 +17,7 @@ const methodColors: Record<string, string> = {
 const defaultMethodColor = 'bg-gray-100 text-gray-700 border-gray-200';
 
 export const HttpRequestNode = memo(
-  ({ data, selected }: NodeProps<Node<HttpRequestNodeData>>) => {
+  ({ id, data, selected }: NodeProps<Node<HttpRequestNodeData>>) => {
     const method = data.method || 'GET';
     const methodClass = methodColors[method] || defaultMethodColor;
 
@@ -28,6 +28,7 @@ export const HttpRequestNode = memo(
 
     return (
       <BaseNode
+        id={id}
         data={data}
         selected={selected}
         showSourceHandle={true}
@@ -60,4 +61,3 @@ export const HttpRequestNode = memo(
 );
 
 HttpRequestNode.displayName = 'HttpRequestNode';
-

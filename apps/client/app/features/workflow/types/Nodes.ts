@@ -1,9 +1,12 @@
 import { Node as ReactFlowNode } from '@xyflow/react';
+import type { JudgeFirstActivePolicy } from './ModelRouting';
 
 // 모든 노드가 가져야 할 공통 데이터 필드. 서버의 BaseNodeData에 대응됩니다.
 export interface BaseNodeData {
   title: string;
   description?: string;
+  displayNumber?: number;
+  visibleProperties?: string[];
   // UI 표시용 상태 필드 (실행 중 시각적 피드백)
   selected?: boolean; // 노드 선택 여부
   status?: 'idle' | 'running' | 'success' | 'failure'; // 실행 상태 (UI용)
@@ -85,7 +88,7 @@ export interface HttpRequestNodeData extends BaseNodeData {
 // ============================================================================
 
 // ======================== [Slack Post Node] ================================
-export interface SlackPostNodeData extends HttpRequestNodeData {
+export interface SlackPostNodeData extends BaseNodeData {
   slackMode?: 'webhook' | 'api';
   channel?: string;
   message?: string;
@@ -94,6 +97,16 @@ export interface SlackPostNodeData extends HttpRequestNodeData {
   icon_emoji?: string;
   blocks?: string;
   attachments?: string;
+  referenced_variables: HttpVariable[];
+
+  // Legacy HTTP-shaped fields are read-only compatibility input.
+  url?: string;
+  authConfig?: { token?: string };
+  method?: 'POST';
+  headers?: { key: string; value: string }[];
+  body?: string;
+  timeout?: number;
+  authType?: 'bearer' | 'none';
 }
 // ============================================================================
 
@@ -128,21 +141,74 @@ export interface LLMVariable {
   value_selector: string[];
 }
 
+export interface KnowledgeBaseNodeReference {
+  id: string;
+  name: string;
+}
+
+export interface KnowledgeCollectionNodeReference {
+  id: string;
+  safeLabel?: string;
+}
+
 export interface LLMNodeData extends BaseNodeData {
   provider: string;
   model_id: string;
   fallback_model_id?: string;
+  auto_model_routing?: boolean;
+  /** 초안 단계에서 만든 Judge-first 라우팅 준비 정보의 식별자 */
+  model_routing_bootstrap_id?: string;
+  /** prompt/RAG/schema/후속 계약이 같은지 배포 시 확인하는 지문 */
+  model_routing_bootstrap_fingerprint?: string;
+  /** Judge가 후보를 판단할 때 참고하는 사용자 작업 설명. */
+  model_routing_task_description?: string;
+  model_routing_strategy?: 'judge_bootstrap_incremental_v1';
+  model_routing_policy?: {
+    status?:
+      | 'off'
+      | 'collecting'
+      | 'active'
+      | 'refreshing'
+      | 'pending_review'
+      | 'failed';
+    policy_id?: string;
+    policy_version?: string;
+    active_policy?: JudgeFirstActivePolicy;
+    refresh?: {
+      runs_since_last_refresh?: number;
+      refresh_every_runs?: number;
+      last_refresh_result?: string;
+    };
+  };
+  model_routing_context?: {
+    customer_facing?: boolean;
+    node_task?: string;
+    category?: string;
+    intent?: string;
+    risk_level?: 'low' | 'medium' | 'high';
+  };
+  task_type?: string;
   system_prompt?: string;
   user_prompt?: string;
   assistant_prompt?: string;
   referenced_variables: LLMVariable[];
   context_variable?: string;
   parameters: Record<string, unknown>;
+  output_format?: {
+    type?: 'text' | 'json';
+    schema?: Record<string, unknown> | null;
+  };
 
   // 지식 (Knowledge) 통합 필드
-  knowledgeBases?: { id: string; name: string }[];
+  knowledgeBases?: KnowledgeBaseNodeReference[];
+  knowledgeCollections?: KnowledgeCollectionNodeReference[];
   scoreThreshold?: number;
   topK?: number;
+  dedupeRetrievedContext?: boolean;
+  retrievedContextMaxChars?: number;
+  retrievedContextCompression?: 'off' | 'light' | 'strong';
+  answerGroundingCheck?: 'off' | 'basic' | 'strict';
+  citationDisplayMode?: 'hidden' | 'basic' | 'detailed';
 }
 // ============================================================================
 
@@ -278,23 +344,14 @@ export interface GithubNodeData extends BaseNodeData {
 // ============================================================================
 
 // ========================= [Mail Node] ======================================
-export type EmailProvider = 'gmail' | 'naver' | 'daum' | 'outlook' | 'custom';
-
 export interface MailVariable {
   name: string;
   value_selector: string[];
 }
 
 export interface MailNodeData extends BaseNodeData {
-  // Account
-  email: string;
-  password: string;
-
-  // Server
-  provider: EmailProvider;
-  imap_server: string;
-  imap_port: number;
-  use_ssl: boolean;
+  credential_id?: string | null;
+  configuration_state?: 'resolved' | 'unresolved';
 
   // 검색 설정
   keyword?: string;
@@ -308,9 +365,22 @@ export interface MailNodeData extends BaseNodeData {
   max_results?: number; // Optional: 기본값 10
   unread_only: boolean;
   mark_as_read: boolean;
+  processing_mode?: 'search_only' | 'durable';
 
   // Variables
   referenced_variables: MailVariable[];
+}
+
+export interface GmailDraftNodeData extends BaseNodeData {
+  credential_id?: string | null;
+  configuration_state?: 'resolved' | 'unresolved';
+  processing_ref_selector: string[];
+  reply_body_selector: string[];
+}
+
+export interface MailAcknowledgeNodeData extends BaseNodeData {
+  processing_ref_selector: string[];
+  required_effect_ref_selectors: string[][];
 }
 
 // ========================= [Loop Node] ======================================
@@ -372,6 +442,14 @@ export type ScheduleTriggerNode = ReactFlowNode<
 export type GithubNode = ReactFlowNode<GithubNodeData, 'githubNode'>;
 
 export type MailNode = ReactFlowNode<MailNodeData, 'mailNode'>;
+export type GmailDraftNode = ReactFlowNode<
+  GmailDraftNodeData,
+  'gmailDraftNode'
+>;
+export type MailAcknowledgeNode = ReactFlowNode<
+  MailAcknowledgeNodeData,
+  'mailAcknowledgeNode'
+>;
 export type LoopNode = ReactFlowNode<LoopNodeData, 'loopNode'>;
 // ============================================================================
 
@@ -386,12 +464,14 @@ export type AppNode =
   | ConditionNode
   | CodeNode
   | TemplateNode
+  | MailNode
+  | GmailDraftNode
+  | MailAcknowledgeNode
   | FileExtractionNode
   | VariableExtractionNode
   | WebhookTriggerNode
   | ScheduleTriggerNode
   | GithubNode
-  | MailNode
   | LoopNode
   | NoteNode
   | WorkflowNode;

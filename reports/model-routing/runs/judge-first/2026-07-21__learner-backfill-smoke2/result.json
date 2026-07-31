@@ -1,0 +1,314 @@
+{
+  "executed_at": "2026-07-21T14:19:16.002598+00:00",
+  "workflow_id": "98000000-0000-0000-0000-000000000002",
+  "node_id": "llm-triage",
+  "case_count": 1,
+  "latest_batch": {
+    "offset": 31,
+    "count": 1,
+    "completed_case_count": 1
+  },
+  "available_models": [
+    "gpt-4o-mini",
+    "gpt-4.1-mini",
+    "gpt-4.1",
+    "gpt-4o",
+    "gpt-5-mini",
+    "gpt-5.4-mini",
+    "gpt-5.4",
+    "gpt-5.6-sol",
+    "gpt-5.6-luna",
+    "gpt-5.6-terra",
+    "o3"
+  ],
+  "routing_judge_model": "gpt-5.4-mini",
+  "quality_judge_model": "gpt-5-mini",
+  "runs": [
+    {
+      "case_id": "finance_closing_approval-32",
+      "category": "finance_closing_approval",
+      "expected_difficulty": "advanced",
+      "customer_tier": "enterprise",
+      "input": {
+        "request": "서비스 중단 보상액이 담당자 한도를 초과해 추가 결재가 필요합니다.",
+        "context": "지식 베이스 검색이나 외부 문서 조회 없이, 요청에 포함된 정보만 사용합니다.",
+        "constraints": [
+          "근거 없는 사실을 확정하지 않습니다.",
+          "누락된 정보는 assumptions에 분리합니다.",
+          "필수 JSON 필드를 모두 반환합니다.",
+          "위험하거나 되돌리기 어려운 조치는 승인 전제로 보수적으로 제안합니다."
+        ],
+        "output_mode": "analysis"
+      },
+      "execution_order": [
+        "automatic"
+      ],
+      "arms": {
+        "automatic": {
+          "arm": "automatic",
+          "selected_model": "gpt-5.4-mini-[REDACTED]",
+          "task_cost_usd": 0.001517,
+          "task_latency_ms": 27689,
+          "workflow_latency_ms": 27907,
+          "prompt_tokens": 498,
+          "completion_tokens": 254,
+          "total_tokens": 752,
+          "output_text": "{\"분류\":\"보상/결재\",\"우선순위\":\"high\",\"승인필요\":true,\"대응계획\":[\"담당자 보상 한도와 요청된 보상액의 초과 여부를 확인합니다.\",\"누락된 핵심 정보(서비스 중단 기간, 영향 범위, 계약/약관상 보상 기준, 산정 근거)를 assumptions로 분리해 정리합니다.\",\"추가 결재가 필요한 사유와 리스크를 간단히 요약해 승인 라인에 전달합니다.\",\"승인 전에는 보상 확정 또는 지급 처리를 진행하지 않습니다.\",\"승인 후에만 보상액 확정 및 후속 처리 절차를 진행합니다.\"],\"답변초안\":\"현재 제공된 정보만으로는 보상액의 적정성이나 최종 지급 가능 여부를 확정할 수 없습니다. 다만 담당자 한도를 초과한 것으로 보이므로 추가 결재가 필요합니다. 누락된 정보는 assumptions로 분리해 정리한 뒤, 승인 라인에 상신해 주시기 바랍니다. 승인 전에는 보상 확정이나 지급 처리를 진행하지 않겠습니다.\"}",
+          "schema_pass": true,
+          "workflow_success": true,
+          "error": null,
+          "routing": {
+            "judge": {
+              "cost": 0.00539175,
+              "model": "gpt-5.[REDACTED]",
+              "usage": {
+                "latency_ms": 9667,
+                "total_tokens": 2711,
+                "prompt_tokens": 2598,
+                "completion_tokens": 113
+              },
+              "status": "selected",
+              "attempted": true,
+              "confidence": 0.88,
+              "reason_code": "requirement_judge_ambiguous",
+              "reason_short": "요구 수준이 모호해 기본 모델 사용",
+              "reason_factors": [
+                "high_decision_impact",
+                "multi_step_reasoning",
+                "broad_context_synthesis"
+              ],
+              "rubric_version": "routing-requirements-v2",
+              "selected_model": "gpt-5.4-mini-[REDACTED]",
+              "ambiguity_flags": [
+                "insufficient_context"
+              ],
+              "learning_status": "pending_contract",
+              "selection_source": "server_requirement_selection",
+              "adjudicator_model": "gpt-5.[REDACTED]",
+              "task_requirements": {
+                "decision_impact": 2,
+                "task_complexity": 2,
+                "evidence_synthesis": 2
+              },
+              "candidate_model_count": 19,
+              "adjudication_attempted": true
+            },
+            "enabled": true,
+            "policy_id": "6317963e-1700-40bf-b812-9f1911b292c5",
+            "learner_id": "5885eecf-2c62-440e-a089-3dee36683a14",
+            "rag_context": {
+              "used": false,
+              "source_count": 0,
+              "partial_result": false,
+              "source_tier_used": null,
+              "evidence_sufficient": false,
+              "insufficiency_reason": null,
+              "query_rewrite_applied": false,
+              "retrieved_chunk_count": 0,
+              "retrieved_context_chars": 0,
+              "retrieved_context_token_estimate": "[REDACTED]"
+            },
+            "reason_code": "requirement_judge_ambiguous",
+            "strategy_id": "judge_bootstrap_incremental_v1",
+            "judge_called": true,
+            "execution_mode": "deployed",
+            "fallback_model": "gpt-4.[REDACTED]",
+            "policy_version": "judge-first-economics-v1",
+            "selected_model": "gpt-5.4-mini-[REDACTED]",
+            "decision_source": "runtime_judge",
+            "learner_version": null,
+            "learning_status": "pending_contract",
+            "matched_rule_id": null,
+            "runtime_context": {
+              "intent": "generate",
+              "node_task": "generate",
+              "risk_level": "medium",
+              "input_length": 284,
+              "output_format": "json",
+              "prompt_length": 385,
+              "has_file_input": false,
+              "customer_facing": false,
+              "schema_required": true,
+              "knowledge_enabled": false,
+              "input_length_bucket": "short",
+              "prompt_length_bucket": "short"
+            },
+            "decision_factors": {
+              "learning_mode": "judge_first",
+              "judged_request_count": 0,
+              "candidate_model_count": 19
+            },
+            "included_in_routing_learning": true
+          },
+          "routing_judge_cost_usd": 0.001199,
+          "routing_judge_tokens": 1349,
+          "routing_judge_latency_ms": 7904
+        }
+      },
+      "routing_accuracy": {
+        "classification": "unclassified",
+        "selected_model": "gpt-5.4-mini-[REDACTED]",
+        "acceptable_model_ids": [
+          "gpt-5.4",
+          "gpt-5.6-sol",
+          "o3"
+        ],
+        "underpowered_model_ids": [
+          "gpt-4o-mini",
+          "gpt-4.1-mini",
+          "gpt-5.6-luna"
+        ],
+        "overprovisioned_model_ids": []
+      },
+      "quality": {
+        "automatic": {
+          "quality_score": 86.0,
+          "contract_pass": true,
+          "reason": "전반적으로 요청 내용에 맞춘 분류('보상/결재')와 높은 우선순위 지정, 승인 필요 표기가 적절합니다. 대응계획은 실행 가능한 단계로 구성되어 있으며, '승인 전 보상 미확정' 등 보수적 접근을 유지해 위험 제약을 충족합니다. 답변초안은 이해하기 쉬운 문장으로 작성되어 있고 근거 없는 확정을 피했습니다. 다만 개선 여지는 다음과 같습니다: (1) 대응계획에 요청자에게 즉시 요청할 구체적 정보 항목(예: 서비스 중단 시작/종료 ",
+          "evaluation_status": "completed"
+        }
+      },
+      "quality_evaluation": {
+        "model": "gpt-5-mini",
+        "prompt_tokens": 623,
+        "completion_tokens": 349,
+        "total_tokens": 972,
+        "cost_usd": 0.00085375,
+        "latency_ms": 5730,
+        "attempt_count": 1,
+        "evaluation_status": "completed"
+      }
+    }
+  ],
+  "arm_summary": {
+    "automatic": {
+      "run_count": 1,
+      "task_cost_usd": 0.001517,
+      "routing_judge_cost_usd": 0.001199,
+      "total_product_cost_usd": 0.0027159999999999997,
+      "average_task_latency_ms": 27689.0,
+      "average_end_to_end_latency_ms": 27907.0,
+      "p95_task_latency_ms": 27689.0,
+      "total_tokens": 752,
+      "schema_pass_rate": 1.0,
+      "workflow_success_rate": 1.0,
+      "quality_score_average": 86.0,
+      "quality_pass_rate": 1.0,
+      "quality_evaluation_failure_count": 0,
+      "model_distribution": {
+        "gpt-5.4-mini-[REDACTED]": 1
+      },
+      "runtime_judge_call_count": 1
+    }
+  },
+  "learning_summary": {
+    "judge_label_count": 1,
+    "distinct_selected_model_count": 1,
+    "selected_models": {
+      "gpt-5.4-mini-[REDACTED]": 1
+    },
+    "decision_source_distribution": {
+      "runtime_judge": 1
+    },
+    "local_router_takeover_count": 0,
+    "local_router_uncertain_count": 0,
+    "local_confidence_threshold": 0.78,
+    "judge_confidence_average": 0.88,
+    "judge_confidence_p95": 0.88,
+    "interpretation": "local_router_takeover_count가 0이면, 현재 학습 표본 또는 confidence가 임계값에 도달하지 않아 모든 요청이 Runtime Judge로 처리된 것입니다.",
+    "persisted": {
+      "policy_status": "active",
+      "policy_version": "judge-first-economics-v1",
+      "learning_mode": "judge_first",
+      "judged_request_count": 0,
+      "operational_run_count": null,
+      "selected_model_ids": [],
+      "artifact_kind": null,
+      "artifact_encoder": null,
+      "artifact_label_models": [],
+      "artifact_trained_example_count": 0,
+      "last_learning_error": null
+    }
+  },
+  "policy_checkpoint": {
+    "policy": {
+      "status": "active",
+      "policy_version": "judge-first-economics-v1",
+      "active_policy": {
+        "learning": {
+          "mode": "judge_first",
+          "selected_model_ids": [],
+          "judged_request_count": 0,
+          "local_confidence_threshold": 0.78
+        },
+        "strategy_id": "judge_bootstrap_incremental_v1",
+        "judge_model_id": "gpt-5.4-mini",
+        "default_model_id": "gpt-5.4-mini",
+        "fallback_model_id": "gpt-4.1",
+        "global_profile_catalog": {
+          "candidates": [
+            {
+              "model_id": "gpt-4o-mini"
+            },
+            {
+              "model_id": "gpt-4.1-mini"
+            },
+            {
+              "model_id": "gpt-4.1"
+            },
+            {
+              "model_id": "gpt-4o"
+            },
+            {
+              "model_id": "gpt-5-mini"
+            },
+            {
+              "model_id": "gpt-5.4-mini"
+            },
+            {
+              "model_id": "gpt-5.4"
+            },
+            {
+              "model_id": "gpt-5.6-sol"
+            },
+            {
+              "model_id": "gpt-5.6-luna"
+            },
+            {
+              "model_id": "gpt-5.6-terra"
+            },
+            {
+              "model_id": "o3"
+            }
+          ]
+        }
+      },
+      "performance_checkpoint": {},
+      "pending_policy": null,
+      "refresh_every_runs": 100,
+      "eligible_runs_since_last_refresh": 1,
+      "refresh_requested_at": null,
+      "last_refresh_result": null
+    },
+    "performances": [
+      {
+        "model_id": "gpt-5.4-mini-2026-03-17",
+        "input_profile": "unknown",
+        "run_count": 1,
+        "success_count": 1,
+        "schema_pass_count": 1,
+        "schema_eval_count": 1,
+        "downstream_success_count": 1,
+        "downstream_eval_count": 1,
+        "fallback_count": 0,
+        "retry_count": 0,
+        "total_cost": 0.001517,
+        "total_tokens": 752,
+        "total_latency_ms": 0
+      }
+    ]
+  },
+  "quality_judge_total_cost_usd": 0.00085375,
+  "quality_judge_call_count": 1,
+  "quality_judge_errors": []
+}

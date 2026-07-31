@@ -1,0 +1,95 @@
+name: Test Workflow PostgreSQL Contracts
+
+on:
+  workflow_call:
+  push:
+    branches:
+      - dev
+    paths:
+      - "apps/gateway/adapters/db/schedule_dispatch_repository.py"
+      - "apps/gateway/adapters/audit/sqlalchemy_schedule_dispatch_audit.py"
+      - "apps/gateway/application/deployment/schedule_occurrence.py"
+      - "apps/gateway/application/deployment/schedule_dispatch.py"
+      - "apps/gateway/services/scheduler_service.py"
+      - "apps/shared/alembic/**"
+      - "apps/shared/celery_app.py"
+      - "apps/shared/db/models/workflow_node_effect_attempt.py"
+      - "apps/shared/db/models/llm.py"
+      - "apps/shared/db/models/schedule_dispatch.py"
+      - "apps/shared/db/models/provider_usage.py"
+      - "apps/shared/domain/schedule_dispatch.py"
+      - "apps/shared/domain/provider_usage_ledger.py"
+      - "apps/shared/services/provider_usage_*.py"
+      - "apps/shared/services/schedule_dispatch_*.py"
+      - "apps/shared/tests/db/test_schedule_dispatch_disposable_postgres.py"
+      - "apps/shared/tests/db/test_external_effect_disposable_postgres.py"
+      - "apps/shared/tests/db/test_provider_execution_node_location_migration.py"
+      - "apps/shared/tests/db/test_query_embedding_capability_migration_postgres.py"
+      - "apps/shared/tests/db/test_provider_usage_ledger_disposable_postgres.py"
+      - "apps/workflow_engine/adapters/db/external_effect_repository.py"
+      - "apps/workflow_engine/application/external_effect.py"
+      - "apps/workflow_engine/composition/external_effect_readiness.py"
+      - "apps/workflow_engine/adapters/schedule_dispatch_repository.py"
+      - "apps/workflow_engine/adapters/schedule_dispatch_audit.py"
+      - "apps/workflow_engine/application/schedule_dispatch.py"
+      - "apps/workflow_engine/tasks.py"
+      - "scripts/check_schedule_dispatch_rollback.py"
+      - ".github/workflows/test-schedule-dispatch-postgres.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  schedule-dispatch-postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DB_HOST: 127.0.0.1
+      DB_PORT: "5432"
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      NODEASE_DISPOSABLE_DB_MAINTENANCE_DB: postgres
+      NODEASE_RUN_DISPOSABLE_DB_TEST: "1"
+      PYTHONPATH: ${{ github.workspace }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+
+      - name: Install test dependencies
+        run: |
+          uv sync --project apps/workflow_engine --extra dev --frozen
+          uv pip install --python apps/workflow_engine/.venv/bin/python -e apps/shared apscheduler fastapi
+
+      - name: Run migration and multi-session race evidence
+        run: |
+          apps/workflow_engine/.venv/bin/python -m pytest \
+            apps/shared/tests/db/test_schedule_dispatch_disposable_postgres.py \
+            apps/shared/tests/db/test_external_effect_disposable_postgres.py \
+            apps/shared/tests/db/test_provider_execution_node_location_migration.py \
+            apps/shared/tests/db/test_query_embedding_capability_migration_postgres.py \
+            apps/shared/tests/db/test_provider_usage_ledger_disposable_postgres.py \
+            -q

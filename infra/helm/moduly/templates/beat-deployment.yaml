@@ -1,0 +1,64 @@
+{{- if .Values.beat.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "moduly.fullname" . }}-beat
+  labels:
+    {{- include "moduly.componentLabels" (dict "component" "beat" "context" .) | nindent 4 }}
+spec:
+  # Beat is a singleton scheduler. Recreate prevents an update from briefly
+  # running two schedulers and publishing duplicate periodic deliveries.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "moduly.componentSelectorLabels" (dict "component" "beat" "context" .) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "moduly.componentSelectorLabels" (dict "component" "beat" "context" .) | nindent 8 }}
+      annotations:
+        checksum/config: {{ toYaml .Values | sha256sum }}
+        checksum/secret: {{ toYaml .Values.secrets | sha256sum }}
+    spec:
+      containers:
+      - name: beat
+        image: "{{ default .Values.worker.image.repository .Values.beat.image.repository }}:{{ default (.Values.worker.image.tag | default .Chart.AppVersion) .Values.beat.image.tag }}"
+        imagePullPolicy: {{ default .Values.worker.image.pullPolicy .Values.beat.image.pullPolicy }}
+        command:
+        - celery
+        args:
+        - -A
+        - apps.shared.celery_app:celery_app
+        - beat
+        - --loglevel=info
+        env:
+        - name: REDIS_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "moduly.configMapName" . }}
+              key: REDIS_HOST
+        - name: REDIS_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "moduly.configMapName" . }}
+              key: REDIS_PORT
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "moduly.secretName" . }}
+              key: REDIS_PASSWORD
+        - name: REDIS_BROKER_DB
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "moduly.configMapName" . }}
+              key: REDIS_BROKER_DB
+        - name: REDIS_BACKEND_DB
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "moduly.configMapName" . }}
+              key: REDIS_BACKEND_DB
+        resources:
+          {{- toYaml .Values.beat.resources | nindent 10 }}
+{{- end }}

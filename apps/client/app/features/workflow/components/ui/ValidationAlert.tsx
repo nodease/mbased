@@ -1,6 +1,5 @@
 import { ReactNode } from 'react';
 import { cn } from '@/lib/utils';
-import { AlertTriangle } from 'lucide-react';
 
 interface ValidationAlertProps {
   message: ReactNode;
@@ -22,12 +21,10 @@ export function ValidationAlert({
     <div
       className={cn(
         `${bgColor} border ${borderColor} rounded p-2 ${textColor} text-xs mt-1`,
-        className
+        className,
       )}
     >
-      <div className="font-semibold flex flex-col gap-1">
-        {message}
-      </div>
+      <div className="font-semibold flex flex-col gap-1">{message}</div>
     </div>
   );
 }

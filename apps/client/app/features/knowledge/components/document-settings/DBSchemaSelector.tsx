@@ -294,32 +294,6 @@ export default function DBSchemaSelector({
     onSensitiveColumnsChange(newValue);
   };
 
-  // Alias 변경
-  const handleAliasChange = (
-    tableName: string,
-    colName: string,
-    alias: string,
-  ) => {
-    if (!onAliasesChange) return;
-
-    const newAliases = { ...aliases };
-    if (!newAliases[tableName]) {
-      newAliases[tableName] = {};
-    }
-
-    if (alias.trim()) {
-      newAliases[tableName][colName] = alias.trim();
-    } else {
-      // Alias 비우면 삭제
-      delete newAliases[tableName][colName];
-      if (Object.keys(newAliases[tableName]).length === 0) {
-        delete newAliases[tableName];
-      }
-    }
-
-    onAliasesChange(newAliases);
-  };
-
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center p-8 text-gray-400">

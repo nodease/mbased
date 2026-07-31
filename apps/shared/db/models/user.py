@@ -1,12 +1,14 @@
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
-
-from sqlalchemy import DateTime, String
-from sqlalchemy.dialects.postgresql import UUID as PGUUID
-from sqlalchemy.orm import Mapped, mapped_column
+from typing import TYPE_CHECKING, Optional
 
 from apps.shared.db.base import Base
+from sqlalchemy import DateTime, String
+from sqlalchemy.dialects.postgresql import UUID as PGUUID
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+if TYPE_CHECKING:
+    from apps.shared.db.models.organization_membership import OrganizationMembership
 
 
 class User(Base):
@@ -32,6 +34,13 @@ class User(Base):
 
     avatar_url: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
 
+    deactivated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_login_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -43,4 +52,16 @@ class User(Base):
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )
-    # TODO: tenant_id 추가.
+
+    organization_memberships: Mapped[list["OrganizationMembership"]] = relationship(
+        "OrganizationMembership",
+        back_populates="user",
+        foreign_keys="OrganizationMembership.user_id",
+    )
+    invited_organization_memberships: Mapped[list["OrganizationMembership"]] = (
+        relationship(
+            "OrganizationMembership",
+            back_populates="inviter",
+            foreign_keys="OrganizationMembership.invited_by",
+        )
+    )

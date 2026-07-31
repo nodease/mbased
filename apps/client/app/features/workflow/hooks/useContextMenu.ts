@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react';
 import { useReactFlow } from '@xyflow/react';
 import type { AppNode, NoteNode } from '../types/Nodes';
 import { getNodeDefinition } from '../config/nodeRegistry';
+import { useWorkflowStore } from '../store/useWorkflowStore';
 
 interface ContextMenu {
   x: number;
@@ -22,8 +23,6 @@ interface EdgeContextMenu {
 }
 
 interface UseContextMenuProps {
-  nodes: AppNode[];
-  setNodes: (nodes: AppNode[]) => void;
   triggerWorkflowRun: () => void;
   setSearchModalContext: (context: {
     isOpen: boolean;
@@ -32,12 +31,11 @@ interface UseContextMenuProps {
 }
 
 export function useContextMenu({
-  nodes,
-  setNodes,
   triggerWorkflowRun,
   setSearchModalContext,
 }: UseContextMenuProps) {
   const { screenToFlowPosition } = useReactFlow();
+  const addNode = useWorkflowStore((state) => state.addNode);
 
   // Context menu states
   const [contextMenu, setContextMenu] = useState<ContextMenu | null>(null);
@@ -94,9 +92,9 @@ export function useContextMenu({
       style: { width: 300, height: 100 },
     };
 
-    setNodes([...nodes, newNote]);
+    addNode(newNote);
     setContextMenu(null);
-  }, [contextMenuPos, screenToFlowPosition, setNodes, nodes]);
+  }, [contextMenuPos, screenToFlowPosition, addNode]);
 
   // Test run from context menu
   const handleTestRunFromContext = useCallback(() => {
@@ -122,23 +120,16 @@ export function useContextMenu({
         return;
       }
 
-      const newNode: AppNode = {
+      const baseNode = {
         id: `${nodeDef.id}-${Date.now()}`,
-        type: nodeDef.type as any,
-        data: nodeDef.defaultData() as any,
+        type: nodeDef.type,
+        data: nodeDef.defaultData(),
         position,
-      };
-
-      setNodes([...nodes, newNode]);
+      } as unknown as AppNode;
+      addNode(baseNode);
       setIsContextNodeSelectorOpen(false);
     },
-    [
-      contextMenuPos,
-      screenToFlowPosition,
-      setNodes,
-      nodes,
-      setSearchModalContext,
-    ],
+    [contextMenuPos, screenToFlowPosition, setSearchModalContext, addNode],
   );
 
   return {

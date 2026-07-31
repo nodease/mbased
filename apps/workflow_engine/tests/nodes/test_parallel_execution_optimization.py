@@ -121,7 +121,7 @@ def mixed_dependencies_graph():
 
     Start → [Node A (slow), Node B (fast)] → Node C (uses only B's output)
 
-    Node C should start as soon as Node B completes (doesn't wait for A).
+    Node C needs B's data, but both A and B are active control predecessors.
     """
     return {
         "nodes": [
@@ -272,10 +272,12 @@ class TestParallelExecution:
         assert "answer-1" in result
         assert "result" in result["answer-1"]
 
-    def test_mixed_dependencies_optimize_execution(self, mixed_dependencies_graph):
+    def test_mixed_dependencies_wait_for_active_control_predecessors(
+        self, mixed_dependencies_graph
+    ):
         """
-        Node C should start as soon as Node B completes,
-        without waiting for Node A.
+        Node C must wait for both active incoming control edges even when its
+        selector references only Node B.
         """
         user_input = {"query": "test"}
         engine = WorkflowEngine(graph=mixed_dependencies_graph, user_input=user_input)
@@ -295,12 +297,11 @@ class TestParallelExecution:
         # [GEVENT] sync 호출
         result = engine.execute()
 
-        # answer-1 should become ready as soon as template-b completes
-        # (not waiting for template-a)
+        # answer-1 should become ready only after both active predecessors.
         if "answer-1" in ready_times:
             _, completed_nodes = ready_times["answer-1"]
             assert "template-b" in completed_nodes
-            # template-a may or may not be complete when answer-1 becomes ready
+            assert "template-a" in completed_nodes
 
         assert "answer-1" in result
 
@@ -310,8 +311,7 @@ class TestBackwardCompatibility:
 
     def test_nodes_without_value_selector_use_graph_edges(self):
         """
-        Nodes without value_selector should have empty data dependencies,
-        allowing them to execute immediately (not waiting for graph predecessors).
+        Nodes without value_selector still wait for active graph predecessors.
         """
         graph = {
             "nodes": [
@@ -343,8 +343,8 @@ class TestBackwardCompatibility:
         assert "code-1" in engine.data_dependencies
         assert len(engine.data_dependencies["code-1"]) == 0
 
-        # _is_ready should work correctly (no dependencies = ready immediately)
-        assert engine._is_ready("code-1", {})
+        # The start -> code control edge is unresolved before start completes.
+        assert not engine._is_ready("code-1", {})
 
 
 class TestComplexWorkflows:

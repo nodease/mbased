@@ -1,28 +1,30 @@
 @import 'tailwindcss';
+@source './**/*.{js,ts,jsx,tsx,mdx}';
+@source '../lib/**/*.{js,ts,jsx,tsx,mdx}';
+@source not '../.next';
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f6f8fb;
+  --foreground: #0f172a;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --font-sans:
+    Arial, 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+  --font-mono:
+    'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family:
+    Arial,
+    'Apple SD Gothic Neo',
+    'Malgun Gothic',
+    sans-serif;
 }
 
 /* Custom scrollbar styles */
@@ -32,16 +34,16 @@ body {
 }
 
 ::-webkit-scrollbar-track {
-  background: #f1f1f1;
+  background: #f1f5f9;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #c1c1c1;
+  background: #cbd5e1;
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #a1a1a1;
+  background: #94a3b8;
 }
 
 /* ReactFlow custom styles */
@@ -52,4 +54,10 @@ body {
 .react-flow__attribution {
   opacity: 0.3;
   font-size: 10px;
+}
+
+@media (min-width: 40rem) {
+  .agent-builder-panel-shell {
+    width: var(--agent-builder-panel-width);
+  }
 }

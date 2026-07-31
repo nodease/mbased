@@ -16,6 +16,12 @@ class WorkflowNodeRunSchema(BaseModel):
     error_message: Optional[str]
     started_at: datetime
     finished_at: Optional[datetime]
+    duration: Optional[float] = None
+    trace_metadata: Optional[Dict[str, Any]] = None
+    redaction_applied: Optional[bool] = False
+    pii_detected: Optional[bool] = False
+    sequence: Optional[int] = None
+    retry_count: Optional[int] = 0
 
     class Config:
         from_attributes = True
@@ -25,7 +31,8 @@ class WorkflowNodeRunSchema(BaseModel):
 class WorkflowRunSchema(BaseModel):
     id: UUID
     workflow_id: UUID
-    user_id: UUID
+    app_id: Optional[UUID] = None
+    user_id: Optional[UUID]
     status: str
     trigger_mode: str
     inputs: Optional[Dict[str, Any]]
@@ -38,6 +45,13 @@ class WorkflowRunSchema(BaseModel):
     deployment_id: Optional[UUID] = None  # [NEW]
     total_tokens: Optional[int] = 0  # [NEW]
     total_cost: Optional[float] = 0.0  # [NEW]
+    correlation_id: Optional[str] = None
+    request_id: Optional[str] = None
+    workflow_task_id: Optional[str] = None
+    trace_metadata: Optional[Dict[str, Any]] = None
+    redaction_applied: Optional[bool] = False
+    pii_detected: Optional[bool] = False
+    payload_storage_mode: Optional[str] = "redacted_only"
     node_runs: List[WorkflowNodeRunSchema] = []
 
     class Config:
@@ -56,7 +70,8 @@ class WorkflowRunSchema(BaseModel):
 class WorkflowRunSummarySchema(BaseModel):
     id: UUID
     workflow_id: UUID
-    user_id: UUID
+    app_id: Optional[UUID] = None
+    user_id: Optional[UUID]
     status: str
     trigger_mode: str
     inputs: Optional[Dict[str, Any]]
@@ -69,6 +84,9 @@ class WorkflowRunSummarySchema(BaseModel):
     deployment_id: Optional[UUID] = None
     total_tokens: Optional[int] = 0
     total_cost: Optional[float] = 0.0
+    redaction_applied: Optional[bool] = False
+    pii_detected: Optional[bool] = False
+    payload_storage_mode: Optional[str] = "redacted_only"
     # node_runs 제외됨
 
     class Config:

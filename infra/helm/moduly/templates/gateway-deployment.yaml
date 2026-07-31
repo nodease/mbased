@@ -1,4 +1,9 @@
 {{- if .Values.gateway.enabled }}
+{{- $connectorTestAllowedPorts := required "connectorTest.allowedPorts is required" .Values.connectorTest.allowedPorts }}
+{{- $storageType := include "moduly.storageType" . }}
+{{- if and .Values.knowledgeWorker.enabled (eq $storageType "LOCAL") (not .Values.knowledgeWorker.localStorage.enabled) }}
+{{- fail "knowledgeWorker.localStorage.enabled must be true when Knowledge worker uses LOCAL storage" }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -14,10 +19,21 @@ spec:
     metadata:
       labels:
         {{- include "moduly.componentSelectorLabels" (dict "component" "gateway" "context" .) | nindent 8 }}
+        {{- if .Values.egressProxy.enabled }}
+        nodease.io/egress-mode: proxy-v1
+        {{- end }}
       annotations:
+        nodease.io/egress-enforcement-phase: {{ .Values.egressProxy.networkPolicy.enforcementPhase | quote }}
+        nodease.io/schedule-dispatch-fingerprint: {{ include "moduly.scheduleDispatchFingerprint" . | quote }}
         checksum/config: {{ toYaml .Values | sha256sum }}
         checksum/secret: {{ toYaml .Values.secrets | sha256sum }}
     spec:
+      serviceAccountName: {{ include "moduly.serviceAccountName" . }}
+      {{- if and .Values.knowledgeWorker.enabled (eq $storageType "LOCAL") .Values.knowledgeWorker.localStorage.enabled }}
+      securityContext:
+        fsGroup: {{ .Values.knowledgeWorker.localStorage.fsGroup }}
+        fsGroupChangePolicy: OnRootMismatch
+      {{- end }}
       containers:
       - name: gateway
         image: "{{ .Values.gateway.image.repository }}:{{ .Values.gateway.image.tag | default .Chart.AppVersion }}"
@@ -27,6 +43,7 @@ spec:
           containerPort: {{ .Values.gateway.service.port }}
           protocol: TCP
         env:
+        {{- include "moduly.outboundProxyEnv" (dict "context" . "port" .Values.egressProxy.service.httpsPort) | nindent 8 }}
         # Database configuration (from ConfigMap)
         - name: DB_HOST
           valueFrom:
@@ -75,6 +92,45 @@ spec:
             secretKeyRef:
               name: {{ include "moduly.secretName" . }}
               key: REDIS_PASSWORD
+        - name: AUTH_LOGIN_LIMITER_REDIS_DB
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "moduly.configMapName" . }}
+              key: AUTH_LOGIN_LIMITER_REDIS_DB
+        - name: AUTH_LOGIN_LIMITER_POLICY_VERSION
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "moduly.configMapName" . }}
+              key: AUTH_LOGIN_LIMITER_POLICY_VERSION
+        - name: AUTH_LOGIN_FINGERPRINT_PRIMARY_VERSION
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "moduly.configMapName" . }}
+              key: AUTH_LOGIN_FINGERPRINT_PRIMARY_VERSION
+        - name: AUTH_LOGIN_TRUSTED_PROXY_CIDRS
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "moduly.configMapName" . }}
+              key: AUTH_LOGIN_TRUSTED_PROXY_CIDRS
+        - name: AUTH_LOGIN_FINGERPRINT_KEYS
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "moduly.secretName" . }}
+              key: AUTH_LOGIN_FINGERPRINT_KEYS
+
+        {{- include "moduly.scheduleDispatchEnv" . | nindent 8 }}
+
+        - name: APP_AUTH_SECRET_LIFECYCLE_MODE
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "moduly.configMapName" . }}
+              key: APP_AUTH_SECRET_LIFECYCLE_MODE
+        - name: PUBLIC_CHAT_CONVERSATION_ROLLOUT_MODE
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "moduly.configMapName" . }}
+              key: PUBLIC_CHAT_CONVERSATION_ROLLOUT_MODE
+
         
         # CORS and Security
         - name: CORS_ORIGINS
@@ -87,6 +143,56 @@ spec:
             secretKeyRef:
               name: {{ include "moduly.secretName" . }}
               key: SECRET_KEY
+        - name: MEMORY_PUBLIC_CONVERSATION_ENABLED
+          value: {{ .Values.memoryPublicConversation.enabled | quote }}
+        - name: MEMORY_PUBLIC_PURGE_WORKER_READY
+          value: {{ .Values.memoryPublicConversation.purgeWorkerReady | quote }}
+        - name: MEMORY_PUBLIC_REPLAY_BACKUP_ERASURE_MODE
+          value: {{ .Values.memoryPublicConversation.replayBackupErasureMode | quote }}
+        {{- if .Values.memoryPublicConversation.enabled }}
+        {{- if .Values.secrets.memoryPublicCapabilityHmacKeys }}
+        - name: MEMORY_PUBLIC_CAPABILITY_HMAC_KEYS
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "moduly.secretName" . }}
+              key: MEMORY_PUBLIC_CAPABILITY_HMAC_KEYS
+        - name: MEMORY_PUBLIC_CAPABILITY_HMAC_PRIMARY_VERSION
+          value: {{ required "memoryPublicConversation.capabilityHmacPrimaryVersion is required when a capability keyring is configured" .Values.memoryPublicConversation.capabilityHmacPrimaryVersion | quote }}
+        {{- else }}
+        - name: MEMORY_PUBLIC_CAPABILITY_HMAC_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "moduly.secretName" . }}
+              key: MEMORY_PUBLIC_CAPABILITY_HMAC_KEY
+        {{- end }}
+        {{- if .Values.secrets.memoryPublicReplayEncryptionKeys }}
+        - name: MEMORY_PUBLIC_REPLAY_ENCRYPTION_KEYS
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "moduly.secretName" . }}
+              key: MEMORY_PUBLIC_REPLAY_ENCRYPTION_KEYS
+        - name: MEMORY_PUBLIC_REPLAY_ENCRYPTION_PRIMARY_VERSION
+          value: {{ required "memoryPublicConversation.replayEncryptionPrimaryVersion is required when a replay keyring is configured" .Values.memoryPublicConversation.replayEncryptionPrimaryVersion | quote }}
+        {{- else }}
+        - name: MEMORY_PUBLIC_REPLAY_ENCRYPTION_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "moduly.secretName" . }}
+              key: MEMORY_PUBLIC_REPLAY_ENCRYPTION_KEY
+        {{- end }}
+        - name: MEMORY_PUBLIC_ADMISSION_HMAC_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "moduly.secretName" . }}
+              key: MEMORY_PUBLIC_ADMISSION_HMAC_KEY
+        {{- end }}
+        - name: CONNECTOR_TEST_ADMISSION_HMAC_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "moduly.secretName" . }}
+              key: CONNECTOR_TEST_ADMISSION_HMAC_KEY
+        - name: CONNECTOR_TEST_ALLOWED_PORTS
+          value: {{ join "," $connectorTestAllowedPorts | quote }}
         
         # Sandbox configuration
         - name: SANDBOX_URL
@@ -115,6 +221,33 @@ spec:
               name: {{ include "moduly.secretName" . }}
               key: ENCRYPTION_KEY
         {{- end }}
+        {{- if .Values.secrets.mailCredentialEncryptionKeys }}
+        - name: MAIL_CREDENTIAL_ENCRYPTION_KEYS
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "moduly.secretName" . }}
+              key: MAIL_CREDENTIAL_ENCRYPTION_KEYS
+        - name: MAIL_CREDENTIAL_ACTIVE_KEY_VERSION
+          value: {{ .Values.secrets.mailCredentialActiveKeyVersion | default "v1" | quote }}
+        {{- end }}
+        {{- if .Values.secrets.workflowNodeSecretEncryptionKeys }}
+        - name: WORKFLOW_NODE_SECRET_ENCRYPTION_KEYS
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "moduly.secretName" . }}
+              key: WORKFLOW_NODE_SECRET_ENCRYPTION_KEYS
+        - name: WORKFLOW_NODE_SECRET_ACTIVE_KEY_VERSION
+          value: {{ .Values.secrets.workflowNodeSecretActiveKeyVersion | default "v1" | quote }}
+        {{- end }}
+        {{- if .Values.secrets.llmCredentialEncryptionKeys }}
+        - name: LLM_CREDENTIAL_ENCRYPTION_KEYS
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "moduly.secretName" . }}
+              key: LLM_CREDENTIAL_ENCRYPTION_KEYS
+        - name: LLM_CREDENTIAL_ACTIVE_KEY_VERSION
+          value: {{ .Values.secrets.llmCredentialActiveKeyVersion | default "v1" | quote }}
+        {{- end }}
         
         # Storage configuration
         - name: STORAGE_TYPE
@@ -122,18 +255,18 @@ spec:
             configMapKeyRef:
               name: {{ include "moduly.configMapName" . }}
               key: STORAGE_TYPE
-        {{- if .Values.gateway.env.S3_BUCKET_NAME }}
+        {{- if eq $storageType "CLOUD" }}
         - name: S3_BUCKET_NAME
           valueFrom:
             configMapKeyRef:
               name: {{ include "moduly.configMapName" . }}
               key: S3_BUCKET_NAME
-        {{- end }}
         - name: AWS_REGION
           valueFrom:
             configMapKeyRef:
               name: {{ include "moduly.configMapName" . }}
               key: AWS_REGION
+        {{- end }}
         
         # Google OAuth (optional)
         {{- if .Values.secrets.googleClientId }}
@@ -160,6 +293,11 @@ spec:
         
         resources:
           {{- toYaml .Values.gateway.resources | nindent 10 }}
+        {{- if and .Values.knowledgeWorker.enabled (eq $storageType "LOCAL") .Values.knowledgeWorker.localStorage.enabled }}
+        volumeMounts:
+        - name: knowledge-uploads
+          mountPath: /app/uploads
+        {{- end }}
         
         livenessProbe:
           httpGet:
@@ -174,4 +312,10 @@ spec:
             port: http
           initialDelaySeconds: 10
           periodSeconds: 5
+      {{- if and .Values.knowledgeWorker.enabled (eq $storageType "LOCAL") .Values.knowledgeWorker.localStorage.enabled }}
+      volumes:
+      - name: knowledge-uploads
+        persistentVolumeClaim:
+          claimName: {{ include "moduly.knowledgeUploadClaimName" . }}
+      {{- end }}
 {{- end }}

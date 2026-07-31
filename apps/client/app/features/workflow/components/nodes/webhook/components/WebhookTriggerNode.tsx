@@ -5,9 +5,10 @@ import { WebhookTriggerNodeData } from '../../../../types/Nodes';
 import { BaseNode } from '../../BaseNode';
 
 export const WebhookTriggerNode = memo(
-  ({ data, selected }: NodeProps<Node<WebhookTriggerNodeData>>) => {
+  ({ id, data, selected }: NodeProps<Node<WebhookTriggerNodeData>>) => {
     return (
       <BaseNode
+        id={id}
         data={data}
         selected={selected}
         icon={<Webhook className="text-white" />}

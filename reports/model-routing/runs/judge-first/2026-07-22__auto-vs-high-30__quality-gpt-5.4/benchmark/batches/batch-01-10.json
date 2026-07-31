@@ -1,0 +1,2147 @@
+{
+  "executed_at": "2026-07-21T23:06:54.560517+00:00",
+  "phase": "benchmark",
+  "quality_evaluation_enabled": true,
+  "workflow_id": "98000000-0000-0000-0000-000000000002",
+  "node_id": "llm-triage",
+  "case_count": 10,
+  "latest_batch": {
+    "offset": 0,
+    "count": 10,
+    "completed_case_count": 10
+  },
+  "available_models": [
+    "gpt-4o-mini",
+    "gpt-4.1-mini",
+    "gpt-4.1",
+    "gpt-4o",
+    "gpt-5-mini",
+    "gpt-5.4-mini",
+    "gpt-5.4",
+    "gpt-5.6-sol",
+    "gpt-5.6-luna",
+    "gpt-5.6-terra",
+    "o3"
+  ],
+  "routing_judge_model": "gpt-5.4-mini",
+  "quality_judge_model": "gpt-5.4",
+  "runs": [
+    {
+      "case_id": "benchmark-holdout-001",
+      "category": "holdout_product_help",
+      "expected_difficulty": "economy",
+      "customer_tier": "business",
+      "input": {
+        "request": "실행 비교 화면에서 기준 실행을 바꾸는 방법을 알려 주세요.",
+        "context": "지식 베이스 검색이나 외부 문서 조회 없이, 요청에 포함된 정보만 사용합니다.",
+        "constraints": [
+          "근거 없는 사실을 확정하지 않습니다.",
+          "누락된 정보는 assumptions에 분리합니다.",
+          "필수 JSON 필드를 모두 반환합니다."
+        ],
+        "output_mode": "checklist"
+      },
+      "execution_order": [
+        "high_fixed",
+        "automatic"
+      ],
+      "arms": {
+        "high_fixed": {
+          "arm": "high_fixed",
+          "selected_model": "gpt-5.6-sol",
+          "task_cost_usd": 0.01183,
+          "task_latency_ms": 6909,
+          "workflow_latency_ms": 7156,
+          "prompt_tokens": 470,
+          "completion_tokens": 316,
+          "total_tokens": 786,
+          "output_text": "{\"분류\":\"제품 사용 방법 문의\",\"우선순위\":\"low\",\"승인필요\":false,\"대응계획\":[\"실행 비교 화면에서 기준 실행을 선택하거나 변경하는 컨트롤이 있는지 확인합니다.\",\"현재 제공된 정보만으로는 정확한 메뉴명과 조작 절차를 확정할 수 없음을 안내합니다.\",\"제품명, 화면 캡처, 현재 보이는 버튼이나 메뉴 정보를 요청합니다.\"],\"답변초안\":\"확인 체크리스트\\n□ 실행 비교 화면에서 ‘기준 실행’, ‘Baseline’, ‘Reference’ 또는 유사한 선택 항목을 찾습니다.\\n□ 해당 항목이 있다면 원하는 실행을 선택한 뒤 적용 또는 비교 버튼을 확인합니다.\\n□ 선택 항목이 보이지 않으면 실행 목록의 더보기 메뉴나 비교 설정 영역을 확인합니다.\\n□ 그래도 찾기 어렵다면 제품명, 화면 캡처, 현재 보이는 버튼·메뉴를 알려 주세요.\\n\\nAssumptions\\n- 일반적으로 비교 화면에 기준 실행을 지정하는 선택 컨트롤이 있을 수 있다고 가정한 안내입니다.\\n- 제공된 정보만으로 실제 메뉴명, 위치, 저장 방식은 확정할 수 없습니다.\"}",
+          "schema_pass": true,
+          "workflow_success": true,
+          "error": null,
+          "routing": {},
+          "routing_judge_cost_usd": 0.0,
+          "routing_judge_tokens": 0,
+          "routing_judge_latency_ms": null
+        },
+        "automatic": {
+          "arm": "automatic",
+          "selected_model": "gpt-4o-mini",
+          "task_cost_usd": 0.000155,
+          "task_latency_ms": 4368,
+          "workflow_latency_ms": 4554,
+          "prompt_tokens": 471,
+          "completion_tokens": 141,
+          "total_tokens": 612,
+          "output_text": "{\n  \"분류\": \"정보 요청\",\n  \"우선순위\": \"medium\",\n  \"승인필요\": false,\n  \"대응계획\": [\n    \"요청자에게 기준 실행 변경 방법에 대한 정보를 제공한다.\",\n    \"추가적인 세부사항이 필요할 경우 요청자에게 질문한다.\"\n  ],\n  \"답변초안\": \"기준 실행을 변경하는 방법은 사용 중인 시스템의 설정 메뉴에서 '기준 실행' 옵션을 찾아 변경할 수 있습니다. 구체적인 단계는 시스템의 사용자 매뉴얼을 참조하시거나, 시스템 내 도움말 기능을 이용해 주시기 바랍니다.\"\n}",
+          "schema_pass": true,
+          "workflow_success": true,
+          "error": null,
+          "routing": {
+            "judge": {
+              "cost": 0.00189,
+              "model": "gpt-5.4-mini",
+              "usage": {
+                "latency_ms": 2216,
+                "total_tokens": 1480,
+                "prompt_tokens": 1272,
+                "completion_tokens": 208
+              },
+              "status": "selected",
+              "attempted": true,
+              "confidence": 0.88,
+              "reason_code": "requirements_candidate_selected",
+              "reason_short": "요구 수준에 맞는 후보 선택",
+              "reason_factors": [
+                "multi_step_reasoning",
+                "broad_context_synthesis"
+              ],
+              "rubric_version": "routing-requirements-v4",
+              "selected_model": "gpt-4o-mini",
+              "ambiguity_flags": [
+                "insufficient_context"
+              ],
+              "learning_status": "not_queued",
+              "selection_source": "server_requirement_selection",
+              "task_requirements": {
+                "decision_impact": 1,
+                "task_complexity": 1,
+                "evidence_synthesis": 1
+              },
+              "safe_fallback_used": false,
+              "candidate_model_count": 11,
+              "adjudication_attempted": false,
+              "learning_not_queued_reason": "RuntimeError"
+            },
+            "enabled": true,
+            "policy_id": "5371a7bd-3dd0-44bc-9e5c-f7100fb496f1",
+            "learner_id": "766934dd-a437-45eb-9d45-743631a62d7f",
+            "rag_context": {
+              "used": false,
+              "source_count": 0,
+              "partial_result": false,
+              "source_tier_used": null,
+              "evidence_sufficient": false,
+              "insufficiency_reason": null,
+              "query_rewrite_applied": false,
+              "retrieved_chunk_count": 0,
+              "retrieved_context_chars": 0,
+              "retrieved_context_token_estimate": "[REDACTED]"
+            },
+            "reason_code": "requirements_candidate_selected",
+            "strategy_id": "judge_bootstrap_incremental_v1",
+            "judge_called": true,
+            "execution_mode": "deployed",
+            "fallback_model": "gpt-4.1",
+            "policy_version": "judge-first-economics-v1",
+            "selected_model": "gpt-4o-mini",
+            "decision_source": "runtime_judge",
+            "learner_version": null,
+            "learning_status": "not_queued",
+            "matched_rule_id": null,
+            "runtime_context": {
+              "intent": "generate",
+              "node_task": "generate",
+              "risk_level": "medium",
+              "input_length": 224,
+              "output_format": "json",
+              "prompt_length": 385,
+              "has_file_input": false,
+              "customer_facing": false,
+              "schema_required": true,
+              "knowledge_enabled": false,
+              "input_length_bucket": "short",
+              "prompt_length_bucket": "short"
+            },
+            "decision_factors": {
+              "learning_mode": "judge_first",
+              "judged_request_count": 24,
+              "candidate_model_count": 11
+            },
+            "included_in_routing_learning": false
+          },
+          "routing_judge_cost_usd": 0.00189,
+          "routing_judge_tokens": 1480,
+          "routing_judge_latency_ms": 2216
+        }
+      },
+      "routing_accuracy": {
+        "classification": "appropriate",
+        "selected_model": "gpt-4o-mini",
+        "canonical_model_id": "gpt-4o-mini",
+        "capability_source": "official_provider_catalog",
+        "capability_tier": "economy",
+        "complexity_ceiling": "routine",
+        "acceptable_model_ids": [
+          "gpt-4o-mini",
+          "gpt-4.1-mini",
+          "gpt-5-mini",
+          "gpt-5.6-luna"
+        ],
+        "underpowered_model_ids": [],
+        "overprovisioned_model_ids": [
+          "gpt-5.4",
+          "gpt-5.6-sol",
+          "o3"
+        ]
+      },
+      "quality": {
+        "high_fixed": {
+          "quality_score": 91.0,
+          "contract_pass": true,
+          "reason": "근거를 보수적으로 다루고 단계가 실행 가능하며 답변도 이해하기 쉽습니다.",
+          "evaluation_status": "completed"
+        },
+        "automatic": {
+          "quality_score": 41.0,
+          "contract_pass": false,
+          "reason": "설정 메뉴·매뉴얼을 단정해 근거 없는 안내가 있고 단계가 구체성이 부족합니다.",
+          "evaluation_status": "completed"
+        }
+      },
+      "quality_evaluation": {
+        "model": "gpt-5.4",
+        "prompt_tokens": 803,
+        "completion_tokens": 296,
+        "total_tokens": 1099,
+        "cost_usd": 0.0064475,
+        "latency_ms": 4697,
+        "attempt_count": 1,
+        "evaluation_status": "completed"
+      }
+    },
+    {
+      "case_id": "benchmark-holdout-005",
+      "category": "holdout_access",
+      "expected_difficulty": "balanced",
+      "customer_tier": "enterprise",
+      "input": {
+        "request": "감사 담당자에게 이번 달 실행 로그만 읽을 수 있는 임시 권한을 부여하려 합니다.",
+        "context": "지식 베이스 검색이나 외부 문서 조회 없이, 요청에 포함된 정보만 사용합니다.",
+        "constraints": [
+          "근거 없는 사실을 확정하지 않습니다.",
+          "누락된 정보는 assumptions에 분리합니다.",
+          "필수 JSON 필드를 모두 반환합니다."
+        ],
+        "output_mode": "checklist"
+      },
+      "execution_order": [
+        "automatic",
+        "high_fixed"
+      ],
+      "arms": {
+        "automatic": {
+          "arm": "automatic",
+          "selected_model": "gpt-4.1",
+          "task_cost_usd": 0.003238,
+          "task_latency_ms": 5212,
+          "workflow_latency_ms": 5405,
+          "prompt_tokens": 479,
+          "completion_tokens": 285,
+          "total_tokens": 764,
+          "output_text": "{\n  \"분류\": \"권한 관리\",\n  \"우선순위\": \"high\",\n  \"승인필요\": true,\n  \"대응계획\": [\n    \"요청자 등급(enterprise) 확인\",\n    \"감사 담당자 신원 및 계정 정보 확인\",\n    \"이번 달 실행 로그의 범위 및 저장 위치 확인\",\n    \"임시 권한의 기간 및 만료 조건 명확화\",\n    \"읽기 전용 권한만 부여되도록 설정\",\n    \"권한 부여 내역 기록 및 감사 로그 남김\",\n    \"권한 부여 후 정상 적용 여부 점검\",\n    \"권한 만료 시 자동 회수 프로세스 확인\"\n  ],\n  \"답변초안\": \"감사 담당자에게 이번 달 실행 로그에 대한 읽기 전용 임시 권한을 부여하려면, 담당자의 신원과 계정 정보를 확인한 후, 로그의 저장 위치와 범위를 명확히 파악해야 합니다. 임시 권한의 기간을 설정하고, 읽기 전용 권한만 부여되도록 주의해야 합니다. 권한 부여 및 회수 내역은 반드시 기록되어야 하며, 권한이 정상적으로 적용되는지 점검이 필요합니다. 본 요청은 보안상 승인 절차가 필요합니다.\"\n}",
+          "schema_pass": true,
+          "workflow_success": true,
+          "error": null,
+          "routing": {
+            "judge": {
+              "cost": 0.002046,
+              "model": "gpt-5.4-mini",
+              "usage": {
+                "latency_ms": 2122,
+                "total_tokens": 1528,
+                "prompt_tokens": 1288,
+                "completion_tokens": 240
+              },
+              "status": "selected",
+              "attempted": true,
+              "confidence": 0.88,
+              "reason_code": "requirement_judge_low_confidence_fallback",
+              "reason_short": "요구 수준 판정 확신도가 낮아 대체 모델 사용",
+              "reason_factors": [
+                "high_decision_impact",
+                "security_or_compliance_risk",
+                "multi_step_reasoning"
+              ],
+              "rubric_version": "routing-requirements-v4",
+              "selected_model": "gpt-4.1",
+              "ambiguity_flags": [
+                "high_impact_uncertainty",
+                "insufficient_context"
+              ],
+              "learning_status": "not_queued",
+              "selection_source": "server_requirement_selection",
+              "task_requirements": {
+                "decision_impact": 3,
+                "task_complexity": 2,
+                "evidence_synthesis": 2
+              },
+              "safe_fallback_used": true,
+              "candidate_model_count": 11,
+              "adjudication_attempted": false,
+              "learning_not_queued_reason": "requirement_judge_low_confidence"
+            },
+            "enabled": true,
+            "policy_id": "5371a7bd-3dd0-44bc-9e5c-f7100fb496f1",
+            "learner_id": "766934dd-a437-45eb-9d45-743631a62d7f",
+            "rag_context": {
+              "used": false,
+              "source_count": 0,
+              "partial_result": false,
+              "source_tier_used": null,
+              "evidence_sufficient": false,
+              "insufficiency_reason": null,
+              "query_rewrite_applied": false,
+              "retrieved_chunk_count": 0,
+              "retrieved_context_chars": 0,
+              "retrieved_context_token_estimate": "[REDACTED]"
+            },
+            "reason_code": "requirement_judge_low_confidence_fallback",
+            "strategy_id": "judge_bootstrap_incremental_v1",
+            "judge_called": true,
+            "execution_mode": "deployed",
+            "fallback_model": "gpt-5.4-mini",
+            "policy_version": "judge-first-economics-v1",
+            "selected_model": "gpt-4.1",
+            "decision_source": "runtime_judge",
+            "learner_version": null,
+            "learning_status": "not_queued",
+            "matched_rule_id": null,
+            "runtime_context": {
+              "intent": "generate",
+              "node_task": "generate",
+              "risk_level": "medium",
+              "input_length": 238,
+              "output_format": "json",
+              "prompt_length": 385,
+              "has_file_input": false,
+              "customer_facing": false,
+              "schema_required": true,
+              "knowledge_enabled": false,
+              "input_length_bucket": "short",
+              "prompt_length_bucket": "short"
+            },
+            "decision_factors": {
+              "learning_mode": "judge_first",
+              "judged_request_count": 24,
+              "candidate_model_count": 11
+            },
+            "included_in_routing_learning": false
+          },
+          "routing_judge_cost_usd": 0.002046,
+          "routing_judge_tokens": 1528,
+          "routing_judge_latency_ms": 2122
+        },
+        "high_fixed": {
+          "arm": "high_fixed",
+          "selected_model": "gpt-5.6-sol",
+          "task_cost_usd": 0.01664,
+          "task_latency_ms": 8593,
+          "workflow_latency_ms": 8739,
+          "prompt_tokens": 478,
+          "completion_tokens": 475,
+          "total_tokens": 953,
+          "output_text": "{\"분류\":\"보안·접근권한 관리\",\"우선순위\":\"high\",\"승인필요\":true,\"대응계획\":[\"감사 담당자의 신원과 대상 계정을 확인합니다.\",\"‘이번 달’의 정확한 시작·종료 일시와 시간대를 확정합니다.\",\"열람 대상 실행 로그의 시스템·프로젝트·환경 범위를 확정합니다.\",\"다운로드·내보내기·검색·메타데이터 열람 포함 여부를 확인하고 최소 권한 원칙을 적용합니다.\",\"쓰기·수정·삭제·설정 변경 권한이 제외된 읽기 전용 역할인지 검증합니다.\",\"조직의 권한 승인 절차에 따라 시스템 또는 보안 책임자의 승인을 받습니다.\",\"만료 시각이 설정된 임시 권한을 부여하고 권한 부여·사용 내역을 기록합니다.\",\"만료 후 권한이 회수되었는지 확인하고 필요 시 접근 기록을 검토합니다.\"],\"답변초안\":\"[ ] 감사 담당자 신원 및 대상 계정 확인\\n[ ] 대상 시스템·프로젝트·환경 확인\\n[ ] 이번 달의 정확한 기간과 시간대 확인\\n[ ] 실행 로그만 열람하도록 범위 제한\\n[ ] 쓰기·수정·삭제·설정 변경 권한 제외\\n[ ] 다운로드·내보내기 허용 여부 확인\\n[ ] 책임자 승인 획득\\n[ ] 자동 만료 시각 설정\\n[ ] 권한 부여 및 사용 기록 보존\\n[ ] 만료 후 권한 회수 확인\\n\\nAssumptions:\\n- 현재 요청만으로는 감사 담당자의 계정, 대상 시스템, 정확한 기간·시간대, 내보내기 허용 여부, 승인권자가 확인되지 않았습니다.\\n- 실제 권한 부여는 필요한 정보 확인과 승인 완료 후 진행해야 합니다.\"}",
+          "schema_pass": true,
+          "workflow_success": true,
+          "error": null,
+          "routing": {},
+          "routing_judge_cost_usd": 0.0,
+          "routing_judge_tokens": 0,
+          "routing_judge_latency_ms": null
+        }
+      },
+      "routing_accuracy": {
+        "classification": "appropriate",
+        "selected_model": "gpt-4.1",
+        "canonical_model_id": "gpt-4.1",
+        "capability_source": "official_provider_catalog",
+        "capability_tier": "balanced",
+        "complexity_ceiling": "multi_constraint",
+        "acceptable_model_ids": [
+          "gpt-4.1-mini",
+          "gpt-4o",
+          "gpt-5-mini",
+          "gpt-5.4-mini",
+          "gpt-5.6-terra"
+        ],
+        "underpowered_model_ids": [
+          "gpt-4o-mini",
+          "gpt-5.6-luna"
+        ],
+        "overprovisioned_model_ids": [
+          "gpt-5.6-sol",
+          "o3"
+        ]
+      },
+      "quality": {
+        "high_fixed": {
+          "quality_score": 92.0,
+          "contract_pass": false,
+          "reason": "실행 단계와 보안 통제가 구체적이지만 assumptions가 별도 JSON 필드로 분리되지 않았습니다.",
+          "evaluation_status": "completed"
+        },
+        "automatic": {
+          "quality_score": 74.0,
+          "contract_pass": false,
+          "reason": "기본 필드는 있으나 누락 정보에 대한 assumptions 분리가 없고 대응계획의 범위·승인 조건이 더 추상적입니다.",
+          "evaluation_status": "completed"
+        }
+      },
+      "quality_evaluation": {
+        "model": "gpt-5.4",
+        "prompt_tokens": 1112,
+        "completion_tokens": 354,
+        "total_tokens": 1466,
+        "cost_usd": 0.00809,
+        "latency_ms": 5167,
+        "attempt_count": 1,
+        "evaluation_status": "completed"
+      }
+    },
+    {
+      "case_id": "benchmark-holdout-009",
+      "category": "holdout_finance",
+      "expected_difficulty": "balanced",
+      "customer_tier": "business",
+      "input": {
+        "request": "사용량 보고서와 청구서의 토큰 합계가 다릅니다. 고객에게 답하기 전 확인할 자료를 정리해 주세요.",
+        "context": "지식 베이스 검색이나 외부 문서 조회 없이, 요청에 포함된 정보만 사용합니다.",
+        "constraints": [
+          "근거 없는 사실을 확정하지 않습니다.",
+          "누락된 정보는 assumptions에 분리합니다.",
+          "필수 JSON 필드를 모두 반환합니다."
+        ],
+        "output_mode": "checklist"
+      },
+      "execution_order": [
+        "automatic",
+        "high_fixed"
+      ],
+      "arms": {
+        "automatic": {
+          "arm": "automatic",
+          "selected_model": "gpt-5-mini",
+          "task_cost_usd": 0.001916,
+          "task_latency_ms": 12840,
+          "workflow_latency_ms": 13098,
+          "prompt_tokens": 487,
+          "completion_tokens": 897,
+          "total_tokens": 1384,
+          "output_text": "{\n  \"분류\": \"청구/사용량 불일치 확인 요청\",\n  \"우선순위\": \"high\",\n  \"승인필요\": false,\n  \"대응계획\": [\n    \"고객이 제공한 사용량 보고서와 청구서(인보이스) 원본 파일 확보 요청 및 수령 확인\",\n    \"두 문서에서 비교할 핵심 필드 목록 정의: 기간(start/end), 계정/고객 ID, 토큰 종류(예: 입력/출력/합계), 각 항목별 토큰 수, 환불/크레딧 적용 내역, 요금 할인 또는 프로모션 항목 여부\",\n    \"문서의 날짜·시간 범위(타임존 포함) 일치 여부 확인\",\n    \"계정 식별자(계정 ID, 고객 ID, 프로젝트 ID 등)가 두 문서에서 동일한지 확인\",\n    \"토큰 집계 방식 차이 확인: 사용량 보고서가 세부 항목별 합계인지, 청구서가 라운딩·절사·소수점 처리 등으로 계산되었는지 검토\",\n    \"청구서에 반영된 조정사항 확인: 크레딧, 환불, 수동 조정, 이전 청구 정산 항목 여부 파악\",\n    \"포함/제외 항목 차이 확인: 무료 한도, 프로모션, 테스트 계정 사용량 등 청구 대상에서 제외된 항목 존재 여부 점검\",\n    \"토큰 정의 불일치 점검: 사용보고의 토큰 측정 기준과 청구서의 토큰 계산 기준(예: 토큰화 규칙)이 같은지 확인(정보 없으면 고객에게 명확한 정의 요청)\",\n    \"소수점 반올림 및 집계 시점 차이로 인한 미세한 불일치 여부 계산(예: 각 항목별 반올림 후 합계 vs 전체 합계 반올림)\",\n    \"시스템 지연·로그 누락 가능성 점검: 사용 데이터 수집 지연이나 처리 실패로 일부 사용량이 집계되지 않았을 가능성 확인\",\n    \"내부 담당자(청구팀/계정관리/엔지니어링)에게 초기 문의용 요약 자료 준비: 불일치 증상, 관련 문서 목록, 확인 요청 항목 명시\",\n    \"고객에게 추가 요청할 정보 목록 작성(필수/선택 구분): 원본 CSV/로그, 사용량 집계 쿼리/방법, 의심되는 특정 항목 식별 예시\",\n    \"모든 확인 단계와 결과를 시간순 로그로 기록하여 추후 감사 및 고객회신 근거로 보관\"\n  ],\n  \"답변초안\": \"안녕하세요. 사용량 보고서와 청구서의 토큰 합계가 다르다는 문의를 확인했습니다. 정확히 확인하기 위해 아래 자료를 요청드립니다. 1) 문제로 지적하신 사용량 보고서 원본 파일(또는 스크린샷) 및 청구서(인보이스) 원본 2) 두 문서의 적용 기간(시작/종료 날짜)과 사용된 타임존 3) 계정/고객/프로젝트 식별자(가능하면 ID 포함) 4) 사용량 집계 방식에 대한 설명(있다면 집계 쿼리나 도구) 5) 청구서에 반영된 크레딧, 환불, 수동 조정 내역 6) 불일치가 발생한 특정 항목의 예시(가능하면 행 수준) 요청하신 자료를 받는 즉시, 문서 간 기간·계정·토큰 정의 일치 여부, 반올림·집계 방식 차이, 크레딧/조정 항목 반영 여부 등을 우선 확인한 뒤 결과와 권장 조치(필요 시 수정 청구 또는 추가 설명)를 안내하겠습니다. 현재 제공된 정보만으로는 불일치 원인을 확정할 수 없으므로 추가 자료를 요청드립니다. 감사합니다.\"\n}",
+          "schema_pass": true,
+          "workflow_success": true,
+          "error": null,
+          "routing": {
+            "judge": {
+              "cost": 0.00220725,
+              "model": "gpt-5.4-mini",
+              "usage": {
+                "latency_ms": 2420,
+                "total_tokens": 1578,
+                "prompt_tokens": 1305,
+                "completion_tokens": 273
+              },
+              "status": "selected",
+              "attempted": true,
+              "confidence": 0.93,
+              "reason_code": "requirements_candidate_selected",
+              "reason_short": "요구 수준에 맞는 후보 선택",
+              "reason_factors": [
+                "multi_step_reasoning",
+                "high_decision_impact",
+                "broad_context_synthesis"
+              ],
+              "rubric_version": "routing-requirements-v4",
+              "selected_model": "gpt-5-mini",
+              "ambiguity_flags": [
+                "insufficient_context",
+                "boundary_score"
+              ],
+              "learning_status": "not_queued",
+              "selection_source": "server_requirement_selection",
+              "task_requirements": {
+                "decision_impact": 2,
+                "task_complexity": 2,
+                "evidence_synthesis": 2
+              },
+              "safe_fallback_used": false,
+              "candidate_model_count": 11,
+              "adjudication_attempted": false,
+              "learning_not_queued_reason": "RuntimeError"
+            },
+            "enabled": true,
+            "policy_id": "5371a7bd-3dd0-44bc-9e5c-f7100fb496f1",
+            "learner_id": "766934dd-a437-45eb-9d45-743631a62d7f",
+            "rag_context": {
+              "used": false,
+              "source_count": 0,
+              "partial_result": false,
+              "source_tier_used": null,
+              "evidence_sufficient": false,
+              "insufficiency_reason": null,
+              "query_rewrite_applied": false,
+              "retrieved_chunk_count": 0,
+              "retrieved_context_chars": 0,
+              "retrieved_context_token_estimate": "[REDACTED]"
+            },
+            "reason_code": "requirements_candidate_selected",
+            "strategy_id": "judge_bootstrap_incremental_v1",
+            "judge_called": true,
+            "execution_mode": "deployed",
+            "fallback_model": "gpt-4.1",
+            "policy_version": "judge-first-economics-v1",
+            "selected_model": "gpt-5-mini",
+            "decision_source": "runtime_judge",
+            "learner_version": null,
+            "learning_status": "not_queued",
+            "matched_rule_id": null,
+            "runtime_context": {
+              "intent": "generate",
+              "node_task": "generate",
+              "risk_level": "medium",
+              "input_length": 245,
+              "output_format": "json",
+              "prompt_length": 385,
+              "has_file_input": false,
+              "customer_facing": false,
+              "schema_required": true,
+              "knowledge_enabled": false,
+              "input_length_bucket": "short",
+              "prompt_length_bucket": "short"
+            },
+            "decision_factors": {
+              "learning_mode": "judge_first",
+              "judged_request_count": 24,
+              "candidate_model_count": 11
+            },
+            "included_in_routing_learning": false
+          },
+          "routing_judge_cost_usd": 0.002207,
+          "routing_judge_tokens": 1578,
+          "routing_judge_latency_ms": 2420
+        },
+        "high_fixed": {
+          "arm": "high_fixed",
+          "selected_model": "gpt-5.6-sol",
+          "task_cost_usd": 0.024005,
+          "task_latency_ms": 17094,
+          "workflow_latency_ms": 17250,
+          "prompt_tokens": 487,
+          "completion_tokens": 719,
+          "total_tokens": 1206,
+          "output_text": "{\"분류\":\"결제·청구 사용량 불일치 확인\",\"우선순위\":\"high\",\"승인필요\":true,\"대응계획\":[\"[ ] 사용량 보고서 원본과 해당 청구서 원본을 확보합니다.\",\"[ ] 두 자료의 집계 기간, 기준 시간대, 계정·조직·프로젝트 범위가 동일한지 확인합니다.\",\"[ ] 사용량 보고서의 토큰 분류와 청구서의 토큰 항목별 합계를 대조합니다.\",\"[ ] 필터, 반올림, 집계 지연, 조정 내역 등 차이에 영향을 줄 수 있는 표시 항목이 있는지 자료에서 확인합니다.\",\"[ ] 불일치한 토큰 수와 금액 영향을 계산하고, 항목별 대조표를 작성합니다.\",\"[ ] 고객 답변 전에 청구 담당자의 검토와 승인을 받습니다.\"],\"답변초안\":\"고객에게 답변하기 전 다음 자료를 확인해야 합니다.\\n\\n확인 자료\\n[ ] 사용량 보고서 원본 또는 전체 화면 캡처\\n[ ] 청구서 원본 및 청구서 번호\\n[ ] 각 자료의 집계 시작일·종료일과 시간대\\n[ ] 대상 계정, 조직, 워크스페이스 또는 프로젝트 식별 정보\\n[ ] 사용량 보고서에 적용된 필터와 그룹화 기준\\n[ ] 보고서와 청구서의 토큰 항목별 내역 및 총합\\n[ ] 조정, 할인, 크레딧 또는 별도 청구 항목이 표시된 내역\\n[ ] 불일치가 발생한 것으로 판단한 계산식과 차이 수량\\n\\nAssumptions\\n- 현재 제공된 정보만으로는 실제 불일치 여부나 원인을 확정할 수 없습니다.\\n- 사용량 보고서와 청구서의 집계 기준 및 대상 범위가 동일한지 아직 확인되지 않았습니다.\\n- 고객 안내 문안은 자료 대조와 청구 담당자 승인 후 확정해야 합니다.\"}",
+          "schema_pass": true,
+          "workflow_success": true,
+          "error": null,
+          "routing": {},
+          "routing_judge_cost_usd": 0.0,
+          "routing_judge_tokens": 0,
+          "routing_judge_latency_ms": null
+        }
+      },
+      "routing_accuracy": {
+        "classification": "appropriate",
+        "selected_model": "gpt-5-mini",
+        "canonical_model_id": "gpt-5-mini",
+        "capability_source": "official_provider_catalog",
+        "capability_tier": "balanced",
+        "complexity_ceiling": "multi_constraint",
+        "acceptable_model_ids": [
+          "gpt-4.1-mini",
+          "gpt-4o",
+          "gpt-5-mini",
+          "gpt-5.4-mini",
+          "gpt-5.6-terra"
+        ],
+        "underpowered_model_ids": [
+          "gpt-4o-mini",
+          "gpt-5.6-luna"
+        ],
+        "overprovisioned_model_ids": [
+          "gpt-5.6-sol",
+          "o3"
+        ]
+      },
+      "quality": {
+        "automatic": {
+          "quality_score": 82.0,
+          "contract_pass": true,
+          "reason": "필수 필드는 모두 있고 대응계획도 구체적입니다. 다만 checklist 형식 적합성이 약하고, 누락 정보가 assumptions로 분리되지 않았으며, 결제 이슈인데 승인필요=false가 다소 보수적이지 않습니다.",
+          "evaluation_status": "completed"
+        },
+        "high_fixed": {
+          "quality_score": 91.0,
+          "contract_pass": true,
+          "reason": "필수 필드를 모두 충족하고 checklist 형식에 잘 맞습니다. 결제 이슈를 보수적으로 처리했고 대응계획이 실행 가능하며, 불확실성을 명확히 분리해 품질이 더 높습니다.",
+          "evaluation_status": "completed"
+        }
+      },
+      "quality_evaluation": {
+        "model": "gpt-5.4",
+        "prompt_tokens": 1761,
+        "completion_tokens": 363,
+        "total_tokens": 2124,
+        "cost_usd": 0.0098475,
+        "latency_ms": 5309,
+        "attempt_count": 1,
+        "evaluation_status": "completed"
+      }
+    },
+    {
+      "case_id": "benchmark-holdout-008",
+      "category": "holdout_access",
+      "expected_difficulty": "advanced",
+      "customer_tier": "enterprise",
+      "input": {
+        "request": "권한 회수 후에도 이전 토큰으로 관리자 API 호출이 성공했습니다. 차단과 조사 순서를 제시해 주세요.",
+        "context": "지식 베이스 검색이나 외부 문서 조회 없이, 요청에 포함된 정보만 사용합니다.",
+        "constraints": [
+          "근거 없는 사실을 확정하지 않습니다.",
+          "누락된 정보는 assumptions에 분리합니다.",
+          "필수 JSON 필드를 모두 반환합니다.",
+          "위험하거나 되돌리기 어려운 조치는 승인 전제로 보수적으로 제안합니다."
+        ],
+        "output_mode": "analysis"
+      },
+      "execution_order": [
+        "automatic",
+        "high_fixed"
+      ],
+      "arms": {
+        "automatic": {
+          "arm": "automatic",
+          "selected_model": "gpt-4.1",
+          "task_cost_usd": 0.0041,
+          "task_latency_ms": 5700,
+          "workflow_latency_ms": 5907,
+          "prompt_tokens": 506,
+          "completion_tokens": 386,
+          "total_tokens": 892,
+          "output_text": "{\n  \"분류\": \"보안 이슈\",\n  \"우선순위\": \"high\",\n  \"승인필요\": true,\n  \"대응계획\": [\n    \"1. 즉시 해당 토큰의 모든 API 접근을 임시 차단(가능하다면 네트워크 레벨 또는 인증 서버에서 차단).\",\n    \"2. 관련 로그를 확보하여 토큰 회수 시점 이후의 모든 관리자 API 호출 내역을 수집.\",\n    \"3. 토큰 무효화(회수) 로직의 정상 동작 여부를 개발팀과 함께 점검.\",\n    \"4. 유사 사례가 있는지 전체 토큰 관리 내역을 점검.\",\n    \"5. 영향 범위(관리자 API로 인한 데이터 변경, 접근 등) 분석.\",\n    \"6. 필요시 보안팀 및 법무팀에 보고.\",\n    \"7. 재발 방지를 위한 인증/권한 관리 정책 및 시스템 개선안 마련.\"\n  ],\n  \"답변초안\": \"권한 회수 후에도 이전 토큰으로 관리자 API 호출이 성공한 것은 심각한 보안 이슈로 판단됩니다. 우선, 해당 토큰의 모든 API 접근을 즉시 차단하는 것이 필요합니다(이 조치는 승인 후 진행). 이후 관련 로그를 확보하여 회수 시점 이후의 호출 내역을 조사하고, 토큰 무효화 로직의 정상 동작 여부를 개발팀과 함께 점검해야 합니다. 추가로 유사 사례가 있는지 전체 토큰 관리 내역을 점검하고, 영향 범위를 분석해야 합니다. 필요시 보안팀 및 법무팀에 보고하며, 재발 방지를 위한 정책 및 시스템 개선도 병행해야 합니다. 조치 순서와 범위는 승인 후 상세히 협의하겠습니다.\"\n}",
+          "schema_pass": true,
+          "workflow_success": true,
+          "error": null,
+          "routing": {
+            "judge": {
+              "cost": 0.00167625,
+              "model": "gpt-5.4-mini",
+              "usage": {
+                "latency_ms": 1729,
+                "total_tokens": 1490,
+                "prompt_tokens": 1341,
+                "completion_tokens": 149
+              },
+              "status": "selected",
+              "attempted": true,
+              "confidence": 0.95,
+              "reason_code": "requirement_judge_low_confidence_fallback",
+              "reason_short": "요구 수준 판정 확신도가 낮아 대체 모델 사용",
+              "reason_factors": [
+                "security_or_compliance_risk",
+                "multi_step_reasoning"
+              ],
+              "rubric_version": "routing-requirements-v4",
+              "selected_model": "gpt-4.1",
+              "ambiguity_flags": [
+                "high_impact_uncertainty"
+              ],
+              "learning_status": "not_queued",
+              "selection_source": "server_requirement_selection",
+              "task_requirements": {
+                "decision_impact": 3,
+                "task_complexity": 2,
+                "evidence_synthesis": 2
+              },
+              "safe_fallback_used": true,
+              "candidate_model_count": 11,
+              "adjudication_attempted": false,
+              "learning_not_queued_reason": "requirement_judge_low_confidence"
+            },
+            "enabled": true,
+            "policy_id": "5371a7bd-3dd0-44bc-9e5c-f7100fb496f1",
+            "learner_id": "766934dd-a437-45eb-9d45-743631a62d7f",
+            "rag_context": {
+              "used": false,
+              "source_count": 0,
+              "partial_result": false,
+              "source_tier_used": null,
+              "evidence_sufficient": false,
+              "insufficiency_reason": null,
+              "query_rewrite_applied": false,
+              "retrieved_chunk_count": 0,
+              "retrieved_context_chars": 0,
+              "retrieved_context_token_estimate": "[REDACTED]"
+            },
+            "reason_code": "requirement_judge_low_confidence_fallback",
+            "strategy_id": "judge_bootstrap_incremental_v1",
+            "judge_called": true,
+            "execution_mode": "deployed",
+            "fallback_model": "gpt-5.4-mini",
+            "policy_version": "judge-first-economics-v1",
+            "selected_model": "gpt-4.1",
+            "decision_source": "runtime_judge",
+            "learner_version": null,
+            "learning_status": "not_queued",
+            "matched_rule_id": null,
+            "runtime_context": {
+              "intent": "generate",
+              "node_task": "generate",
+              "risk_level": "medium",
+              "input_length": 288,
+              "output_format": "json",
+              "prompt_length": 385,
+              "has_file_input": false,
+              "customer_facing": false,
+              "schema_required": true,
+              "knowledge_enabled": false,
+              "input_length_bucket": "short",
+              "prompt_length_bucket": "short"
+            },
+            "decision_factors": {
+              "learning_mode": "judge_first",
+              "judged_request_count": 24,
+              "candidate_model_count": 11
+            },
+            "included_in_routing_learning": false
+          },
+          "routing_judge_cost_usd": 0.001676,
+          "routing_judge_tokens": 1490,
+          "routing_judge_latency_ms": 1729
+        },
+        "high_fixed": {
+          "arm": "high_fixed",
+          "selected_model": "gpt-5.6-sol",
+          "task_cost_usd": 0.035825,
+          "task_latency_ms": 22709,
+          "workflow_latency_ms": 22947,
+          "prompt_tokens": 505,
+          "completion_tokens": 1110,
+          "total_tokens": 1615,
+          "output_text": "{\"분류\":\"보안 사고 의심 - 권한 회수 후 관리자 API 접근 지속\",\"우선순위\":\"critical\",\"승인필요\":true,\"대응계획\":[\"즉시 사고 대응 담당자와 인증·API 소유자를 호출하고, 원문 토큰을 티켓·채팅·로그에 추가로 노출하지 않습니다.\",\"재현을 반복하지 말고 기존 요청 기록에서 호출 시각, 계정·주체 ID, 토큰 식별자 또는 해시, API 경로, 응답 코드, 권한 회수 시각을 확보합니다.\",\"영향받은 토큰을 인증 계층에서 즉시 폐기하거나 거부 목록에 등록하고, 관리자 API 게이트웨이에서도 해당 토큰·주체의 접근을 임시 차단합니다. 긴급 변경 절차가 없다면 담당 승인 후 시행합니다.\",\"동일 주체에 발급된 활성 세션과 토큰을 식별해 범위를 확인합니다. 전체 세션 강제 종료나 계정 비활성화는 업무 영향이 크므로 사고 책임자 승인 후 적용합니다.\",\"차단 직후 최소 1회만 검증하여 이전 토큰이 관리자 API에서 거부되는지 확인하고, 결과와 시각을 증적으로 남깁니다.\",\"인증 로그, 권한 변경 감사 로그, 토큰 발급·갱신·검증 로그, API 게이트웨이 및 관리자 API 접근 로그를 보존합니다. 보존 정책 변경이나 광범위한 개인정보 조회는 보안·법무 절차에 따릅니다.\",\"권한 회수 시점 전후의 호출을 시간순으로 대조하여 캐시·복제 지연, 토큰 자체 권한 내장, 폐기 목록 미적용, 검증 경로 불일치, 갱신 토큰 사용 여부를 가설별로 조사합니다. 현재 정보만으로 원인을 확정하지 않습니다.\",\"성공한 관리자 API 호출의 범위와 수행 작업, 데이터 조회·변경 여부를 확인하고 추가 악용 징후를 탐색합니다. 영향이 확인되면 내부 통지 및 고객·규제기관 통지 필요성을 보안·법무 담당자가 판단합니다.\",\"서명 키 전체 교체, 전사 토큰 무효화, 서비스 중단 같은 광범위하고 되돌리기 어려운 조치는 키 유출 또는 광범위한 검증 실패의 근거를 확보한 뒤 명시적 승인과 복구 계획을 전제로 시행합니다.\",\"원인 확인 후 권한 회수 시 토큰 즉시 무효화, 관리자 API의 실시간 권한 재검증, 폐기 전파 모니터링, 회귀 테스트 및 경보를 보완합니다.\"],\"답변초안\":\"보안 사고 가능성이 있으므로 최우선 순서는 ‘증거 최소 확보 → 해당 토큰과 주체의 관리자 API 접근 차단 → 차단 확인 → 로그 보존 및 영향 조사’입니다. 먼저 원문 토큰을 추가 공유하지 말고 호출·회수 시각, 주체 ID, 토큰 식별자 또는 해시, API 경로와 응답을 확보하십시오. 그다음 해당 토큰을 폐기·거부 목록에 등록하고 API 게이트웨이에서도 임시 차단한 뒤, 최소 검증으로 거부 여부를 확인하십시오. 동일 주체의 전체 세션 종료, 계정 비활성화, 전사 토큰 무효화, 서명 키 교체는 영향이 크므로 긴급 변경 권한 또는 사고 책임자 승인을 전제로 합니다. 이후 인증·감사·API 로그를 보존하고 권한 회수 전후 호출, 성공한 작업과 데이터 영향, 동일 주체의 다른 토큰 사용 여부를 조사하십시오. assumptions: 현재 알려진 사실은 ‘권한 회수 후 이전 토큰으로 관리자 API 호출이 성공했다는 보고’뿐이며, 토큰 종류, 회수 방식, 성공 시각과 횟수, 실제 데이터 영향, 키 유출 여부는 확인되지 않았습니다. 따라서 캐시 지연이나 검증 결함 등 특정 원인을 아직 확정할 수 없습니다.\"}",
+          "schema_pass": true,
+          "workflow_success": true,
+          "error": null,
+          "routing": {},
+          "routing_judge_cost_usd": 0.0,
+          "routing_judge_tokens": 0,
+          "routing_judge_latency_ms": null
+        }
+      },
+      "routing_accuracy": {
+        "classification": "underpowered",
+        "selected_model": "gpt-4.1",
+        "canonical_model_id": "gpt-4.1",
+        "capability_source": "official_provider_catalog",
+        "capability_tier": "balanced",
+        "complexity_ceiling": "multi_constraint",
+        "acceptable_model_ids": [
+          "gpt-5.4",
+          "gpt-5.6-sol",
+          "o3"
+        ],
+        "underpowered_model_ids": [
+          "gpt-4o-mini",
+          "gpt-4.1-mini",
+          "gpt-5.6-luna"
+        ],
+        "overprovisioned_model_ids": []
+      },
+      "quality": {
+        "high_fixed": {
+          "quality_score": 94.0,
+          "contract_pass": true,
+          "reason": "분류·우선순위가 적절하고 대응 순서가 실행 가능하며, 승인 전제와 원인 미확정을 잘 지켰습니다.",
+          "evaluation_status": "completed"
+        },
+        "automatic": {
+          "quality_score": 76.0,
+          "contract_pass": false,
+          "reason": "전반적 방향은 맞지만 우선순위가 다소 낮고, 가정 분리 누락과 조사·차단 순서의 구체성이 부족합니다.",
+          "evaluation_status": "completed"
+        }
+      },
+      "quality_evaluation": {
+        "model": "gpt-5.4",
+        "prompt_tokens": 1722,
+        "completion_tokens": 307,
+        "total_tokens": 2029,
+        "cost_usd": 0.00891,
+        "latency_ms": 4590,
+        "attempt_count": 1,
+        "evaluation_status": "completed"
+      }
+    },
+    {
+      "case_id": "benchmark-holdout-017",
+      "category": "holdout_reliability",
+      "expected_difficulty": "advanced",
+      "customer_tier": "enterprise",
+      "input": {
+        "request": "장애 복구 중 동일 주문이 두 번 처리될 가능성이 있습니다. 데이터 손상을 막는 복구 순서를 정리해 주세요.",
+        "context": "지식 베이스 검색이나 외부 문서 조회 없이, 요청에 포함된 정보만 사용합니다.",
+        "constraints": [
+          "근거 없는 사실을 확정하지 않습니다.",
+          "누락된 정보는 assumptions에 분리합니다.",
+          "필수 JSON 필드를 모두 반환합니다.",
+          "위험하거나 되돌리기 어려운 조치는 승인 전제로 보수적으로 제안합니다."
+        ],
+        "output_mode": "analysis"
+      },
+      "execution_order": [
+        "automatic",
+        "high_fixed"
+      ],
+      "arms": {
+        "automatic": {
+          "arm": "automatic",
+          "selected_model": "gpt-5-mini",
+          "task_cost_usd": 0.001911,
+          "task_latency_ms": 12368,
+          "workflow_latency_ms": 12706,
+          "prompt_tokens": 506,
+          "completion_tokens": 892,
+          "total_tokens": 1398,
+          "output_text": "{\n  \"분류\": \"복구 절차(데이터 무결성)\",\n  \"우선순위\": \"critical\",\n  \"승인필요\": true,\n  \"대응계획\": [\n    \"현재 복구 작업을 즉시 중단하고 더 이상의 자동 재시도나 처리 트리거를 일시적으로 비활성화한다.\",\n    \"전체 시스템에서 주문 생성·처리 관련 큐, 백그라운드 작업자, 재시도 메커니즘의 상태를 읽기 전용 모드로 전환하거나 관련 엔드포인트를 일시적으로 차단한다.\",\n    \"중복 처리 가능성이 있는 주문 식별을 위해 최근 복구 시점 이전과 이후의 주문 로그(생성, 상태 변경, 처리 완료 타임스탬프) 스냅샷을 확보한다.\",\n    \"각 주문에 대해 유니크 식별자(idempotency key 또는 주문 ID) 기준으로 중복 여부를 판별할 수 있는 임시 검사 스크립트 또는 쿼리를 실행한다.\",\n    \"중복으로 추정되는 주문을 별도 격리 목록으로 분류하고, 자동 취소/롤백 같은 되돌리기 조치는 승인 절차를 통해 신중히 진행한다.\",\n    \"데이터베이스 변경(주문 상태, 재고, 결제 등)이 이미 발생한 경우에는 변경 이력과 트랜잭션 로그를 확보해 복구 가능성 및 영향 범위를 분석한다.\",\n    \"복구 순서(우선 순위)를 정한다: 1) 데이터 손상 우려가 큰 결제/정산 관련 항목 우선 검토, 2) 재고/배송 영향 항목, 3) 마케팅/통계 목적의 중복 데이터 처리 순으로 진행한다.\",\n    \"되돌리기 조치(주문 취소, 환불, 재고 조정 등)는 담당 팀/권한자 승인을 받고, 변경 전후 상태를 기록하는 트랜잭션 로그를 남긴다.\",\n    \"작업 중에는 고객에게 혼란을 주지 않도록 외부에 노출되는 주문 상태는 '조사중' 등으로 일시 표기하고, 고객 통신 템플릿은 법무·CS와 협의 후 사용한다.\",\n    \"복구 완료 후에는 중복 발생 원인(복구 절차, 재시도 로직, 트랜잭션 격리 등)을 근본 원인 분석(RCA)해 재발 방지 대책을 설계하고 배포한다.\"\n  ],\n  \"답변초안\": \"현재 복구 과정에서 동일 주문이 중복 처리될 위험이 있으므로, 보수적인 접근으로 즉시 자동 처리·재시도를 중단하고 조사 모드로 전환하는 것을 권고합니다. 우선 관련 로그와 트랜잭션 스냅샷을 확보해 주문별 유니크 식별자를 기준으로 중복을 판별하세요. 중복으로 식별된 주문은 격리 목록으로 관리하고, 결제·정산·재고처럼 데이터 손상 우려가 큰 항목부터 우선 분석합니다. 이미 반영된 변경은 트랜잭션 로그와 변경 이력을 근거로 영향 범위를 평가한 뒤, 환불·주문 취소·재고 조정 등 되돌리기 조치는 권한자 승인 하에 수행합니다. 모든 변경은 변경 전후 상태를 기록하고, 고객에게는 일시적으로 '조사중' 상태를 표기해 혼선을 줄이세요. 복구 종료 후에는 근본 원인 분석(RCA)을 수행해 재시도 로직·아이덴포텐시 처리·트랜잭션 격리 수준 등 재발 방지 대책을 마련해야 합니다. 주의: 구체적 실행 방법(데이터베이스 쿼리, 스크립트, 롤백 절차 등)은 현재 시스템 세부사항이 필요하므로 실행 전 관련 담당자 승인과 추가 정보 확인을 권합니다.\"\n}",
+          "schema_pass": true,
+          "workflow_success": true,
+          "error": null,
+          "routing": {
+            "judge": {
+              "cost": 0.0022005,
+              "model": "gpt-5.4-mini",
+              "usage": {
+                "latency_ms": 2574,
+                "total_tokens": 1609,
+                "prompt_tokens": 1344,
+                "completion_tokens": 265
+              },
+              "status": "selected",
+              "attempted": true,
+              "confidence": 0.92,
+              "reason_code": "requirements_candidate_selected",
+              "reason_short": "요구 수준에 맞는 후보 선택",
+              "reason_factors": [
+                "multi_step_reasoning",
+                "high_decision_impact",
+                "broad_context_synthesis"
+              ],
+              "rubric_version": "routing-requirements-v4",
+              "selected_model": "gpt-5-mini",
+              "ambiguity_flags": [
+                "insufficient_context",
+                "boundary_score"
+              ],
+              "learning_status": "not_queued",
+              "selection_source": "server_requirement_selection",
+              "task_requirements": {
+                "decision_impact": 2,
+                "task_complexity": 2,
+                "evidence_synthesis": 2
+              },
+              "safe_fallback_used": false,
+              "candidate_model_count": 11,
+              "adjudication_attempted": false,
+              "learning_not_queued_reason": "RuntimeError"
+            },
+            "enabled": true,
+            "policy_id": "5371a7bd-3dd0-44bc-9e5c-f7100fb496f1",
+            "learner_id": "766934dd-a437-45eb-9d45-743631a62d7f",
+            "rag_context": {
+              "used": false,
+              "source_count": 0,
+              "partial_result": false,
+              "source_tier_used": null,
+              "evidence_sufficient": false,
+              "insufficiency_reason": null,
+              "query_rewrite_applied": false,
+              "retrieved_chunk_count": 0,
+              "retrieved_context_chars": 0,
+              "retrieved_context_token_estimate": "[REDACTED]"
+            },
+            "reason_code": "requirements_candidate_selected",
+            "strategy_id": "judge_bootstrap_incremental_v1",
+            "judge_called": true,
+            "execution_mode": "deployed",
+            "fallback_model": "gpt-4.1",
+            "policy_version": "judge-first-economics-v1",
+            "selected_model": "gpt-5-mini",
+            "decision_source": "runtime_judge",
+            "learner_version": null,
+            "learning_status": "not_queued",
+            "matched_rule_id": null,
+            "runtime_context": {
+              "intent": "generate",
+              "node_task": "generate",
+              "risk_level": "medium",
+              "input_length": 291,
+              "output_format": "json",
+              "prompt_length": 385,
+              "has_file_input": false,
+              "customer_facing": false,
+              "schema_required": true,
+              "knowledge_enabled": false,
+              "input_length_bucket": "short",
+              "prompt_length_bucket": "short"
+            },
+            "decision_factors": {
+              "learning_mode": "judge_first",
+              "judged_request_count": 24,
+              "candidate_model_count": 11
+            },
+            "included_in_routing_learning": false
+          },
+          "routing_judge_cost_usd": 0.002201,
+          "routing_judge_tokens": 1609,
+          "routing_judge_latency_ms": 2574
+        },
+        "high_fixed": {
+          "arm": "high_fixed",
+          "selected_model": "gpt-5.6-sol",
+          "task_cost_usd": 0.02929,
+          "task_latency_ms": 18706,
+          "workflow_latency_ms": 18968,
+          "prompt_tokens": 506,
+          "completion_tokens": 892,
+          "total_tokens": 1398,
+          "output_text": "{\"분류\":\"장애 복구·데이터 무결성 위험\",\"우선순위\":\"high\",\"승인필요\":true,\"대응계획\":[\"신규 주문 처리와 자동 재시도를 일시 중지하거나 격리한다. 중지가 불가능하면 영향 범위를 최소화하도록 복구 대상 주문의 처리를 차단한다.\",\"변경 전에 주문 데이터, 처리 큐, 재시도 목록, 관련 로그의 현재 상태를 보존한다. 스냅샷·백업 생성 및 복원 가능 여부를 확인하고, 검증되지 않은 일괄 수정은 수행하지 않는다.\",\"주문별 고유 식별자와 처리 상태를 기준으로 원본 요청, 최초 처리, 재시도 및 외부 반영 여부를 대조해 중복 가능 주문 목록을 만든다. 판별이 불가능한 주문은 별도 격리한다.\",\"중복 방지 기준을 확정한다. 동일 주문 식별자에 대해 한 번만 상태 전이가 허용되도록 하고, 이미 완료된 주문은 재실행 대상에서 제외한다. 해당 통제가 실제 환경에서 보장되는지는 테스트 후 판단한다.\",\"복구 대상 주문을 미처리, 처리 완료, 중복 의심, 상태 불명으로 구분한다. 결제·재고·배송 등 되돌리기 어려운 외부 반영이 있을 수 있는 주문은 자동 취소나 재처리하지 않고 담당자 승인을 받는다.\",\"읽기 전용 검증 또는 비운영 환경에서 복구 절차를 시험하고, 예상 변경 건수와 실제 변경 건수가 일치하는지 확인한다.\",\"승인된 소규모 주문 묶음부터 복구한다. 각 주문은 처리 직전에 현재 상태를 다시 확인하고, 성공 기록이 확인된 경우 재처리하지 않는다.\",\"각 복구 묶음 이후 주문 상태와 관련 반영 결과를 대조한다. 불일치나 추가 중복이 발견되면 즉시 중단하고 해당 묶음을 격리한다.\",\"검증이 완료된 뒤 트래픽과 자동 재시도를 단계적으로 재개한다. 재개 중에는 중복 처리 징후와 상태 불일치를 집중 감시한다.\",\"복구 대상, 제외 대상, 승인자, 실행 시각, 변경 전후 상태 및 수동 조치 내역을 감사 기록으로 남긴다.\"],\"답변초안\":\"권장 복구 순서는 ‘처리 중지·격리 → 현 상태 보존 → 중복 후보 식별 → 중복 방지 기준 확정 → 주문 분류 → 사전 검증 → 소규모 복구 → 결과 대조 → 단계적 재개 → 감사 기록’입니다. 데이터 손상을 막기 위해 상태가 불명확하거나 결제·재고·배송 등 외부 반영 가능성이 있는 주문은 자동으로 재처리하거나 되돌리지 말고 승인 후 처리해야 합니다.\\n\\nAssumptions:\\n- 주문별로 대조 가능한 고유 식별자와 처리 상태 또는 로그가 존재한다고 가정합니다.\\n- 현재 요청만으로는 중복이 발생하는 구간, 결제·재고·배송 연동 여부, 트랜잭션 및 멱등성 보장 수준, 백업·복원 가능 여부를 확인할 수 없습니다.\\n- 처리 중지, 데이터 수정, 재처리, 취소 및 외부 시스템 보정은 운영 영향이나 비가역적 결과를 만들 수 있으므로 담당자 승인과 복원 수단 확인이 필요합니다.\"}",
+          "schema_pass": true,
+          "workflow_success": true,
+          "error": null,
+          "routing": {},
+          "routing_judge_cost_usd": 0.0,
+          "routing_judge_tokens": 0,
+          "routing_judge_latency_ms": null
+        }
+      },
+      "routing_accuracy": {
+        "classification": "underpowered",
+        "selected_model": "gpt-5-mini",
+        "canonical_model_id": "gpt-5-mini",
+        "capability_source": "official_provider_catalog",
+        "capability_tier": "balanced",
+        "complexity_ceiling": "multi_constraint",
+        "acceptable_model_ids": [
+          "gpt-5.4",
+          "gpt-5.6-sol",
+          "o3"
+        ],
+        "underpowered_model_ids": [
+          "gpt-4o-mini",
+          "gpt-4.1-mini",
+          "gpt-5.6-luna"
+        ],
+        "overprovisioned_model_ids": []
+      },
+      "quality": {
+        "automatic": {
+          "quality_score": 86.0,
+          "contract_pass": true,
+          "reason": "필수 필드 충족, 단계가 실행 가능하고 보수적입니다. 다만 누락 정보가 assumptions로 분리되지 않았고 일부 추정 표현이 섞였습니다.",
+          "evaluation_status": "completed"
+        },
+        "high_fixed": {
+          "quality_score": 95.0,
+          "contract_pass": true,
+          "reason": "필수 필드 충족, 복구 순서가 명확하고 실행 가능하며 보수적입니다. 누락 정보를 assumptions로 분리해 제약도 가장 잘 반영했습니다.",
+          "evaluation_status": "completed"
+        }
+      },
+      "quality_evaluation": {
+        "model": "gpt-5.4",
+        "prompt_tokens": 2101,
+        "completion_tokens": 345,
+        "total_tokens": 2446,
+        "cost_usd": 0.0104275,
+        "latency_ms": 9067,
+        "attempt_count": 1,
+        "evaluation_status": "completed"
+      }
+    },
+    {
+      "case_id": "benchmark-holdout-020",
+      "category": "holdout_governance",
+      "expected_difficulty": "balanced",
+      "customer_tier": "enterprise",
+      "input": {
+        "request": "AI 답변이 내부 정책과 다를 때 자동 발송을 막고 사람 검토로 넘기는 기준을 설계해 주세요.",
+        "context": "지식 베이스 검색이나 외부 문서 조회 없이, 요청에 포함된 정보만 사용합니다.",
+        "constraints": [
+          "근거 없는 사실을 확정하지 않습니다.",
+          "누락된 정보는 assumptions에 분리합니다.",
+          "필수 JSON 필드를 모두 반환합니다."
+        ],
+        "output_mode": "checklist"
+      },
+      "execution_order": [
+        "high_fixed",
+        "automatic"
+      ],
+      "arms": {
+        "high_fixed": {
+          "arm": "high_fixed",
+          "selected_model": "gpt-5.6-sol",
+          "task_cost_usd": 0.0386,
+          "task_latency_ms": 20597,
+          "workflow_latency_ms": 20947,
+          "prompt_tokens": 484,
+          "completion_tokens": 1206,
+          "total_tokens": 1690,
+          "output_text": "{\"분류\":\"AI 거버넌스·정책 준수 검토 기준 설계\",\"우선순위\":\"high\",\"승인필요\":true,\"대응계획\":[\"[ ] 내부 정책을 구조화된 규칙으로 등록합니다: 정책 ID, 적용 대상, 금지·필수 조건, 예외, 우선순위, 시행일, 담당 승인자.\",\"[ ] 발송 전 AI 답변을 관련 정책 규칙과 대조하는 검증 단계를 둡니다.\",\"[ ] 명시적 정책 위반, 필수 고지 누락, 상충하는 정책의 존재, 적용 정책 판단 불가 중 하나라도 감지되면 자동 발송을 차단합니다.\",\"[ ] 정책과의 일치 여부를 판단할 근거가 부족하거나 검증 결과의 신뢰도가 사전 승인된 임계값보다 낮으면 사람 검토로 전환합니다.\",\"[ ] 정책 영향이 큰 보안, 개인정보, 법무, 결제, 보상, 장애 관련 답변은 명시적 일치가 확인되지 않는 한 보수적으로 사람 검토에 넘깁니다.\",\"[ ] 단순 문체 차이는 차단 사유에서 제외하되, 의무·금지·수치·기한·책임·승인 절차의 의미가 달라지면 정책 충돌로 처리합니다.\",\"[ ] 검토 화면에 원문 요청, AI 답변, 적용 정책 ID와 문구, 충돌 지점, 판단 근거, 신뢰도, 추천 조치를 함께 표시합니다.\",\"[ ] 검토자의 승인, 수정 후 승인, 반려 결과와 사유를 기록하고 정책 버전 및 모델 출력과 연결해 감사 추적성을 확보합니다.\",\"[ ] 정책을 찾지 못했거나 정책 버전이 만료·불명확한 경우에는 '정책 일치'로 간주하지 않고 발송을 보류합니다.\",\"[ ] 운영 전 정책 담당자와 보안·법무 등 관련 책임자가 기준, 임계값, 예외 및 검토 SLA를 승인하도록 합니다.\",\"[ ] 초기에는 차단 기준을 보수적으로 적용하고 오탐·누락·검토량을 측정한 뒤 승인된 변경 절차로 조정합니다.\",\"[ ] 우회 발송, 검증 실패, 정책 엔진 장애가 발생하면 기본 동작을 자동 발송 차단으로 설정하고 담당자에게 알립니다.\"],\"답변초안\":\"[설계 원칙]\\n[ ] 자동 발송은 '관련 정책이 식별되고, 명시적 충돌이 없으며, 필수 요소가 모두 충족되고, 검증 신뢰도가 승인된 기준 이상'인 경우에만 허용합니다.\\n[ ] 그 외 결과는 기본적으로 발송을 보류하고 사람 검토로 전환합니다.\\n\\n[사람 검토 전환 기준]\\n[ ] AI 답변이 정책의 금지 조항과 직접 충돌합니다.\\n[ ] 정책상 필수 문구, 고지, 승인 절차 또는 제한 조건이 누락되었습니다.\\n[ ] 정책의 수치, 기한, 대상, 책임 주체 또는 예외 조건을 다르게 표현해 의미가 변경되었습니다.\\n[ ] 둘 이상의 정책이 상충하거나 우선순위를 결정할 수 없습니다.\\n[ ] 적용할 정책을 식별할 수 없거나 정책이 최신인지 확인할 수 없습니다.\\n[ ] 답변에 정책 근거가 없는 확정적 사실·약속·승인·보상 표현이 포함됩니다.\\n[ ] 보안, 개인정보, 법무, 결제, 보상 또는 장애에 영향을 주지만 정책 일치가 명확히 확인되지 않습니다.\\n[ ] 검증 구성요소가 실패하거나 결과 신뢰도가 승인된 임계값보다 낮습니다.\\n[ ] 사용자가 정책 우회, 예외 적용 또는 승인 없는 실행을 요구합니다.\\n\\n[자동 발송 허용 기준]\\n[ ] 적용 정책과 정책 버전이 식별되었습니다.\\n[ ] 금지 사항 위반이 없습니다.\\n[ ] 필수 요소가 모두 포함되었습니다.\\n[ ] 정책의 의미를 바꾸는 표현이 없습니다.\\n[ ] 고위험 항목이나 별도 승인 대상이 아닙니다.\\n[ ] 검증 결과와 근거가 기록되었습니다.\\n\\n[검토 결과]\\n[ ] 승인: 원문대로 발송합니다.\\n[ ] 수정 후 승인: 수정본을 재검증한 뒤 발송합니다.\\n[ ] 반려: 발송하지 않고 사유를 기록합니다.\\n[ ] 정책 질의: 정책 담당자에게 해석 또는 보완을 요청합니다.\\n\\n[Assumptions]\\n[ ] 실제 내부 정책 내용, 위험 등급, 신뢰도 임계값, 승인 조직 및 검토 SLA는 제공되지 않았습니다.\\n[ ] 따라서 구체적인 임계값이나 정책별 자동 발송 여부는 확정하지 않았으며, 운영 적용 전에 내부 정책 책임자의 승인이 필요합니다.\"}",
+          "schema_pass": true,
+          "workflow_success": true,
+          "error": null,
+          "routing": {},
+          "routing_judge_cost_usd": 0.0,
+          "routing_judge_tokens": 0,
+          "routing_judge_latency_ms": null
+        },
+        "automatic": {
+          "arm": "automatic",
+          "selected_model": "gpt-5-mini",
+          "task_cost_usd": 0.002817,
+          "task_latency_ms": 16990,
+          "workflow_latency_ms": 17535,
+          "prompt_tokens": 484,
+          "completion_tokens": 1348,
+          "total_tokens": 1832,
+          "output_text": "{\n  \"분류\": \"검토/거버넌스\",\n  \"우선순위\": \"high\",\n  \"승인필요\": true,\n  \"대응계획\": [\n    \"정책-위반 판별 규칙 목록화: 내부 정책 항목(예: 보안, 개인정보, 법무, 준수, 금전적 약속, 의료/법률 자문 등)을 기준으로 자동 차단 대상 카테고리를 명확히 나열한다.\",\n    \"위험 등급 매핑: 각 정책 카테고리마다 위험 등급(예: low/medium/high/critical)과 자동 발송 허용 여부를 매핑한다. high/critical은 기본적으로 사람 검토 필요로 설정한다.\",\n    \"편향·민감성 체크: 응답 내용에 차별·편향적 표현, 민감 속성(인종·성별·종교·건강·재무 등) 추정·판단이 포함되면 자동 발송을 금지하고 검토로 전환한다.\",\n    \"정확성 불확실성 기준: 모델이 사실을 확정적으로 진술하되 근거가 부족하거나 '모름/불확실' 표시가 필요하면 자동 발송을 금지한다. 근거 부족은 추론 과정에 외부 데이터 사용 또는 내부 기준 미충족으로 정의한다.\",\n    \"위험한 행동·불법 행위 차단: 범죄·자해·위해 유발 지시가 포함되면 즉시 자동 발송 금지 및 고급 검토 프로세스 트리거.\",\n    \"민감 데이터 노출 탐지: 개인식별정보(PII), 계정/결제 정보, 내부 기밀 등이 응답에 포함되거나 요구될 경우 자동 발송 금지 및 보안·법무 검토 필요.\",\n    \"금전적·법적 약속 방지: 보상·환불·계약 조건 등 기업을 구속할 수 있는 문구가 포함되면 자동 발송 금지 및 법무 검토 필요.\",\n    \"임상·법률 조언 제한: 의료·법률 전문 조언으로 해석 가능한 응답은 사람(전문가) 검토 후 명확한 면책·범위 표기 필요.\",\n    \"불확실성·가정 분리 규칙: 입력에 핵심정보(예: 대상, 시간, 수치)가 누락되어 의미가 달라질 수 있으면 자동 발송 금지. 누락된 정보는 'assumptions' 항목으로 분리해 검토자에게 제공.\",\n    \"설명 가능성 요건: 모델이 특정 정책 판단을 자동으로 내릴 때, 판단 근거(간단한 이유 목록)를 포함하도록 하여 검토자가 빠르게 확인 가능하게 한다.\",\n    \"우선순위 기반 워크플로우: critical/high 항목은 즉시 알림과 함께 1차 검토자 할당, medium은 배치 검토, low는 샘플링 검토 허용(단, 민감성 체크 통과해야 함).\",\n    \"검토 SLA 및 책임자 지정: 각 위험 등급별 최대 검토 시간(SLA)과 승인 권한자를 명시한다(예: critical: 1시간, 담당: 법무/보안 리드).\",\n    \"검토 기록 및 감사로그: 자동 차단 사유, 모델 출력 원문, 검토자 결정, 수정 내역을 감사용으로 저장한다.\",\n    \"테스트·모니터링 지표: False positive/negative 비율, 평균 검토 시간, 재발 사례 비율 등을 측정해 기준을 주기적으로 조정한다.\",\n    \"예외 관리 프로세스: 긴급 전송이 필요할 때 임시 예외 요청 절차(근거 문서, 승인자 서명, 제한적 전송 로그 남김)를 마련한다.\",\n    \"사용자 커뮤니케이션 가이드: 자동 차단된 경우 사용자에게 제공할 표준 메시지 템플릿을 마련(검토 중 안내, 예상 처리 시간, 연락처 등).\",\n    \"훈련 및 권한 통제: 검토자 교육 자료와 권한 수준(누가 최종 승인 가능한지)을 정의한다.\",\n    \"버전 관리: 정책·기준 변경 시 버전 관리 및 과거 결정 재검토 절차를 둔다.\"\n  ],\n  \"답변초안\": \"요청하신 기준에 따라 자동 발송 차단 및 사람 검토 전환 정책 초안을 아래 체크리스트 형식으로 제안드립니다. 1) 정책 차단 카테고리 정의(보안, 개인정보, 법무, 의료/법률 조언, 금전적 약속 등). 2) 각 카테고리별 위험 등급 매핑(high/critical은 기본 검토). 3) 민감성 및 편향 표현 포함 시 자동 차단. 4) 정확성 불확실성(근거 부족) 시 자동 차단. 5) 불법/유해 지시 포함 시 즉시 차단. 6) PII·기밀 포함 시 보안·법무 검토. 7) 금전적·법적 약속 문구는 법무 검토. 8) 의료·법률 조언은 전문가 검토와 면책 필요. 9) 입력 누락 시 assumptions로 분리하고 검토 전환. 10) 판단 근거 요약 포함으로 설명 가능성 확보. 11) 위험 등급 기반 워크플로우 및 SLA(critical 예: 1시간). 12) 감사로그 및 결정 기록 보관. 13) 모니터링 지표로 기준 지속 개선. 14) 긴급 예외 절차와 사용자 통보 템플릿 마련. 15) 검토자 교육과 권한 통제, 정책 버전 관리. 누락된 정보와 가정은 별도 'assumptions' 항목으로 정리하여 검토자에게 제공하십시오. 이 초안은 제공된 입력만을 기반으로 작성되었으며, 구체적 내부 정책 문서와의 정합성 검토가 필요합니다.\"\n}",
+          "schema_pass": true,
+          "workflow_success": true,
+          "error": null,
+          "routing": {
+            "judge": {
+              "cost": 0.00200925,
+              "model": "gpt-5.4-mini",
+              "usage": {
+                "latency_ms": 2684,
+                "total_tokens": 1529,
+                "prompt_tokens": 1299,
+                "completion_tokens": 230
+              },
+              "status": "selected",
+              "attempted": true,
+              "confidence": 0.9,
+              "reason_code": "requirements_candidate_selected",
+              "reason_short": "요구 수준에 맞는 후보 선택",
+              "reason_factors": [
+                "multi_step_reasoning",
+                "high_decision_impact",
+                "broad_context_synthesis"
+              ],
+              "rubric_version": "routing-requirements-v4",
+              "selected_model": "gpt-5-mini",
+              "ambiguity_flags": [
+                "boundary_score"
+              ],
+              "learning_status": "not_queued",
+              "selection_source": "server_requirement_selection",
+              "task_requirements": {
+                "decision_impact": 2,
+                "task_complexity": 2,
+                "evidence_synthesis": 2
+              },
+              "safe_fallback_used": false,
+              "candidate_model_count": 11,
+              "adjudication_attempted": false,
+              "learning_not_queued_reason": "RuntimeError"
+            },
+            "enabled": true,
+            "policy_id": "5371a7bd-3dd0-44bc-9e5c-f7100fb496f1",
+            "learner_id": "766934dd-a437-45eb-9d45-743631a62d7f",
+            "rag_context": {
+              "used": false,
+              "source_count": 0,
+              "partial_result": false,
+              "source_tier_used": null,
+              "evidence_sufficient": false,
+              "insufficiency_reason": null,
+              "query_rewrite_applied": false,
+              "retrieved_chunk_count": 0,
+              "retrieved_context_chars": 0,
+              "retrieved_context_token_estimate": "[REDACTED]"
+            },
+            "reason_code": "requirements_candidate_selected",
+            "strategy_id": "judge_bootstrap_incremental_v1",
+            "judge_called": true,
+            "execution_mode": "deployed",
+            "fallback_model": "gpt-4.1",
+            "policy_version": "judge-first-economics-v1",
+            "selected_model": "gpt-5-mini",
+            "decision_source": "runtime_judge",
+            "learner_version": null,
+            "learning_status": "not_queued",
+            "matched_rule_id": null,
+            "runtime_context": {
+              "intent": "generate",
+              "node_task": "generate",
+              "risk_level": "medium",
+              "input_length": 245,
+              "output_format": "json",
+              "prompt_length": 385,
+              "has_file_input": false,
+              "customer_facing": false,
+              "schema_required": true,
+              "knowledge_enabled": false,
+              "input_length_bucket": "short",
+              "prompt_length_bucket": "short"
+            },
+            "decision_factors": {
+              "learning_mode": "judge_first",
+              "judged_request_count": 24,
+              "candidate_model_count": 11
+            },
+            "included_in_routing_learning": false
+          },
+          "routing_judge_cost_usd": 0.002009,
+          "routing_judge_tokens": 1529,
+          "routing_judge_latency_ms": 2684
+        }
+      },
+      "routing_accuracy": {
+        "classification": "appropriate",
+        "selected_model": "gpt-5-mini",
+        "canonical_model_id": "gpt-5-mini",
+        "capability_source": "official_provider_catalog",
+        "capability_tier": "balanced",
+        "complexity_ceiling": "multi_constraint",
+        "acceptable_model_ids": [
+          "gpt-4.1-mini",
+          "gpt-4o",
+          "gpt-5-mini",
+          "gpt-5.4-mini",
+          "gpt-5.6-terra"
+        ],
+        "underpowered_model_ids": [
+          "gpt-4o-mini",
+          "gpt-5.6-luna"
+        ],
+        "overprovisioned_model_ids": [
+          "gpt-5.6-sol",
+          "o3"
+        ]
+      },
+      "quality": {
+        "automatic": {
+          "quality_score": 84.0,
+          "contract_pass": true,
+          "reason": "필수 필드 충족, 실행계획이 구체적임. 다만 체크리스트 형식 적합성이 약하고 assumptions 분리가 불명확함.",
+          "evaluation_status": "completed"
+        },
+        "high_fixed": {
+          "quality_score": 93.0,
+          "contract_pass": true,
+          "reason": "필수 필드 충족, 요청에 직접 맞는 검토 기준과 보수적 처리 원칙이 명확함. 체크리스트 형식과 assumptions 표현도 더 적절함.",
+          "evaluation_status": "completed"
+        }
+      },
+      "quality_evaluation": {
+        "model": "gpt-5.4",
+        "prompt_tokens": 2893,
+        "completion_tokens": 339,
+        "total_tokens": 3232,
+        "cost_usd": 0.0123175,
+        "latency_ms": 5457,
+        "attempt_count": 1,
+        "evaluation_status": "completed"
+      }
+    },
+    {
+      "case_id": "benchmark-holdout-006",
+      "category": "holdout_access",
+      "expected_difficulty": "balanced",
+      "customer_tier": "business",
+      "input": {
+        "request": "프로젝트가 끝난 외부 사용자의 팀 접근을 회수하되 기존 감사 기록은 유지해 주세요.",
+        "context": "지식 베이스 검색이나 외부 문서 조회 없이, 요청에 포함된 정보만 사용합니다.",
+        "constraints": [
+          "근거 없는 사실을 확정하지 않습니다.",
+          "누락된 정보는 assumptions에 분리합니다.",
+          "필수 JSON 필드를 모두 반환합니다."
+        ],
+        "output_mode": "checklist"
+      },
+      "execution_order": [
+        "high_fixed",
+        "automatic"
+      ],
+      "arms": {
+        "high_fixed": {
+          "arm": "high_fixed",
+          "selected_model": "gpt-5.6-sol",
+          "task_cost_usd": 0.01997,
+          "task_latency_ms": 12492,
+          "workflow_latency_ms": 12646,
+          "prompt_tokens": 478,
+          "completion_tokens": 586,
+          "total_tokens": 1064,
+          "output_text": "{\"분류\":\"접근권한 회수 및 감사기록 보존\",\"우선순위\":\"high\",\"승인필요\":true,\"대응계획\":[\"[ ] 대상 외부 사용자, 팀, 프로젝트 및 회수 대상 권한 범위를 확인합니다.\",\"[ ] 프로젝트 종료 여부와 요청자의 권한 변경 승인 권한을 확인합니다.\",\"[ ] 감사 기록이나 사용자 이력을 삭제하지 않고 팀 접근 권한만 회수하는 방식인지 확인합니다.\",\"[ ] 필요한 승인을 받은 후 대상 사용자의 팀 멤버십 또는 접근 권한을 비활성화합니다.\",\"[ ] 회수 후 해당 사용자가 팀 자원에 접근할 수 없는지 검증합니다.\",\"[ ] 기존 감사 기록이 유지되는지 확인하고 처리 결과와 변경 시각을 기록합니다.\"],\"답변초안\":\"요청하신 외부 사용자의 팀 접근 회수는 보안상 우선 처리할 수 있습니다. 다만 대상 사용자와 팀, 정확한 권한 범위 및 승인 권한을 먼저 확인해야 합니다. 기존 감사 기록과 사용자 이력은 삭제하지 않고 접근 권한만 회수하는 방식으로 진행하며, 완료 후 접근 차단 및 감사 기록 유지 여부를 검증하겠습니다.\",\"assumptions\":[\"대상 외부 사용자와 팀의 식별 정보는 아직 제공되지 않았습니다.\",\"요청자가 해당 접근 권한 변경을 직접 승인할 권한이 있는지는 확인되지 않았습니다.\",\"사용 중인 시스템이 권한 회수와 감사 기록 보존을 분리해 지원하는지는 확인되지 않았습니다.\"]}",
+          "schema_pass": true,
+          "workflow_success": true,
+          "error": null,
+          "routing": {},
+          "routing_judge_cost_usd": 0.0,
+          "routing_judge_tokens": 0,
+          "routing_judge_latency_ms": null
+        },
+        "automatic": {
+          "arm": "automatic",
+          "selected_model": "gpt-5.4-mini",
+          "task_cost_usd": 0.001619,
+          "task_latency_ms": 5262,
+          "workflow_latency_ms": 5413,
+          "prompt_tokens": 478,
+          "completion_tokens": 280,
+          "total_tokens": 758,
+          "output_text": "{\"분류\":\"보안/접근권한 관리\",\"우선순위\":\"high\",\"승인필요\":true,\"대응계획\":[\"외부 사용자의 팀 접근 범위를 식별합니다.\",\"프로젝트 종료 기준에 따라 해당 사용자의 팀 접근 권한을 회수합니다.\",\"기존 감사 기록과 로그 보존 설정이 유지되는지 확인합니다.\",\"권한 회수 후 접근 상태를 검증합니다.\",\"감사 기록 보존에 대한 시스템/정책 제한이 있으면 추가 승인 또는 운영 확인을 요청합니다.\"],\"답변초안\":\"프로젝트 종료에 따른 외부 사용자의 팀 접근 회수 요청으로 이해했습니다. 기존 감사 기록은 유지하는 방향으로 처리하는 것이 적절합니다. 다만 실제 권한 구조와 로그 보존 정책은 제공된 정보만으로 확정할 수 없으므로, 권한 회수 대상과 보존 범위를 먼저 확인한 뒤 진행하겠습니다. 확인이 되면 접근은 회수하고 감사 기록은 그대로 유지되도록 조치하겠습니다.\"}",
+          "schema_pass": true,
+          "workflow_success": true,
+          "error": null,
+          "routing": {
+            "judge": {
+              "cost": 0.0021315,
+              "model": "gpt-5.4-mini",
+              "usage": {
+                "latency_ms": 2487,
+                "total_tokens": 1547,
+                "prompt_tokens": 1288,
+                "completion_tokens": 259
+              },
+              "status": "selected",
+              "attempted": true,
+              "confidence": 0.95,
+              "reason_code": "requirement_default_selected",
+              "reason_short": "요구 수준에 맞는 기본 모델 선택",
+              "reason_factors": [
+                "high_decision_impact",
+                "security_or_compliance_risk",
+                "multi_step_reasoning"
+              ],
+              "rubric_version": "routing-requirements-v4",
+              "selected_model": "gpt-5.4-mini",
+              "ambiguity_flags": [
+                "insufficient_context"
+              ],
+              "learning_status": "not_queued",
+              "selection_source": "server_requirement_selection",
+              "task_requirements": {
+                "decision_impact": 3,
+                "task_complexity": 2,
+                "evidence_synthesis": 2
+              },
+              "safe_fallback_used": false,
+              "candidate_model_count": 11,
+              "adjudication_attempted": false,
+              "learning_not_queued_reason": "RuntimeError"
+            },
+            "enabled": true,
+            "policy_id": "5371a7bd-3dd0-44bc-9e5c-f7100fb496f1",
+            "learner_id": "766934dd-a437-45eb-9d45-743631a62d7f",
+            "rag_context": {
+              "used": false,
+              "source_count": 0,
+              "partial_result": false,
+              "source_tier_used": null,
+              "evidence_sufficient": false,
+              "insufficiency_reason": null,
+              "query_rewrite_applied": false,
+              "retrieved_chunk_count": 0,
+              "retrieved_context_chars": 0,
+              "retrieved_context_token_estimate": "[REDACTED]"
+            },
+            "reason_code": "requirement_default_selected",
+            "strategy_id": "judge_bootstrap_incremental_v1",
+            "judge_called": true,
+            "execution_mode": "deployed",
+            "fallback_model": "gpt-4.1",
+            "policy_version": "judge-first-economics-v1",
+            "selected_model": "gpt-5.4-mini",
+            "decision_source": "runtime_judge",
+            "learner_version": null,
+            "learning_status": "not_queued",
+            "matched_rule_id": null,
+            "runtime_context": {
+              "intent": "generate",
+              "node_task": "generate",
+              "risk_level": "medium",
+              "input_length": 237,
+              "output_format": "json",
+              "prompt_length": 385,
+              "has_file_input": false,
+              "customer_facing": false,
+              "schema_required": true,
+              "knowledge_enabled": false,
+              "input_length_bucket": "short",
+              "prompt_length_bucket": "short"
+            },
+            "decision_factors": {
+              "learning_mode": "judge_first",
+              "judged_request_count": 24,
+              "candidate_model_count": 11
+            },
+            "included_in_routing_learning": false
+          },
+          "routing_judge_cost_usd": 0.002132,
+          "routing_judge_tokens": 1547,
+          "routing_judge_latency_ms": 2487
+        }
+      },
+      "routing_accuracy": {
+        "classification": "appropriate",
+        "selected_model": "gpt-5.4-mini",
+        "canonical_model_id": "gpt-5.4-mini",
+        "capability_source": "official_provider_catalog",
+        "capability_tier": "balanced",
+        "complexity_ceiling": "complex_professional",
+        "acceptable_model_ids": [
+          "gpt-4.1-mini",
+          "gpt-4o",
+          "gpt-5-mini",
+          "gpt-5.4-mini",
+          "gpt-5.6-terra"
+        ],
+        "underpowered_model_ids": [
+          "gpt-4o-mini",
+          "gpt-5.6-luna"
+        ],
+        "overprovisioned_model_ids": [
+          "gpt-5.6-sol",
+          "o3"
+        ]
+      },
+      "quality": {
+        "automatic": {
+          "quality_score": 82.0,
+          "contract_pass": false,
+          "reason": "핵심 필드는 충족하고 보수적 처리도 적절하지만, 누락 정보가 assumptions로 분리되지 않아 제약 위반입니다.",
+          "evaluation_status": "completed"
+        },
+        "high_fixed": {
+          "quality_score": 95.0,
+          "contract_pass": true,
+          "reason": "필수 필드를 모두 갖추고, 누락 정보를 assumptions로 분리했으며 실행 단계와 사용자용 초안도 가장 명확합니다.",
+          "evaluation_status": "completed"
+        }
+      },
+      "quality_evaluation": {
+        "model": "gpt-5.4",
+        "prompt_tokens": 960,
+        "completion_tokens": 257,
+        "total_tokens": 1217,
+        "cost_usd": 0.006255,
+        "latency_ms": 3457,
+        "attempt_count": 1,
+        "evaluation_status": "completed"
+      }
+    },
+    {
+      "case_id": "benchmark-holdout-012",
+      "category": "holdout_finance",
+      "expected_difficulty": "economy",
+      "customer_tier": "business",
+      "input": {
+        "request": "이번 달 모델별 비용 합계를 내려받는 위치를 알려 주세요.",
+        "context": "지식 베이스 검색이나 외부 문서 조회 없이, 요청에 포함된 정보만 사용합니다.",
+        "constraints": [
+          "근거 없는 사실을 확정하지 않습니다.",
+          "누락된 정보는 assumptions에 분리합니다.",
+          "필수 JSON 필드를 모두 반환합니다."
+        ],
+        "output_mode": "checklist"
+      },
+      "execution_order": [
+        "high_fixed",
+        "automatic"
+      ],
+      "arms": {
+        "high_fixed": {
+          "arm": "high_fixed",
+          "selected_model": "gpt-5.6-sol",
+          "task_cost_usd": 0.0112,
+          "task_latency_ms": 5722,
+          "workflow_latency_ms": 5876,
+          "prompt_tokens": 470,
+          "completion_tokens": 295,
+          "total_tokens": 765,
+          "output_text": "{\"분류\":\"결제·비용 보고서 위치 문의\",\"우선순위\":\"medium\",\"승인필요\":false,\"대응계획\":[\"요청에 제품명이나 관리 콘솔 정보가 없는 점을 확인합니다.\",\"정확한 다운로드 위치를 안내하기 위해 사용 중인 제품 또는 콘솔 이름을 요청합니다.\",\"확인 후 이번 달 기간과 모델별 집계 기준을 설정하는 메뉴 및 다운로드 절차를 안내합니다.\"],\"답변초안\":\"[확인 필요]\\n- 현재 요청만으로는 사용 중인 제품이나 관리 콘솔을 알 수 없어 정확한 메뉴 위치를 확정할 수 없습니다.\\n- 사용 중인 제품명 또는 비용을 확인하는 콘솔 이름을 알려 주시면, 이번 달 모델별 비용 합계를 내려받는 경로를 안내해 드리겠습니다.\\n\\n[Assumptions]\\n- 모델별 비용 조회 및 파일 다운로드 기능이 제공되는 기업용 관리 화면을 이용 중인 것으로 가정했습니다.\"}",
+          "schema_pass": true,
+          "workflow_success": true,
+          "error": null,
+          "routing": {},
+          "routing_judge_cost_usd": 0.0,
+          "routing_judge_tokens": 0,
+          "routing_judge_latency_ms": null
+        },
+        "automatic": {
+          "arm": "automatic",
+          "selected_model": "gpt-4o-mini",
+          "task_cost_usd": 0.000136,
+          "task_latency_ms": 4356,
+          "workflow_latency_ms": 4523,
+          "prompt_tokens": 471,
+          "completion_tokens": 109,
+          "total_tokens": 580,
+          "output_text": "{\"분류\":\"정보 요청\",\"우선순위\":\"medium\",\"승인필요\":false,\"대응계획\":[\"요청자의 등급에 따라 적절한 정보 제공\",\"비용 합계에 대한 구체적인 위치 확인\"],\"답변초안\":\"이번 달 모델별 비용 합계는 일반적으로 회사의 재무 시스템이나 회계 소프트웨어에서 확인할 수 있습니다. 해당 시스템에 로그인한 후, 비용 보고서 또는 모델별 비용 섹션을 찾아보시기 바랍니다.\"}",
+          "schema_pass": true,
+          "workflow_success": true,
+          "error": null,
+          "routing": {
+            "judge": {
+              "cost": 0.00186225,
+              "model": "gpt-5.4-mini",
+              "usage": {
+                "latency_ms": 2333,
+                "total_tokens": 1473,
+                "prompt_tokens": 1271,
+                "completion_tokens": 202
+              },
+              "status": "selected",
+              "attempted": true,
+              "confidence": 0.91,
+              "reason_code": "requirements_candidate_selected",
+              "reason_short": "요구 수준에 맞는 후보 선택",
+              "reason_factors": [
+                "multi_step_reasoning"
+              ],
+              "rubric_version": "routing-requirements-v4",
+              "selected_model": "gpt-4o-mini",
+              "ambiguity_flags": [
+                "insufficient_context"
+              ],
+              "learning_status": "not_queued",
+              "selection_source": "server_requirement_selection",
+              "task_requirements": {
+                "decision_impact": 1,
+                "task_complexity": 1,
+                "evidence_synthesis": 1
+              },
+              "safe_fallback_used": false,
+              "candidate_model_count": 11,
+              "adjudication_attempted": false,
+              "learning_not_queued_reason": "RuntimeError"
+            },
+            "enabled": true,
+            "policy_id": "5371a7bd-3dd0-44bc-9e5c-f7100fb496f1",
+            "learner_id": "766934dd-a437-45eb-9d45-743631a62d7f",
+            "rag_context": {
+              "used": false,
+              "source_count": 0,
+              "partial_result": false,
+              "source_tier_used": null,
+              "evidence_sufficient": false,
+              "insufficiency_reason": null,
+              "query_rewrite_applied": false,
+              "retrieved_chunk_count": 0,
+              "retrieved_context_chars": 0,
+              "retrieved_context_token_estimate": "[REDACTED]"
+            },
+            "reason_code": "requirements_candidate_selected",
+            "strategy_id": "judge_bootstrap_incremental_v1",
+            "judge_called": true,
+            "execution_mode": "deployed",
+            "fallback_model": "gpt-4.1",
+            "policy_version": "judge-first-economics-v1",
+            "selected_model": "gpt-4o-mini",
+            "decision_source": "runtime_judge",
+            "learner_version": null,
+            "learning_status": "not_queued",
+            "matched_rule_id": null,
+            "runtime_context": {
+              "intent": "generate",
+              "node_task": "generate",
+              "risk_level": "medium",
+              "input_length": 223,
+              "output_format": "json",
+              "prompt_length": 385,
+              "has_file_input": false,
+              "customer_facing": false,
+              "schema_required": true,
+              "knowledge_enabled": false,
+              "input_length_bucket": "short",
+              "prompt_length_bucket": "short"
+            },
+            "decision_factors": {
+              "learning_mode": "judge_first",
+              "judged_request_count": 24,
+              "candidate_model_count": 11
+            },
+            "included_in_routing_learning": false
+          },
+          "routing_judge_cost_usd": 0.001862,
+          "routing_judge_tokens": 1473,
+          "routing_judge_latency_ms": 2333
+        }
+      },
+      "routing_accuracy": {
+        "classification": "appropriate",
+        "selected_model": "gpt-4o-mini",
+        "canonical_model_id": "gpt-4o-mini",
+        "capability_source": "official_provider_catalog",
+        "capability_tier": "economy",
+        "complexity_ceiling": "routine",
+        "acceptable_model_ids": [
+          "gpt-4o-mini",
+          "gpt-4.1-mini",
+          "gpt-5-mini",
+          "gpt-5.6-luna"
+        ],
+        "underpowered_model_ids": [],
+        "overprovisioned_model_ids": [
+          "gpt-5.4",
+          "gpt-5.6-sol",
+          "o3"
+        ]
+      },
+      "quality": {
+        "automatic": {
+          "quality_score": 34.0,
+          "contract_pass": false,
+          "reason": "근거 없이 재무 시스템·회계 소프트웨어를 단정했고, 누락 정보 확인과 실행 단계가 부족합니다.",
+          "evaluation_status": "completed"
+        },
+        "high_fixed": {
+          "quality_score": 91.0,
+          "contract_pass": true,
+          "reason": "정보 부족을 명확히 밝히고 추가 확인을 요청했으며, 보수적이고 실행 가능한 대응계획을 제시했습니다.",
+          "evaluation_status": "completed"
+        }
+      },
+      "quality_evaluation": {
+        "model": "gpt-5.4",
+        "prompt_tokens": 702,
+        "completion_tokens": 324,
+        "total_tokens": 1026,
+        "cost_usd": 0.006615,
+        "latency_ms": 11020,
+        "attempt_count": 1,
+        "evaluation_status": "completed"
+      }
+    },
+    {
+      "case_id": "benchmark-holdout-015",
+      "category": "holdout_security",
+      "expected_difficulty": "balanced",
+      "customer_tier": "business",
+      "input": {
+        "request": "MFA 재등록 요청이 본인 요청인지 확인하기 위한 안전한 절차를 알려 주세요.",
+        "context": "지식 베이스 검색이나 외부 문서 조회 없이, 요청에 포함된 정보만 사용합니다.",
+        "constraints": [
+          "근거 없는 사실을 확정하지 않습니다.",
+          "누락된 정보는 assumptions에 분리합니다.",
+          "필수 JSON 필드를 모두 반환합니다."
+        ],
+        "output_mode": "checklist"
+      },
+      "execution_order": [
+        "high_fixed",
+        "automatic"
+      ],
+      "arms": {
+        "high_fixed": {
+          "arm": "high_fixed",
+          "selected_model": "gpt-5.6-sol",
+          "task_cost_usd": 0.024155,
+          "task_latency_ms": 16042,
+          "workflow_latency_ms": 16277,
+          "prompt_tokens": 475,
+          "completion_tokens": 726,
+          "total_tokens": 1201,
+          "output_text": "{\"분류\":\"보안·계정 접근 관리(MFA 재등록 본인 확인)\",\"우선순위\":\"high\",\"승인필요\":true,\"대응계획\":[\"기존 MFA를 즉시 해제하거나 재등록 링크를 발급하지 않습니다.\",\"등록된 공식 연락처와 사내 승인 경로를 이용해 요청자 신원을 독립적으로 확인합니다.\",\"요청 출처, 계정 식별 정보, 요청 시각, 확인 및 승인 내역을 기록합니다.\",\"피싱이나 계정 탈취 징후가 있으면 처리를 중단하고 보안 담당 조직으로 에스컬레이션합니다.\",\"권한 있는 담당자의 승인 후 기존 세션과 인증 수단의 처리 범위를 결정하고, 제한된 유효기간의 재등록 절차를 제공합니다.\",\"재등록 완료 후 요청자에게 결과를 알리고 계정 활동 및 복구 정보 점검을 안내합니다.\"],\"답변초안\":\"[안전한 MFA 재등록 확인 체크리스트]\\n\\n□ 요청에 포함된 링크, 전화번호 또는 회신 주소를 신원 확인 수단으로 그대로 신뢰하지 않습니다.\\n□ 조직이 기존에 보유한 공식 연락처나 승인된 내부 채널로 요청자에게 별도 연락합니다.\\n□ 이름, 계정 ID, 소속 등 필요한 최소 정보만 확인하며 비밀번호, 현재 MFA 코드, 복구 코드의 전체 값은 요구하지 않습니다.\\n□ 가능하면 서로 독립적인 확인 요소를 2개 이상 사용합니다. 예: 등록된 연락처 확인과 관리자 승인.\\n□ 요청자가 연락처 변경도 함께 요구하거나 기존 확인 수단을 전혀 사용할 수 없다면 고위험 예외 절차로 분리합니다.\\n□ 긴급함을 강조하거나 승인 절차 우회를 요구하는 경우 처리를 중단하고 보안 담당자에게 전달합니다.\\n□ 최근의 의심스러운 로그인, 예상치 못한 세션, 반복된 재설정 요청 등 계정 탈취 징후를 점검합니다.\\n□ 신원 확인과 권한 있는 담당자의 승인이 끝나기 전에는 기존 MFA를 해제하지 않습니다.\\n□ 승인 후에는 짧은 유효기간, 1회 사용 등으로 제한된 재등록 수단을 공식 채널을 통해 제공합니다.\\n□ 필요 시 기존 세션·복구 수단의 무효화 여부를 보안 담당자가 검토하도록 합니다.\\n□ 요청, 확인 방법, 승인자, 처리 시각, 결과를 감사 가능한 형태로 기록하되 민감정보는 최소화합니다.\\n□ 완료 후 요청자에게 MFA 정상 작동 확인, 복구 정보 점검, 의심 활동 신고를 안내합니다.\\n\\n[Assumptions]\\n- 조직별 신원 확인 정책, 승인권자, 공식 연락 채널, 세션 무효화 기준은 제공되지 않았습니다.\\n- 따라서 위 내용은 일반적인 안전 원칙이며, 실제 처리는 조직의 보안 정책과 권한 체계를 우선 적용해야 합니다.\"}",
+          "schema_pass": true,
+          "workflow_success": true,
+          "error": null,
+          "routing": {},
+          "routing_judge_cost_usd": 0.0,
+          "routing_judge_tokens": 0,
+          "routing_judge_latency_ms": null
+        },
+        "automatic": {
+          "arm": "automatic",
+          "selected_model": "gpt-4.1",
+          "task_cost_usd": 0.00308,
+          "task_latency_ms": 5722,
+          "workflow_latency_ms": 5893,
+          "prompt_tokens": 476,
+          "completion_tokens": 266,
+          "total_tokens": 742,
+          "output_text": "{\"분류\": \"보안 인증\", \"우선순위\": \"high\", \"승인필요\": false, \"대응계획\": [\"MFA 재등록 요청 시 본인 확인 절차 필요성 안내\", \"본인 확인을 위한 안전한 절차 체크리스트 제공\", \"추가 정보 필요 시 assumptions에 분리\"], \"답변초안\": \"MFA(다중 인증) 재등록 요청이 본인 요청임을 확인하기 위한 안전한 절차 체크리스트는 다음과 같습니다:\\n\\n1. 본인임을 확인할 수 있는 2차 인증 수단(예: 등록된 이메일, 휴대폰 번호)으로 인증 코드 전송 및 확인\\n2. 기존 MFA 인증 수단이 남아 있다면, 해당 수단을 통한 추가 인증 요청\\n3. 신분증 등 공식 신분 확인 자료 제출 요청(내부 정책에 따라 적용)\\n4. 요청 내역 및 본인 확인 절차 기록 및 감사 로그 남기기\\n5. 본인 확인이 완료된 후에만 MFA 재등록 진행\\n\\nassumptions: 조직의 내부 정책, 사용 가능한 인증 수단, 신분증 제출 여부 등은 요청에 포함되지 않아 구체적으로 안내하지 않았습니다.\"}",
+          "schema_pass": true,
+          "workflow_success": true,
+          "error": null,
+          "routing": {
+            "judge": {
+              "cost": 0.0023025,
+              "model": "gpt-5.4-mini",
+              "usage": {
+                "latency_ms": 2513,
+                "total_tokens": 1580,
+                "prompt_tokens": 1282,
+                "completion_tokens": 298
+              },
+              "status": "selected",
+              "attempted": true,
+              "confidence": 0.89,
+              "reason_code": "requirement_judge_low_confidence_fallback",
+              "reason_short": "요구 수준 판정 확신도가 낮아 대체 모델 사용",
+              "reason_factors": [
+                "security_or_compliance_risk",
+                "multi_step_reasoning",
+                "high_decision_impact"
+              ],
+              "rubric_version": "routing-requirements-v4",
+              "selected_model": "gpt-4.1",
+              "ambiguity_flags": [
+                "high_impact_uncertainty",
+                "insufficient_context"
+              ],
+              "learning_status": "not_queued",
+              "selection_source": "server_requirement_selection",
+              "task_requirements": {
+                "decision_impact": 2,
+                "task_complexity": 2,
+                "evidence_synthesis": 2
+              },
+              "safe_fallback_used": true,
+              "candidate_model_count": 11,
+              "adjudication_attempted": false,
+              "learning_not_queued_reason": "requirement_judge_low_confidence"
+            },
+            "enabled": true,
+            "policy_id": "5371a7bd-3dd0-44bc-9e5c-f7100fb496f1",
+            "learner_id": "766934dd-a437-45eb-9d45-743631a62d7f",
+            "rag_context": {
+              "used": false,
+              "source_count": 0,
+              "partial_result": false,
+              "source_tier_used": null,
+              "evidence_sufficient": false,
+              "insufficiency_reason": null,
+              "query_rewrite_applied": false,
+              "retrieved_chunk_count": 0,
+              "retrieved_context_chars": 0,
+              "retrieved_context_token_estimate": "[REDACTED]"
+            },
+            "reason_code": "requirement_judge_low_confidence_fallback",
+            "strategy_id": "judge_bootstrap_incremental_v1",
+            "judge_called": true,
+            "execution_mode": "deployed",
+            "fallback_model": "gpt-5.4-mini",
+            "policy_version": "judge-first-economics-v1",
+            "selected_model": "gpt-4.1",
+            "decision_source": "runtime_judge",
+            "learner_version": null,
+            "learning_status": "not_queued",
+            "matched_rule_id": null,
+            "runtime_context": {
+              "intent": "generate",
+              "node_task": "generate",
+              "risk_level": "medium",
+              "input_length": 234,
+              "output_format": "json",
+              "prompt_length": 385,
+              "has_file_input": false,
+              "customer_facing": false,
+              "schema_required": true,
+              "knowledge_enabled": false,
+              "input_length_bucket": "short",
+              "prompt_length_bucket": "short"
+            },
+            "decision_factors": {
+              "learning_mode": "judge_first",
+              "judged_request_count": 24,
+              "candidate_model_count": 11
+            },
+            "included_in_routing_learning": false
+          },
+          "routing_judge_cost_usd": 0.002303,
+          "routing_judge_tokens": 1580,
+          "routing_judge_latency_ms": 2513
+        }
+      },
+      "routing_accuracy": {
+        "classification": "appropriate",
+        "selected_model": "gpt-4.1",
+        "canonical_model_id": "gpt-4.1",
+        "capability_source": "official_provider_catalog",
+        "capability_tier": "balanced",
+        "complexity_ceiling": "multi_constraint",
+        "acceptable_model_ids": [
+          "gpt-4.1-mini",
+          "gpt-4o",
+          "gpt-5-mini",
+          "gpt-5.4-mini",
+          "gpt-5.6-terra"
+        ],
+        "underpowered_model_ids": [
+          "gpt-4o-mini",
+          "gpt-5.6-luna"
+        ],
+        "overprovisioned_model_ids": [
+          "gpt-5.6-sol",
+          "o3"
+        ]
+      },
+      "quality": {
+        "high_fixed": {
+          "quality_score": 96.0,
+          "contract_pass": true,
+          "reason": "필수 필드 충족, 보안 위험을 보수적으로 다뤘고 단계가 실행 가능하며 답변도 명확합니다.",
+          "evaluation_status": "completed"
+        },
+        "automatic": {
+          "quality_score": 62.0,
+          "contract_pass": false,
+          "reason": "승인필요=false가 보수적 처리 원칙에 어긋날 수 있고 대응계획이 추상적이며 확인 절차가 충분히 엄격하지 않습니다.",
+          "evaluation_status": "completed"
+        }
+      },
+      "quality_evaluation": {
+        "model": "gpt-5.4",
+        "prompt_tokens": 1323,
+        "completion_tokens": 264,
+        "total_tokens": 1587,
+        "cost_usd": 0.0072675,
+        "latency_ms": 4352,
+        "attempt_count": 1,
+        "evaluation_status": "completed"
+      }
+    },
+    {
+      "case_id": "benchmark-holdout-010",
+      "category": "holdout_finance",
+      "expected_difficulty": "advanced",
+      "customer_tier": "enterprise",
+      "input": {
+        "request": "중복 청구된 구독료를 여러 법인에 환불해야 합니다. 승인 범위와 회계 반영 순서를 제안해 주세요.",
+        "context": "지식 베이스 검색이나 외부 문서 조회 없이, 요청에 포함된 정보만 사용합니다.",
+        "constraints": [
+          "근거 없는 사실을 확정하지 않습니다.",
+          "누락된 정보는 assumptions에 분리합니다.",
+          "필수 JSON 필드를 모두 반환합니다.",
+          "위험하거나 되돌리기 어려운 조치는 승인 전제로 보수적으로 제안합니다."
+        ],
+        "output_mode": "analysis"
+      },
+      "execution_order": [
+        "automatic",
+        "high_fixed"
+      ],
+      "arms": {
+        "automatic": {
+          "arm": "automatic",
+          "selected_model": "gpt-5-mini",
+          "task_cost_usd": 0.002164,
+          "task_latency_ms": 14880,
+          "workflow_latency_ms": 15233,
+          "prompt_tokens": 510,
+          "completion_tokens": 1018,
+          "total_tokens": 1528,
+          "output_text": "{\n  \"분류\": \"환불 및 회계처리\",\n  \"우선순위\": \"high\",\n  \"승인필요\": true,\n  \"대응계획\": [\n    \"현황 파악: 중복 청구된 금액, 청구 대상 법인별 금액, 청구/납부 일자, 관련 고객 계정/계약 번호를 목록화하여 증빙(청구서, 결제 영수증)을 확보합니다.\",\n    \"환불 정책 및 권한 범위 정의: 환불 금액 한도(예: 건별/월별 최대액), 환불 결제수단(원결제수단 환불 우선, 불가시 계좌이체 등), 법인별 환불 승인 권한(예: 재무팀 결재 한도, CFO 승인 필요 기준)을 명문화합니다.\",\n    \"승인 절차 설계: 소액은 재무팀 승인, 특정 한도 초과 또는 다수 법인 대상 환불은 재무책임자(CFO) 및 법무 검토 후 승인하도록 단계별 승인 라인을 설정합니다.\",\n    \"환불 실행 순서(회계 반영 포함) 제안: 1) 환불 승인 후 우선적으로 고객에게 원결제수단으로 환불 처리; 2) 환불 발생 시점에 환불예정부채(혹은 환불충당금) 계정을 사용해 선반영; 3) 실제 환불완료 시 해당 부채 계정에서 현금/예금 감소로 대체; 4) 법인별로 내부전표로 수취·지급 계정 및 교차청구 조정을 수행; 5) 월별 마감 시 총괄 보고서에 반영해 매출 및 매출환입(또는 환불)로 집계.\",\n    \"법인 간 정산: 동일 고객의 여러 법인에 중복 청구가 발생한 경우, 환불 후 내부 정산 전표를 통해 과오납이 발생한 법인에서 환불부담을 정리하고 필요 시 법인 간 청구/상계로 조정합니다.\",\n    \"모니터링 및 재발방지: 환불 처리 건을 트래킹하는 로그/대시보드 마련, 원인 분석(청구 시스템 오류, 프로세스 문제 등) 및 개선 조치 계획 수립.\",\n    \"법무·세무 검토: 환불에 따른 세금계산서(취소·정정) 처리 및 법적 영향이 불확실한 경우 법무·세무 자문을 받아 절차 확정.\",\n    \"커뮤니케이션 템플릿: 고객 및 내부(재무·영업) 대상 안내 문구와 승인 요청서 양식 초안 준비.\"\n  ],\n  \"답변초안\": \"요청하신 중복 청구 환불 건에 대해 다음을 제안합니다. 우선 중복 청구된 금액과 대상 법인별 내역, 관련 증빙(청구서·영수증)을 확보하여 환불 대상과 금액을 확정합니다. 환불 정책(한도, 결제수단 우선순위)과 승인 권한을 명문화하여 소액·정형 건은 재무팀에서 처리하고, 일정 한도 초과 또는 복수 법인 관련 환불은 CFO 및 법무·세무 검토 후 승인하도록 단계별 절차를 마련하십시오. 회계 반영은 승인 즉시 환불예정부채(또는 환불충당금)로 선반영하고, 실제 환불 시 현금(예금) 감소로 대체하며 매출환입(또는 환불) 항목으로 집계합니다. 여러 법인에 걸친 중복 청구의 경우 환불 후 내부전표로 법인 간 정산을 수행하여 과오납 부담을 조정하십시오. 모든 환불 건은 로그로 추적하고 원인 분석을 통해 재발방지 조치를 수립하며, 세금계산서 정정 등 세무·법무 영향은 관련 부서 확인을 거쳐 처리해야 합니다. 추가로 고객·내부용 안내 문구와 승인 요청 양식을 준비해 승인 흐름을 원활히 하시길 권합니다.\\n\\n(Assumptions: 1) 원결제수단 환불이 기술적으로 가능하다는 전제, 2) 회사에 법인별 회계·정산 프로세스가 존재한다는 전제, 3) 환불 관련 세무·법적 요건은 회사 내부 또는 외부 자문으로 확정해야 함.)\"\n}",
+          "schema_pass": true,
+          "workflow_success": true,
+          "error": null,
+          "routing": {
+            "judge": {
+              "cost": 0.00199875,
+              "model": "gpt-5.4-mini",
+              "usage": {
+                "latency_ms": 2228,
+                "total_tokens": 1570,
+                "prompt_tokens": 1351,
+                "completion_tokens": 219
+              },
+              "status": "selected",
+              "attempted": true,
+              "confidence": 0.84,
+              "reason_code": "requirements_candidate_selected",
+              "reason_short": "요구 수준에 맞는 후보 선택",
+              "reason_factors": [
+                "high_decision_impact",
+                "multi_step_reasoning",
+                "broad_context_synthesis"
+              ],
+              "rubric_version": "routing-requirements-v4",
+              "selected_model": "gpt-5-mini",
+              "ambiguity_flags": [
+                "boundary_score",
+                "insufficient_context"
+              ],
+              "learning_status": "not_queued",
+              "selection_source": "server_requirement_selection",
+              "task_requirements": {
+                "decision_impact": 2,
+                "task_complexity": 2,
+                "evidence_synthesis": 2
+              },
+              "safe_fallback_used": false,
+              "candidate_model_count": 11,
+              "adjudication_attempted": false,
+              "learning_not_queued_reason": "RuntimeError"
+            },
+            "enabled": true,
+            "policy_id": "5371a7bd-3dd0-44bc-9e5c-f7100fb496f1",
+            "learner_id": "766934dd-a437-45eb-9d45-743631a62d7f",
+            "rag_context": {
+              "used": false,
+              "source_count": 0,
+              "partial_result": false,
+              "source_tier_used": null,
+              "evidence_sufficient": false,
+              "insufficiency_reason": null,
+              "query_rewrite_applied": false,
+              "retrieved_chunk_count": 0,
+              "retrieved_context_chars": 0,
+              "retrieved_context_token_estimate": "[REDACTED]"
+            },
+            "reason_code": "requirements_candidate_selected",
+            "strategy_id": "judge_bootstrap_incremental_v1",
+            "judge_called": true,
+            "execution_mode": "deployed",
+            "fallback_model": "gpt-4.1",
+            "policy_version": "judge-first-economics-v1",
+            "selected_model": "gpt-5-mini",
+            "decision_source": "runtime_judge",
+            "learner_version": null,
+            "learning_status": "not_queued",
+            "matched_rule_id": null,
+            "runtime_context": {
+              "intent": "generate",
+              "node_task": "generate",
+              "risk_level": "medium",
+              "input_length": 285,
+              "output_format": "json",
+              "prompt_length": 385,
+              "has_file_input": false,
+              "customer_facing": false,
+              "schema_required": true,
+              "knowledge_enabled": false,
+              "input_length_bucket": "short",
+              "prompt_length_bucket": "short"
+            },
+            "decision_factors": {
+              "learning_mode": "judge_first",
+              "judged_request_count": 24,
+              "candidate_model_count": 11
+            },
+            "included_in_routing_learning": false
+          },
+          "routing_judge_cost_usd": 0.001999,
+          "routing_judge_tokens": 1570,
+          "routing_judge_latency_ms": 2228
+        },
+        "high_fixed": {
+          "arm": "high_fixed",
+          "selected_model": "gpt-5.6-sol",
+          "task_cost_usd": 0.03261,
+          "task_latency_ms": 22825,
+          "workflow_latency_ms": 23089,
+          "prompt_tokens": 510,
+          "completion_tokens": 1002,
+          "total_tokens": 1512,
+          "output_text": "{\"분류\":\"결제·환불 및 다법인 회계조정\",\"우선순위\":\"high\",\"승인필요\":true,\"대응계획\":[\"환불 실행을 일시 보류하고 법인별 중복 청구 건, 원청구·결제·세금계산서 또는 인보이스·환불 대상 금액을 대조합니다.\",\"법인별 계약 주체, 청구 통화, 결제 수단, 세금 처리, 회계 기간, 이미 인식된 수익 여부를 확인하여 환불 명세를 확정합니다.\",\"승인 범위는 최소한 사업 책임자, 재무·회계 책임자, 결제 운영 책임자의 검토를 포함하도록 제안합니다. 금액이 내부 전결 한도를 초과하거나 국경 간 거래·세금 수정·계약 해석이 필요한 경우 상위 재무 승인 및 세무·법무 검토를 추가합니다.\",\"승인 문서에는 대상 법인, 거래 식별자, 중복 발생 근거, 원청구액, 환불액, 통화, 세금, 수수료, 환불 수단, 회계 기간, 고객 통지안, 예외 처리 및 재발 방지 조치를 포함합니다.\",\"회계 반영은 먼저 중복 청구 사실과 귀속 기간을 확정하고, 이어 미수금·현금·선수수익·매출 등 실제 사용 계정에 따라 취소 또는 조정 분개안을 작성한 뒤 회계 승인을 받는 순서로 진행합니다.\",\"승인된 조정 분개와 수정 세금계산서·크레딧 노트 등 필요한 증빙을 먼저 또는 환불과 통제된 방식으로 연계 처리하고, 그다음 원결제 수단을 우선해 법인별 환불을 실행합니다. 정확한 선후관계는 관할 세무 요건과 내부 결산 정책 확인 후 확정합니다.\",\"환불 완료 후 결제사 정산 내역과 총계정원장을 법인별로 대사하고, 고객에게 금액·통화·예상 반영 방식은 확인된 범위에서만 안내하며, 감사 추적 자료를 보관합니다.\",\"중복 청구 원인을 조사하고 자동결제 차단, 중복 탐지, 승인 분리 등 재발 방지 통제를 적용합니다.\"],\"답변초안\":\"제안드리는 승인 구조는 ‘법인별 사실 확인 → 재무·회계 검토 → 전결권자 승인 → 필요 시 세무·법무 검토 → 환불 실행’입니다. 여러 법인에 대한 환불은 금액 합계뿐 아니라 각 법인의 계약·결제·세금 관계를 별도로 검증해야 하므로, 일괄 승인 문서 안에 법인별 명세를 첨부하는 방식이 적절합니다. 내부 전결 한도, 세금 수정, 국경 간 거래 또는 계약상 상계 가능성이 관련되면 상위 승인이나 전문 검토를 조건으로 두어야 합니다.\\n\\n권장 회계 반영 순서는 ① 법인별 중복 청구 및 귀속 기간 확정, ② 원거래와 발행 증빙 대조, ③ 매출·선수수익·미수금·현금 및 세금 계정의 조정 분개안 작성, ④ 회계 및 전결 승인, ⑤ 필요한 크레딧 노트나 수정 세금 증빙 처리, ⑥ 원결제 수단으로 환불, ⑦ 결제 정산 내역과 총계정원장 대사, ⑧ 고객 통지 및 감사 자료 보관입니다. 다만 수정 증빙과 환불의 정확한 선후관계는 관할 세무 규정과 내부 결산 정책을 확인한 후 확정해야 합니다.\\n\\nAssumptions: 중복 청구 사실과 환불액은 아직 최종 검증되지 않았고, 각 법인의 소재지·통화·결제 수단·세금 처리·회계 기간·내부 전결 한도는 제공되지 않았습니다. 따라서 현재 제안은 통제 절차의 기본안이며, 실제 환불 실행이나 분개 확정에 대한 승인이 아닙니다.\"}",
+          "schema_pass": true,
+          "workflow_success": true,
+          "error": null,
+          "routing": {},
+          "routing_judge_cost_usd": 0.0,
+          "routing_judge_tokens": 0,
+          "routing_judge_latency_ms": null
+        }
+      },
+      "routing_accuracy": {
+        "classification": "underpowered",
+        "selected_model": "gpt-5-mini",
+        "canonical_model_id": "gpt-5-mini",
+        "capability_source": "official_provider_catalog",
+        "capability_tier": "balanced",
+        "complexity_ceiling": "multi_constraint",
+        "acceptable_model_ids": [
+          "gpt-5.4",
+          "gpt-5.6-sol",
+          "o3"
+        ],
+        "underpowered_model_ids": [
+          "gpt-4o-mini",
+          "gpt-4.1-mini",
+          "gpt-5.6-luna"
+        ],
+        "overprovisioned_model_ids": []
+      },
+      "quality": {
+        "automatic": {
+          "quality_score": 84.0,
+          "contract_pass": true,
+          "reason": "필수 필드는 충족했고 실행 단계도 구체적입니다. 다만 승인권자·계정 처리 예시가 일부 가정에 기대며, 회계 반영 순서를 다소 확정적으로 제시한 점이 보수성 측면에서 아쉽습니다.",
+          "evaluation_status": "completed"
+        },
+        "high_fixed": {
+          "quality_score": 93.0,
+          "contract_pass": true,
+          "reason": "필수 필드를 모두 충족하며, 다법인 환불의 승인 범위와 회계 반영 순서를 보수적으로 잘 제안했습니다. 불확실한 세무·회계 선후관계를 조건부로 처리해 근거 없는 확정을 피한 점이 특히 좋습니다.",
+          "evaluation_status": "completed"
+        }
+      },
+      "quality_evaluation": {
+        "model": "gpt-5.4",
+        "prompt_tokens": 2384,
+        "completion_tokens": 373,
+        "total_tokens": 2757,
+        "cost_usd": 0.011555,
+        "latency_ms": 5388,
+        "attempt_count": 1,
+        "evaluation_status": "completed"
+      }
+    }
+  ],
+  "arm_summary": {
+    "automatic": {
+      "run_count": 10,
+      "task_cost_usd": 0.021136,
+      "routing_judge_cost_usd": 0.020325,
+      "total_product_cost_usd": 0.041461,
+      "average_task_latency_ms": 8769.8,
+      "average_end_to_end_latency_ms": 9026.7,
+      "p95_task_latency_ms": 16990.0,
+      "total_tokens": 10490,
+      "schema_pass_rate": 1.0,
+      "workflow_success_rate": 1.0,
+      "quality_score_average": 70.5,
+      "quality_pass_rate": 0.4,
+      "quality_evaluation_failure_count": 0,
+      "model_distribution": {
+        "gpt-4o-mini": 2,
+        "gpt-4.1": 3,
+        "gpt-5-mini": 4,
+        "gpt-5.4-mini": 1
+      },
+      "runtime_judge_call_count": 10
+    },
+    "high_fixed": {
+      "run_count": 10,
+      "task_cost_usd": 0.244125,
+      "routing_judge_cost_usd": 0.0,
+      "total_product_cost_usd": 0.244125,
+      "average_task_latency_ms": 15168.9,
+      "average_end_to_end_latency_ms": 15389.5,
+      "p95_task_latency_ms": 22825.0,
+      "total_tokens": 12190,
+      "schema_pass_rate": 1.0,
+      "workflow_success_rate": 1.0,
+      "quality_score_average": 93.1,
+      "quality_pass_rate": 0.9,
+      "quality_evaluation_failure_count": 0,
+      "model_distribution": {
+        "gpt-5.6-sol": 10
+      },
+      "runtime_judge_call_count": 0
+    }
+  },
+  "learning_summary": {
+    "judge_label_count": 10,
+    "distinct_selected_model_count": 4,
+    "selected_models": {
+      "gpt-4o-mini": 2,
+      "gpt-4.1": 3,
+      "gpt-5-mini": 4,
+      "gpt-5.4-mini": 1
+    },
+    "decision_source_distribution": {
+      "runtime_judge": 10
+    },
+    "local_router_takeover_count": 0,
+    "local_router_uncertain_count": 0,
+    "local_confidence_threshold": 0.78,
+    "judge_confidence_average": 0.905,
+    "judge_confidence_p95": 0.95,
+    "interpretation": "local_router_takeover_count가 0이면, 현재 학습 표본 또는 confidence가 임계값에 도달하지 않아 모든 요청이 Runtime Judge로 처리된 것입니다.",
+    "persisted": {
+      "policy_status": "active",
+      "policy_version": "judge-first-economics-v1",
+      "learner_id": "766934dd-a437-45eb-9d45-743631a62d7f",
+      "learner_status": "collecting",
+      "task_fingerprint": "9d9489b146e80a39b2c7c81d294374ed9c85511045a58ce9235e8a0864ea013b",
+      "learning_mode": "judge_first",
+      "judged_request_count": 24,
+      "operational_run_count": 24,
+      "selected_model_ids": [
+        "gpt-4.1-mini",
+        "gpt-4o-mini",
+        "gpt-5-mini",
+        "gpt-5.4-mini"
+      ],
+      "selected_model_counts": {
+        "gpt-5-mini": 9,
+        "gpt-4o-mini": 10,
+        "gpt-4.1-mini": 2,
+        "gpt-5.4-mini": 3
+      },
+      "active_version": null,
+      "pending_count": 0,
+      "accepted_count": 24,
+      "rejected_count": 0,
+      "artifact_kind": "multilingual_e5_task_requirements_ordinal_v3",
+      "artifact_encoder": "intfloat/multilingual-e5-base",
+      "artifact_label_models": [
+        "gpt-4.1-mini",
+        "gpt-4o-mini",
+        "gpt-5-mini",
+        "gpt-5.4-mini"
+      ],
+      "artifact_trained_example_count": 24,
+      "recent_evaluation": {
+        "sample_count": 0,
+        "axis_accuracies": {
+          "decision_impact": 0.0,
+          "task_complexity": 0.0,
+          "evidence_synthesis": 0.0
+        },
+        "axis_mean_errors": {
+          "decision_impact": 0.0,
+          "task_complexity": 0.0,
+          "evidence_synthesis": 0.0
+        },
+        "judge_match_rate": 0.0,
+        "contract_pass_rate": 0.0,
+        "judge_label_diversity": 0,
+        "local_prediction_diversity": 0,
+        "high_risk_underestimation_count": 0
+      },
+      "last_learning_error": null
+    }
+  },
+  "policy_checkpoint": {
+    "policy": {
+      "status": "active",
+      "policy_version": "judge-first-economics-v1",
+      "active_policy": {
+        "strategy_id": "judge_bootstrap_incremental_v1",
+        "judge_model_id": "gpt-5.4-mini",
+        "default_model_id": "gpt-5.4-mini",
+        "fallback_model_id": "gpt-4.1",
+        "global_profile_catalog": {
+          "candidates": [
+            {
+              "model_id": "gpt-4o-mini"
+            },
+            {
+              "model_id": "gpt-4.1-mini"
+            },
+            {
+              "model_id": "gpt-4.1"
+            },
+            {
+              "model_id": "gpt-4o"
+            },
+            {
+              "model_id": "gpt-5-mini"
+            },
+            {
+              "model_id": "gpt-5.4-mini"
+            },
+            {
+              "model_id": "gpt-5.4"
+            },
+            {
+              "model_id": "gpt-5.6-sol"
+            },
+            {
+              "model_id": "gpt-5.6-luna"
+            },
+            {
+              "model_id": "gpt-5.6-terra"
+            },
+            {
+              "model_id": "o3"
+            }
+          ]
+        }
+      },
+      "performance_checkpoint": {},
+      "pending_policy": null,
+      "refresh_every_runs": 100,
+      "eligible_runs_since_last_refresh": 30,
+      "refresh_requested_at": null,
+      "last_refresh_result": "experiment_refresh_suppressed"
+    },
+    "performances": [
+      {
+        "model_id": "gpt-5.4-mini",
+        "input_profile": "unknown",
+        "run_count": 3,
+        "success_count": 3,
+        "schema_pass_count": 3,
+        "schema_eval_count": 3,
+        "downstream_success_count": 3,
+        "downstream_eval_count": 3,
+        "fallback_count": 0,
+        "retry_count": 0,
+        "total_cost": 0.008087,
+        "total_tokens": 3067,
+        "total_latency_ms": 0
+      },
+      {
+        "model_id": "gpt-4.1-mini",
+        "input_profile": "unknown",
+        "run_count": 2,
+        "success_count": 2,
+        "schema_pass_count": 2,
+        "schema_eval_count": 2,
+        "downstream_success_count": 2,
+        "downstream_eval_count": 2,
+        "fallback_count": 0,
+        "retry_count": 0,
+        "total_cost": 0.001299,
+        "total_tokens": 1585,
+        "total_latency_ms": 0
+      },
+      {
+        "model_id": "gpt-5-mini",
+        "input_profile": "unknown",
+        "run_count": 9,
+        "success_count": 9,
+        "schema_pass_count": 9,
+        "schema_eval_count": 9,
+        "downstream_success_count": 9,
+        "downstream_eval_count": 9,
+        "fallback_count": 0,
+        "retry_count": 0,
+        "total_cost": 0.016134,
+        "total_tokens": 12035,
+        "total_latency_ms": 0
+      },
+      {
+        "model_id": "gpt-4.1",
+        "input_profile": "unknown",
+        "run_count": 6,
+        "success_count": 6,
+        "schema_pass_count": 6,
+        "schema_eval_count": 6,
+        "downstream_success_count": 6,
+        "downstream_eval_count": 6,
+        "fallback_count": 0,
+        "retry_count": 0,
+        "total_cost": 0.021796,
+        "total_tokens": 4952,
+        "total_latency_ms": 0
+      },
+      {
+        "model_id": "gpt-4o-mini",
+        "input_profile": "unknown",
+        "run_count": 10,
+        "success_count": 10,
+        "schema_pass_count": 10,
+        "schema_eval_count": 10,
+        "downstream_success_count": 10,
+        "downstream_eval_count": 10,
+        "fallback_count": 0,
+        "retry_count": 0,
+        "total_cost": 0.001484,
+        "total_tokens": 6069,
+        "total_latency_ms": 0
+      }
+    ]
+  },
+  "quality_judge_total_cost_usd": 0.0877325,
+  "quality_judge_call_count": 10,
+  "quality_judge_errors": []
+}

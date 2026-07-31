@@ -137,3 +137,17 @@ Metrics:
 
 - 실제 DB 연결 테스트는 `@pytest.mark.skip` 처리되어 있음
 - HuggingFace 데이터셋 사용 시 `pip install datasets` 필요
+
+## Agent Builder Intent Evaluation
+
+`run_agent_builder_intent_benchmark.py`는 permission-aware 실제 planner model의 새 workflow/수정/전체 교체/unsupported 분류, capability 순서, 기존 node target/placement, 명시적 integration action을 측정한다. Deterministic unit test에는 포함하지 않는다. Dataset에는 `GitHub`와 `깃허브`로 표기한 GitHub Pull Request 생성 삽입 요청을 각각 포함한다.
+
+```powershell
+$env:NODEASE_EVAL_USER_ID = "<user uuid>"
+$env:NODEASE_EVAL_ORGANIZATION_ID = "<organization uuid>"
+$env:NODEASE_EVAL_CREDENTIAL_ID = "<credential uuid>"
+$env:NODEASE_EVAL_MODEL_ID = "<model uuid>"
+python tests/evaluation/run_agent_builder_intent_benchmark.py --output tests/evaluation/reports/agent_builder_intent.json
+```
+
+Runner는 DB의 active organization, credential `use` 권한, verified model relation을 그대로 검증한다. Report에는 case ID, 기대/실제 구조 필드, 지표만 기록하고 prompt, credential 원문, provider payload, node/edge ID를 기록하지 않는다. 기본 gate는 request type/draft mode 0.90, ordered capability exact match 0.80, target/placement 0.85, 명시된 integration action exact match 1.00, invalid output rate 0.05 이하이다.

@@ -2,9 +2,15 @@
 NodeFactory 테스트: 노드가 올바르게 생성되는지 검증 [GEVENT] Sync 버전
 """
 
+import uuid
+
 import pytest
 
 from apps.shared.schemas.workflow import NodeSchema, Position
+from apps.shared.services.workflow_node_catalog import implemented_node_types
+from apps.workflow_engine.workflow.core.runtime_dependencies import (
+    WorkflowRuntimeDependencies,
+)
 from apps.workflow_engine.workflow.core.workflow_node_factory import NodeFactory
 from apps.workflow_engine.workflow.nodes.base.entities import NodeStatus
 from apps.workflow_engine.workflow.nodes.start import StartNode, StartNodeData
@@ -31,6 +37,31 @@ def test_factory_creates_start_node():
     assert node.data.trigger_type == "manual"
     assert node.status == NodeStatus.IDLE
     assert node.node_type == "startNode"
+
+
+def test_factory_accepts_validated_mail_ui_metadata_without_runtime_fields():
+    credential_id = uuid.uuid4()
+    schema = NodeSchema(
+        id="mail-1",
+        type="mailNode",
+        position=Position(x=0, y=0),
+        data={
+            "title": "Mail",
+            "credential_id": str(credential_id),
+            "configuration_state": "resolved",
+            "folder": "INBOX",
+            "max_results": 10,
+            "unread_only": True,
+            "displayNumber": 2,
+            "visibleProperties": ["credential_id", "folder"],
+        },
+    )
+
+    node = NodeFactory.create(schema)
+
+    assert node.data.credential_id == credential_id
+    assert not hasattr(node.data, "displayNumber")
+    assert not hasattr(node.data, "visibleProperties")
 
 
 def test_factory_raises_error_for_unimplemented_node():
@@ -120,6 +151,10 @@ def test_factory_registry_contains_start_node():
     assert NodeFactory.NODE_REGISTRY["startNode"] == (StartNode, StartNodeData)
 
 
+def test_factory_registry_matches_the_canonical_workflow_node_catalog():
+    assert set(NodeFactory.NODE_REGISTRY) == implemented_node_types()
+
+
 def test_factory_creates_multiple_nodes():
     """여러 노드를 연속으로 생성해도 독립적인지 테스트"""
     # Given
@@ -144,3 +179,29 @@ def test_factory_creates_multiple_nodes():
     assert node1.id != node2.id
     assert node1.data.title != node2.data.title
     assert node1 is not node2  # 서로 다른 인스턴스
+
+
+@pytest.mark.parametrize(
+    ("node_type", "data"),
+    [
+        ("workflowNode", {"title": "Child", "appId": "app-1"}),
+        ("loopNode", {"title": "Loop"}),
+    ],
+)
+def test_factory_binds_runtime_dependencies_to_composite_nodes(node_type, data):
+    dependencies = WorkflowRuntimeDependencies(
+        provider_execution_runtime=object(),
+        provider_usage_recorder=object(),
+    )
+
+    node = NodeFactory.create(
+        NodeSchema(
+            id="composite-1",
+            type=node_type,
+            position=Position(x=0, y=0),
+            data=data,
+        ),
+        runtime_dependencies=dependencies,
+    )
+
+    assert node._runtime_dependencies is dependencies  # noqa: SLF001

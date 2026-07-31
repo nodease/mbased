@@ -1,11 +1,11 @@
 """
 Sandbox Executor - NSJail 프로세스 실행 담당
 """
-import time
 from typing import Any, Dict
 from uuid import UUID
 
 from apps.sandbox.config import settings
+from apps.sandbox.core.network_policy import require_network_access_disabled
 from apps.sandbox.models.result import ExecutionResult
 from apps.sandbox.nsjail.wrapper import NSJailWrapper
 
@@ -43,7 +43,8 @@ class SandboxExecutor:
             ExecutionResult: 실행 결과
         """
         timeout = timeout or settings.DEFAULT_TIMEOUT
-        enable_network = enable_network if enable_network is not None else settings.ENABLE_NETWORK
+        enable_network = enable_network if enable_network is not None else False
+        require_network_access_disabled(enable_network)
         
         # 타임아웃 상한 체크
         if timeout > settings.MAX_TIMEOUT:

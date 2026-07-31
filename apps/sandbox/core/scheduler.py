@@ -22,6 +22,7 @@ from apps.sandbox.config import settings
 from apps.sandbox.core.bucket import PriorityBucket
 from apps.sandbox.core.executor import execute_code
 from apps.sandbox.core.history import ExecutionHistory
+from apps.sandbox.core.network_policy import require_network_access_disabled
 from apps.sandbox.models.job import Job, Priority
 from apps.sandbox.models.result import ExecutionResult
 
@@ -158,9 +159,11 @@ class FairScheduler:
         priority: Priority = None,  # None이면 자동 결정
         trigger_mode: str = None,
         enable_network: bool = False,
-        tenant_id: str = None,
+        organization_id: str = None,
     ) -> ExecutionResult:
         """작업 제출 및 결과 대기"""
+        require_network_access_disabled(enable_network)
+
         if not self._running:
             raise RuntimeError("Scheduler not running")
 
@@ -196,7 +199,7 @@ class FairScheduler:
             timeout=timeout or settings.DEFAULT_TIMEOUT,
             enable_network=enable_network,
             future=future,
-            tenant_id=tenant_id,
+            organization_id=organization_id,
         )
 
         # 해당 우선순위 버킷에 추가
@@ -204,7 +207,7 @@ class FairScheduler:
         self._total_submitted += 1
 
         logger.debug(
-            f"Job {job.job_id} submitted (priority={priority.name}, tenant={tenant_id})"
+            f"Job {job.job_id} submitted (priority={priority.name}, tenant={organization_id})"
         )
 
         try:
@@ -236,8 +239,8 @@ class FairScheduler:
                 self._running_count += 1
                 self._last_busy_time = time.time()
 
-                tenant_id = job.tenant_id or "__default__"
-                self._tenant_running[tenant_id] += 1
+                organization_id = job.organization_id or "__default__"
+                self._tenant_running[organization_id] += 1
 
                 asyncio.create_task(self._execute_job(job, loop))
 
@@ -251,8 +254,8 @@ class FairScheduler:
         """MLFQ + Round-Robin으로 다음 작업 선택"""
 
         # 테넌트 실행 제한 체크 콜백
-        def is_tenant_allowed(tenant_id: str) -> bool:
-            return self._tenant_running[tenant_id] < settings.MAX_PER_TENANT
+        def is_tenant_allowed(organization_id: str) -> bool:
+            return self._tenant_running[organization_id] < settings.MAX_PER_TENANT
 
         # 우선순위 순서대로 버킷 순회
         for priority in [Priority.HIGH, Priority.NORMAL, Priority.LOW]:
@@ -270,7 +273,7 @@ class FairScheduler:
 
     async def _execute_job(self, job: Job, loop: asyncio.AbstractEventLoop):
         """작업 실행 및 결과 반환"""
-        tenant_id = job.tenant_id or "__default__"
+        organization_id = job.organization_id or "__default__"
         start_time = time.time()
 
         try:
@@ -307,7 +310,7 @@ class FairScheduler:
 
         finally:
             self._running_count -= 1
-            self._tenant_running[tenant_id] -= 1
+            self._tenant_running[organization_id] -= 1
 
     async def _scaling_loop(self):
         """EMA 기반 동적 워커 스케일링"""

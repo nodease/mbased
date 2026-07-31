@@ -1,7 +1,7 @@
 'use client';
 
 import { flushSync } from 'react-dom';
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef } from 'react';
 import { ChevronRight, ChevronLeft } from 'lucide-react';
 import { NodeLibraryContent } from './NodeLibraryContent';
 import { NodeDefinition } from '../../config/nodeRegistry';
@@ -13,6 +13,7 @@ interface NodeLibrarySidebarProps {
   // Canvas handles the drag/drop logic, usually by listening to drag events on the window or canvas.
   // But here we need to set dataTransfer.
   onAddNode?: (type: string, position: { x: number; y: number }) => void; // Unused for drag, but kept for interface compat if needed
+  onAddNodeAfterSelected?: (nodeDefId: string) => void;
   onOpenAppSearch?: () => void;
 }
 
@@ -29,6 +30,7 @@ export default function NodeLibrarySidebar({
   onToggle,
   onOpenAppSearch,
   onAddNode,
+  onAddNodeAfterSelected,
 }: NodeLibrarySidebarProps) {
   const sidebarRef = useRef<HTMLDivElement>(null);
   const [isHovering, setIsHovering] = useState(false);
@@ -111,9 +113,9 @@ export default function NodeLibrarySidebar({
     >
       {/* Main Content Area */}
       <div
-        className={`h-full bg-white flex flex-col transition-all duration-300 ${
+        className={`flex h-full flex-col bg-white transition-all duration-300 ${
           isOpen ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-full'
-        } overflow-hidden rounded-xl border-r border-gray-200`}
+        } overflow-hidden rounded-lg border-r border-slate-200`}
       >
         <NodeLibraryContent
           onDragStart={handleDragStart}
@@ -124,6 +126,7 @@ export default function NodeLibrarySidebar({
               onAddNode?.(def.id, { x: 100, y: 200 });
             }
           }}
+          onAddAfterSelected={(_, def) => onAddNodeAfterSelected?.(def.id)}
           hoveredNode={hoveredNode?.id}
           onHoverNode={handleHoverNode}
           disabledNodeTypes={disabledNodeTypes}
@@ -136,16 +139,16 @@ export default function NodeLibrarySidebar({
           onClick={onToggle}
           onMouseEnter={() => setShowTooltip(true)}
           onMouseLeave={() => setShowTooltip(false)}
-          className={`flex items-center justify-center w-8 h-8 bg-white border border-gray-200 rounded-full shadow-md hover:bg-gray-50 transition-all duration-200 ${
+          className={`flex h-8 w-8 items-center justify-center rounded-full border border-slate-200 bg-white shadow-md transition-all duration-200 hover:bg-slate-50 ${
             isHovering || !isOpen
               ? 'opacity-100 scale-100'
               : 'opacity-0 scale-90 pointer-events-none'
           }`}
         >
           {isOpen ? (
-            <ChevronLeft className="w-4 h-4 text-gray-500" />
+            <ChevronLeft className="h-4 w-4 text-slate-500" />
           ) : (
-            <ChevronRight className="w-4 h-4 text-gray-500" />
+            <ChevronRight className="h-4 w-4 text-slate-500" />
           )}
 
           {/* Tooltip */}
@@ -169,8 +172,8 @@ export default function NodeLibrarySidebar({
           width: '240px',
           padding: '16px',
           backgroundColor: 'white',
-          border: '1px solid #d1d5db',
-          borderRadius: '12px',
+          border: '1px solid #cbd5e1',
+          borderRadius: '8px',
           display: 'flex',
           alignItems: 'center',
           gap: '12px',
@@ -220,7 +223,7 @@ export default function NodeLibrarySidebar({
       {/* Hover Card (Popover) - Fixed Position based on calculation */}
       {hoveredNode && isOpen && (
         <div
-          className="fixed z-50 w-64 bg-white rounded-xl shadow-xl border border-gray-100 p-4 transition-all duration-200 animate-in fade-in slide-in-from-left-2 pointer-events-none"
+          className="pointer-events-none fixed z-50 w-64 animate-in rounded-lg border border-slate-200 bg-white p-4 shadow-xl transition-all duration-200 fade-in slide-in-from-left-2"
           style={{ left: hoveredNodePos.x, top: hoveredNodePos.y - 20 }}
         >
           <div className="flex items-start gap-3 mb-2">
@@ -234,26 +237,26 @@ export default function NodeLibrarySidebar({
               </div>
             </div>
             <div>
-              <h3 className="font-bold text-gray-900">{hoveredNode.name}</h3>
-              <p className="text-xs text-gray-500 font-medium">
+              <h3 className="font-black text-slate-950">{hoveredNode.name}</h3>
+              <p className="text-xs font-semibold text-slate-500">
                 {categoryNames[hoveredNode.category]}
               </p>
             </div>
           </div>
-          <p className="text-sm text-gray-600 leading-relaxed">
+          <p className="text-sm font-semibold leading-relaxed text-slate-600">
             {hoveredNode.description}
           </p>
           {/* 비활성화된 노드(예: loopNode)인 경우 안내 메시지 추가 */}
           {disabledNodeTypes.includes(hoveredNode.type) &&
             hoveredNode.type === 'loopNode' && (
-              <div className="mt-3 pt-2 border-t border-gray-100 text-xs font-medium text-amber-600 flex items-center gap-1.5">
+              <div className="mt-3 flex items-center gap-1.5 border-t border-slate-100 pt-2 text-xs font-semibold text-amber-600">
                 <span>🚧</span>
                 <span>준비중 - 곧 사용 가능합니다</span>
               </div>
             )}
           {disabledNodeTypes.includes(hoveredNode.type) &&
             hoveredNode.type !== 'loopNode' && (
-              <div className="mt-3 pt-2 border-t border-gray-100 text-xs font-medium text-amber-600 flex items-center gap-1.5">
+              <div className="mt-3 flex items-center gap-1.5 border-t border-slate-100 pt-2 text-xs font-semibold text-amber-600">
                 <span>🚫</span>
                 <span>이미 시작 노드가 존재합니다</span>
               </div>

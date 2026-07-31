@@ -1,11 +1,13 @@
-import json
 import logging
 from typing import List
 from uuid import UUID
 
-import openai
 from apps.shared.db.models.llm import LLMCredential, LLMProvider
-from apps.shared.utils.encryption import encryption_manager
+from apps.shared.services.llm_client import get_llm_client
+from apps.shared.services.llm_credential_config import (
+    LLMCredentialConfigError,
+    materialize_llm_client_credentials,
+)
 from sqlalchemy.orm import Session
 
 logger = logging.getLogger(__name__)
@@ -21,10 +23,12 @@ class EmbeddingService:
         self.db = db
         self.user_id = user_id
         self._client = None
+        self._client_model = None
         self._model = "text-embedding-3-small"  # Default
 
-    def _get_client(self):
-        if self._client:
+    def _get_client(self, model_id: str | None = None):
+        target_model = model_id or self._model
+        if self._client and self._client_model in (None, target_model):
             return self._client
 
         # 1. 사용자의 OpenAI 크리덴셜 조회 (우선순위: Provider Name = 'openai')
@@ -40,56 +44,44 @@ class EmbeddingService:
         )
 
         if not credential:
-            # Fallback: 아무 유효한 크리덴셜이나 사용 (개발/테스트용)
-            credential = (
-                self.db.query(LLMCredential)
-                .filter(
-                    LLMCredential.user_id == self.user_id,
-                    LLMCredential.is_valid,
-                )
-                .first()
-            )
+            raise ValueError("No valid OpenAI credential found")
 
-        if not credential:
-            raise ValueError(f"No valid LLM credential found for user {self.user_id}")
-
-        # 2. API Key 복호화
         try:
-            config_str = credential.encrypted_config
-            # TODO: 실제로는 DB에 암호화되어 저장되지만, 현재 개발환경에서 평문일 수도 있음
-            # encryption_manager를 통해 복호화 시도
-            try:
-                config_json = encryption_manager.decrypt(config_str)
-            except Exception:
-                config_json = config_str
+            credentials = materialize_llm_client_credentials(
+                credential,
+                credential.provider,
+            )
+        except LLMCredentialConfigError as exc:
+            raise ValueError("Failed to initialize OpenAI client") from exc
 
-            config = json.loads(config_json)
-            api_key = config.get("apiKey")
-            if not api_key:
-                raise ValueError("API Key missing in credential config")
-
-            self._client = openai.OpenAI(api_key=api_key)
+        try:
+            self._client = get_llm_client(
+                provider=credential.provider.name,
+                model_id=target_model,
+                credentials=credentials,
+            )
+            self._client_model = target_model
             return self._client
-        except Exception as e:
-            raise ValueError(f"Failed to initialize OpenAI client: {e}")
+        except Exception:
+            raise ValueError("Failed to initialize OpenAI client") from None
 
     def embed_batch(self, texts: List[str], model: str = None) -> List[List[float]]:
         """
         텍스트 배치를 임베딩 벡터로 변환 (OpenAI)
         """
-        client = self._get_client()
         target_model = model or self._model
+        client = self._get_client(target_model)
 
         # 빈 텍스트 처리 (OpenAI 에러 방지)
         clean_texts = [t if t and t.strip() else " " for t in texts]
 
         try:
-            response = client.embeddings.create(input=clean_texts, model=target_model)
-            # 순서 보장
-            embeddings = [data.embedding for data in response.data]
-            return embeddings
-        except Exception as e:
-            logger.error(f"[EmbeddingService] Failed: {e}")
+            return client.embed_batch_sync(clean_texts)
+        except Exception as exc:
+            logger.error(
+                "[EmbeddingService] Provider call failed: error_type=%s",
+                type(exc).__name__,
+            )
             # 실패 시 더미 벡터 (0.0) 반환 or Raise
             # 여기서는 Workflow가 멈추지 않도록 Raise하되 상위에서 처리
-            raise e
+            raise

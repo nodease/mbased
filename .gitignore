@@ -7,6 +7,9 @@ __pycache__/
 *.egg-info/
 **/*.egg-info/
 
+# Celery Beat local scheduler state
+celerybeat-schedule*
+
 # Node
 apps/client/.next/
 **/node_modules/
@@ -96,3 +99,62 @@ tests/load/reports/
 # Helm 패키징 파일 (빌드 결과물) - 무시
 *.tgz
 *.tar.gz
+
+# 로컬
+/local/
+docker/docker-compose.dev.yml
+
+# 임시
+/tmp
+/output
+/outputs
+
+# 에이전트
+.codex
+.agents
+
+# Test / coverage outputs
+.coverage
+.coverage.*
+coverage/
+htmlcov/
+coverage.xml
+junit.xml
+junit-*.xml
+apps/client/coverage/
+
+# Playwright / E2E outputs
+playwright-report/
+test-results/
+**/playwright-report/
+**/test-results/
+.playwright-cli/
+
+# Python tool caches
+.ruff_cache/
+.mypy_cache/
+.pyre/
+.pytype/
+
+# Node logs
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# TypeScript cache
+*.tsbuildinfo
+
+# Evaluation generated reports
+tests/evaluation/reports/
+
+
+# Codex local run logs
+.codex-run-logs/
+
+# Local Windows development entrypoint and proxy
+/scripts/dev-local.ps1
+/dev/nginx.local-host.conf
+
+# 개인 폴더
+.ignore/

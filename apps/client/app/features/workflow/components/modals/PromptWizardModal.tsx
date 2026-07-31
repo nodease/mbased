@@ -1,7 +1,20 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { X, Sparkles, Copy, Check, Loader2, ArrowRight, Info } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import {
+  X,
+  Sparkles,
+  Copy,
+  Check,
+  Loader2,
+  ArrowRight,
+  Info,
+} from 'lucide-react';
+import {
+  activeOrganizationHeaders,
+  getStoredActiveOrganizationId,
+} from '@/lib/activeOrganization';
+import { csrfFetch } from '@/lib/csrfToken';
 
 interface PromptWizardModalProps {
   isOpen: boolean;
@@ -9,6 +22,7 @@ interface PromptWizardModalProps {
   promptType: 'system' | 'user' | 'assistant';
   originalPrompt: string;
   onApply: (improvedPrompt: string) => void;
+  organizationId?: string | null;
 }
 
 const PROMPT_TYPE_LABELS = {
@@ -23,14 +37,48 @@ export function PromptWizardModal({
   promptType,
   originalPrompt,
   onApply,
+  organizationId,
 }: PromptWizardModalProps) {
-
   const [currentPrompt, setCurrentPrompt] = useState(originalPrompt);
   const [improvedPrompt, setImprovedPrompt] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hasCredentials, setHasCredentials] = useState<boolean | null>(null);
   const [copied, setCopied] = useState(false);
+  const isOrganizationScopePending = organizationId === null;
+
+  const getWizardOrganizationId = useCallback(
+    () =>
+      organizationId !== undefined
+        ? organizationId
+        : getStoredActiveOrganizationId(),
+    [organizationId],
+  );
+
+  const checkCredentials = useCallback(async () => {
+    setHasCredentials(null);
+    if (isOrganizationScopePending) return;
+
+    try {
+      const resolvedOrganizationId = getWizardOrganizationId();
+      const query = resolvedOrganizationId
+        ? `?organization_id=${encodeURIComponent(resolvedOrganizationId)}`
+        : '';
+      const res = await fetch(
+        `/api/v1/prompt-wizard/check-credentials${query}`,
+        {
+          method: 'GET',
+          credentials: 'include',
+        },
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setHasCredentials(data.has_credentials);
+      }
+    } catch {
+      setHasCredentials(false);
+    }
+  }, [getWizardOrganizationId, isOrganizationScopePending]);
 
   // 모달 열릴 때 credential 확인 및 상태 초기화
   useEffect(() => {
@@ -39,28 +87,20 @@ export function PromptWizardModal({
       setImprovedPrompt('');
       setError(null);
       setCopied(false);
-      checkCredentials();
+      void checkCredentials();
     }
-  }, [isOpen, originalPrompt]);
-
-  const checkCredentials = async () => {
-    try {
-      const res = await fetch('/api/v1/prompt-wizard/check-credentials', {
-        method: 'GET',
-        credentials: 'include',
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setHasCredentials(data.has_credentials);
-      }
-    } catch {
-      setHasCredentials(false);
-    }
-  };
+  }, [isOpen, originalPrompt, checkCredentials]);
 
   const handleImprove = async () => {
     if (!currentPrompt.trim()) {
       setError('개선할 프롬프트를 입력해주세요.');
+      return;
+    }
+
+    if (isOrganizationScopePending) {
+      setError(
+        '워크플로우 조직 정보를 불러오는 중입니다. 잠시 후 다시 시도해주세요.',
+      );
       return;
     }
 
@@ -69,26 +109,38 @@ export function PromptWizardModal({
     setImprovedPrompt('');
 
     try {
-      const res = await fetch('/api/v1/prompt-wizard/improve', {
+      const resolvedOrganizationId = getWizardOrganizationId();
+      const res = await csrfFetch('/api/v1/prompt-wizard/improve', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...activeOrganizationHeaders(resolvedOrganizationId),
+        },
         credentials: 'include',
         body: JSON.stringify({
           prompt_type: promptType,
           original_prompt: currentPrompt,
+          organization_id: resolvedOrganizationId ?? undefined,
         }),
       });
 
       if (!res.ok) {
         const errorData = await res.json();
-        const message = errorData.detail?.message || errorData.detail || '프롬프트 개선에 실패했습니다.';
+        const message =
+          errorData.detail?.message ||
+          errorData.detail ||
+          '프롬프트 개선에 실패했습니다.';
         throw new Error(message);
       }
 
       const data = await res.json();
       setImprovedPrompt(data.improved_prompt);
-    } catch (err: any) {
-      setError(err.message || '알 수 없는 오류가 발생했습니다.');
+    } catch (err) {
+      setError(
+        err instanceof Error && err.message
+          ? err.message
+          : '알 수 없는 오류가 발생했습니다.',
+      );
     } finally {
       setIsLoading(false);
     }
@@ -118,7 +170,13 @@ export function PromptWizardModal({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100]">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="프롬프트 마법사"
+      data-canvas-shortcut-scope="blocked"
+      className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100]"
+    >
       <div className="bg-white rounded-xl shadow-2xl w-[90vw] max-w-4xl h-[60vh] min-h-[450px] flex flex-col overflow-hidden">
         {/* Header */}
         <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center bg-gradient-to-r from-blue-50 to-indigo-50">
@@ -147,7 +205,8 @@ export function PromptWizardModal({
         <div className="px-6 py-2.5 bg-amber-50 border-b border-amber-100 flex items-center gap-2">
           <Info className="w-4 h-4 text-amber-600 flex-shrink-0" />
           <p className="text-xs text-amber-700">
-            이 기능은 등록하신 Provider API Key를 통해 AI를 호출하며, 호출 시 소량의 토큰 비용이 발생할 수 있습니다.
+            이 기능은 등록하신 Provider API Key를 통해 AI를 호출하며, 호출 시
+            소량의 토큰 비용이 발생할 수 있습니다.
           </p>
         </div>
 
@@ -164,7 +223,7 @@ export function PromptWizardModal({
               placeholder="개선할 프롬프트를 입력하세요..."
               className="flex-1 w-full p-3 text-sm border border-gray-300 rounded-lg resize-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 focus:outline-none"
             />
-            
+
             {/* 왼쪽 하단 버튼 영역 */}
             <div className="mt-4">
               {hasCredentials === false ? (
@@ -178,7 +237,12 @@ export function PromptWizardModal({
               ) : (
                 <button
                   onClick={handleImprove}
-                  disabled={isLoading || !currentPrompt.trim()}
+                  data-testid="prompt-wizard-submit"
+                  disabled={
+                    isLoading ||
+                    isOrganizationScopePending ||
+                    !currentPrompt.trim()
+                  }
                   className="w-full py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-md hover:shadow-lg"
                 >
                   {isLoading ? (
@@ -202,12 +266,14 @@ export function PromptWizardModal({
             <label className="text-sm font-semibold text-gray-700 mb-2">
               AI 개선 결과
             </label>
-            
+
             <div className="flex-1 w-full p-3 text-sm border border-gray-200 rounded-lg bg-white overflow-y-auto">
               {isLoading ? (
                 <div className="h-full flex flex-col items-center justify-center text-gray-400">
                   <Loader2 className="w-8 h-8 animate-spin mb-3 text-blue-500" />
-                  <p className="text-sm">AI가 프롬프트를 분석하고 있습니다...</p>
+                  <p className="text-sm">
+                    AI가 프롬프트를 분석하고 있습니다...
+                  </p>
                 </div>
               ) : error ? (
                 <div className="h-full flex items-center justify-center">
@@ -249,8 +315,7 @@ export function PromptWizardModal({
                   onClick={handleApply}
                   className="flex-1 py-2.5 px-4 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors flex items-center justify-center gap-2 shadow-md"
                 >
-                  <Check className="w-4 h-4" />
-                  이 프롬프트 적용
+                  <Check className="w-4 h-4" />이 프롬프트 적용
                 </button>
               </div>
             )}

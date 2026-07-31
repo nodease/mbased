@@ -21,7 +21,13 @@ export const OptionFieldItem = ({
   return (
     <div className="text-xs">
       <span className="font-semibold text-gray-700 block mb-1">{label}</span>
-      {isEmpty ? (
+      {type === 'connection-status' ? (
+        <div className="bg-white rounded border border-gray-200 p-2 min-h-[32px]">
+          <p className="text-gray-700 text-[11px]">
+            {isEmpty ? '연결 필요' : '연결됨'}
+          </p>
+        </div>
+      ) : isEmpty ? (
         <div className="bg-white rounded border border-gray-200 p-2 min-h-[32px]" />
       ) : type === 'code' ? (
         <pre className="bg-gray-900 text-gray-100 rounded p-2 overflow-x-auto max-h-40 overflow-y-auto font-mono">

@@ -44,12 +44,17 @@ services:
       dockerfile: docker/gateway/Dockerfile
     container_name: moduly-gateway
     environment:
+      # Keep the bundled stack development-friendly. Set production explicitly
+      # for a real deployment so security key validation fails closed.
+      NODE_ENV: ${NODE_ENV:-development}
       # Database
       DB_HOST: postgres
       DB_PORT: 5432
       DB_USER: admin
       DB_PASSWORD: admin123
       DB_NAME: moduly_local
+      CONNECTOR_TEST_ALLOWED_PORTS: "${CONNECTOR_TEST_ALLOWED_PORTS:-5432}"
+      CONNECTOR_TEST_ADMISSION_HMAC_KEY: "${CONNECTOR_TEST_ADMISSION_HMAC_KEY:-}"
 
       # Redis
       REDIS_HOST: redis
@@ -57,10 +62,36 @@ services:
       REDIS_DB: 0
       REDIS_PASSWORD: ""
       REDIS_URL: redis://redis:6379/0
+      AUTH_LOGIN_LIMITER_REDIS_DB: ${AUTH_LOGIN_LIMITER_REDIS_DB:-2}
+      AUTH_LOGIN_LIMITER_POLICY_VERSION: ${AUTH_LOGIN_LIMITER_POLICY_VERSION:-v1}
+      AUTH_LOGIN_TRUSTED_PROXY_CIDRS: ${AUTH_LOGIN_TRUSTED_PROXY_CIDRS:-172.16.0.0/12}
+      AUTH_LOGIN_FINGERPRINT_KEYS: ${AUTH_LOGIN_FINGERPRINT_KEYS:-}
+      AUTH_LOGIN_FINGERPRINT_PRIMARY_VERSION: ${AUTH_LOGIN_FINGERPRINT_PRIMARY_VERSION:-}
+
+      PUBLIC_CHAT_CONVERSATION_ROLLOUT_MODE: "${PUBLIC_CHAT_CONVERSATION_ROLLOUT_MODE:-compatibility}"
+
+      # Public Conversation Memory is opt-in. Enabling it requires three
+      # independent keys and an approved database-backup erasure contract.
+      MEMORY_PUBLIC_CONVERSATION_ENABLED: "${MEMORY_PUBLIC_CONVERSATION_ENABLED:-false}"
+      MEMORY_PUBLIC_PURGE_WORKER_READY: "${MEMORY_PUBLIC_PURGE_WORKER_READY:-false}"
+      MEMORY_PUBLIC_REPLAY_BACKUP_ERASURE_MODE: "${MEMORY_PUBLIC_REPLAY_BACKUP_ERASURE_MODE:-unconfirmed}"
+      MEMORY_PUBLIC_CAPABILITY_HMAC_KEY: "${MEMORY_PUBLIC_CAPABILITY_HMAC_KEY:-}"
+      MEMORY_PUBLIC_CAPABILITY_HMAC_KEYS: "${MEMORY_PUBLIC_CAPABILITY_HMAC_KEYS:-}"
+      MEMORY_PUBLIC_CAPABILITY_HMAC_PRIMARY_VERSION: "${MEMORY_PUBLIC_CAPABILITY_HMAC_PRIMARY_VERSION:-}"
+      MEMORY_PUBLIC_REPLAY_ENCRYPTION_KEY: "${MEMORY_PUBLIC_REPLAY_ENCRYPTION_KEY:-}"
+      MEMORY_PUBLIC_REPLAY_ENCRYPTION_KEYS: "${MEMORY_PUBLIC_REPLAY_ENCRYPTION_KEYS:-}"
+      MEMORY_PUBLIC_REPLAY_ENCRYPTION_PRIMARY_VERSION: "${MEMORY_PUBLIC_REPLAY_ENCRYPTION_PRIMARY_VERSION:-}"
+      MEMORY_PUBLIC_ADMISSION_HMAC_KEY: "${MEMORY_PUBLIC_ADMISSION_HMAC_KEY:-}"
 
       # JWT Secret
       SECRET_KEY: ${SECRET_KEY:-your-secret-key-change-in-production}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      MAIL_CREDENTIAL_ENCRYPTION_KEYS: "${MAIL_CREDENTIAL_ENCRYPTION_KEYS:-}"
+      MAIL_CREDENTIAL_ACTIVE_KEY_VERSION: "${MAIL_CREDENTIAL_ACTIVE_KEY_VERSION:-v1}"
+      WORKFLOW_NODE_SECRET_ENCRYPTION_KEYS: "${WORKFLOW_NODE_SECRET_ENCRYPTION_KEYS:-}"
+      WORKFLOW_NODE_SECRET_ACTIVE_KEY_VERSION: "${WORKFLOW_NODE_SECRET_ACTIVE_KEY_VERSION:-v1}"
+      LLM_CREDENTIAL_ENCRYPTION_KEYS: "${LLM_CREDENTIAL_ENCRYPTION_KEYS:-}"
+      LLM_CREDENTIAL_ACTIVE_KEY_VERSION: "${LLM_CREDENTIAL_ACTIVE_KEY_VERSION:-v1}"
 
       # Storage
       STORAGE_TYPE: ${STORAGE_TYPE:-LOCAL}
@@ -69,14 +100,42 @@ services:
       AWS_REGION: ${AWS_REGION:-}
       S3_BUCKET_NAME: ${S3_BUCKET_NAME:-}
 
-      # Proxy
-      HTTP_PROXY: http://proxy:3128
-      HTTPS_PROXY: http://proxy:3128
-      NO_PROXY: "localhost,127.0.0.1,sandbox,postgres,redis,workflow_engine,log_system,proxy"
+      # Server-owned outbound proxy policy. Ambient proxy variables are not used.
+      OUTBOUND_TRANSPORT_MODE: proxy_guarded_external
+      OUTBOUND_PROXY_URL: http://proxy:3128
+      OUTBOUND_PROXY_ALLOWED_HOSTS: proxy
+      OUTBOUND_PROXY_POLICY_REVISION: proxy-v1
+      CONNECTOR_EGRESS_PROXY_URL: http://proxy:3130
+      CONNECTOR_EGRESS_PROXY_ALLOWED_HOSTS: proxy
+      CONNECTOR_EGRESS_POLICY_REVISION: connector-egress-v1
+      CONNECTOR_EGRESS_ALLOWED_PORTS: "${CONNECTOR_EGRESS_ALLOWED_PORTS:-22,5432}"
 
       # Python
       PYTHONUNBUFFERED: 1
       PYTHONPATH: /app
+
+      # Agent Builder
+      AGENT_BUILDER_DRAFT_MODEL_ID: ${AGENT_BUILDER_DRAFT_MODEL_ID:-gpt-5-mini}
+
+      # Explicitly activate only after the verifier-aware Gateway is deployed.
+      APP_AUTH_SECRET_LIFECYCLE_MODE: ${APP_AUTH_SECRET_LIFECYCLE_MODE:-disabled}
+
+      # Durable schedule dispatch (disabled until migration-first rollout)
+      SCHEDULE_DISPATCH_MODE: disabled
+      SCHEDULE_DISPATCH_MODE_FINGERPRINT: "v1|disabled|${SCHEDULE_DISPATCH_POLL_SECONDS:-5}|${SCHEDULE_OCCURRENCE_BATCH_SIZE:-50}|${SCHEDULE_DISPATCH_BATCH_SIZE:-10}|${SCHEDULE_RECOVERY_BATCH_SIZE:-50}|${SCHEDULE_CLEANUP_BATCH_SIZE:-100}|${SCHEDULE_DISPATCH_LEASE_SECONDS:-60}|${SCHEDULE_ENQUEUED_DELIVERY_TIMEOUT_SECONDS:-120}|${SCHEDULE_EXECUTION_DEADLINE_SECONDS:-900}|${SCHEDULE_WORKFLOW_RUN_VISIBILITY_TIMEOUT_SECONDS:-120}|${SCHEDULE_DISPATCH_MAX_ATTEMPTS:-5}|${SCHEDULE_DISPATCH_RETRY_BASE_SECONDS:-5}|${SCHEDULE_DISPATCH_RETENTION_DAYS:-30}|${SCHEDULE_DISPATCH_DEAD_LETTER_RETENTION_DAYS:-180}"
+      SCHEDULE_DISPATCH_POLL_SECONDS: ${SCHEDULE_DISPATCH_POLL_SECONDS:-5}
+      SCHEDULE_OCCURRENCE_BATCH_SIZE: ${SCHEDULE_OCCURRENCE_BATCH_SIZE:-50}
+      SCHEDULE_DISPATCH_BATCH_SIZE: ${SCHEDULE_DISPATCH_BATCH_SIZE:-10}
+      SCHEDULE_RECOVERY_BATCH_SIZE: ${SCHEDULE_RECOVERY_BATCH_SIZE:-50}
+      SCHEDULE_CLEANUP_BATCH_SIZE: ${SCHEDULE_CLEANUP_BATCH_SIZE:-100}
+      SCHEDULE_DISPATCH_LEASE_SECONDS: ${SCHEDULE_DISPATCH_LEASE_SECONDS:-60}
+      SCHEDULE_ENQUEUED_DELIVERY_TIMEOUT_SECONDS: ${SCHEDULE_ENQUEUED_DELIVERY_TIMEOUT_SECONDS:-120}
+      SCHEDULE_EXECUTION_DEADLINE_SECONDS: ${SCHEDULE_EXECUTION_DEADLINE_SECONDS:-900}
+      SCHEDULE_WORKFLOW_RUN_VISIBILITY_TIMEOUT_SECONDS: ${SCHEDULE_WORKFLOW_RUN_VISIBILITY_TIMEOUT_SECONDS:-120}
+      SCHEDULE_DISPATCH_MAX_ATTEMPTS: ${SCHEDULE_DISPATCH_MAX_ATTEMPTS:-5}
+      SCHEDULE_DISPATCH_RETRY_BASE_SECONDS: ${SCHEDULE_DISPATCH_RETRY_BASE_SECONDS:-5}
+      SCHEDULE_DISPATCH_RETENTION_DAYS: ${SCHEDULE_DISPATCH_RETENTION_DAYS:-30}
+      SCHEDULE_DISPATCH_DEAD_LETTER_RETENTION_DAYS: ${SCHEDULE_DISPATCH_DEAD_LETTER_RETENTION_DAYS:-180}
     # Gateway는 Nginx를 통해서만 접근 (포트 노출 제거)
     # ports:
     #   - "8000:8000"
@@ -87,16 +146,85 @@ services:
         condition: service_healthy
       sandbox:
         condition: service_started
+      proxy:
+        condition: service_healthy
     volumes:
       - gateway_uploads:/app/uploads
     networks:
       - moduly-network
+      - proxy-https-clients
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
       interval: 60s
       timeout: 10s
       start_period: 30s
       retries: 3
+
+  # Knowledge document ingestion (Celery Worker)
+  knowledge_worker:
+    build:
+      context: ..
+      dockerfile: docker/gateway/Dockerfile
+    container_name: moduly-knowledge-worker
+    entrypoint:
+      - celery
+      - -A
+      - apps.gateway.knowledge_worker:app
+      - worker
+      - --loglevel=info
+      - --queues=knowledge
+      - --concurrency=2
+      - --prefetch-multiplier=1
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: admin
+      DB_PASSWORD: admin123
+      DB_NAME: moduly_local
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DB: 0
+      REDIS_PASSWORD: ""
+      REDIS_URL: redis://redis:6379/0
+      REDIS_BROKER_DB: 0
+      REDIS_BACKEND_DB: 1
+      MASTER_KEY: ${MASTER_KEY:-}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      LLM_CREDENTIAL_ENCRYPTION_KEYS: "${LLM_CREDENTIAL_ENCRYPTION_KEYS:-}"
+      LLM_CREDENTIAL_ACTIVE_KEY_VERSION: "${LLM_CREDENTIAL_ACTIVE_KEY_VERSION:-v1}"
+      STORAGE_TYPE: ${STORAGE_TYPE:-LOCAL}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      AWS_REGION: ${AWS_REGION:-ap-northeast-2}
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME:-}
+      CONNECTOR_TEST_ALLOWED_PORTS: "${CONNECTOR_TEST_ALLOWED_PORTS:-5432}"
+      OUTBOUND_TRANSPORT_MODE: proxy_guarded_external
+      OUTBOUND_PROXY_URL: http://proxy:3128
+      OUTBOUND_PROXY_ALLOWED_HOSTS: proxy
+      OUTBOUND_PROXY_POLICY_REVISION: proxy-v1
+      CONNECTOR_EGRESS_PROXY_URL: http://proxy:3130
+      CONNECTOR_EGRESS_PROXY_ALLOWED_HOSTS: proxy
+      CONNECTOR_EGRESS_POLICY_REVISION: connector-egress-v1
+      CONNECTOR_EGRESS_ALLOWED_PORTS: "${CONNECTOR_EGRESS_ALLOWED_PORTS:-22,5432}"
+      PYTHONUNBUFFERED: 1
+      PYTHONPATH: /app
+    depends_on:
+      gateway:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      proxy:
+        condition: service_healthy
+    volumes:
+      - gateway_uploads:/app/uploads
+    networks:
+      - moduly-network
+      - proxy-https-clients
+    healthcheck:
+      disable: true
 
   # Workflow Engine (Celery Worker)
   workflow_engine:
@@ -105,6 +233,7 @@ services:
       dockerfile: docker/workflow_engine/Dockerfile
     container_name: moduly-workflow-engine
     environment:
+      NODE_ENV: ${NODE_ENV:-development}
       # Database
       DB_HOST: postgres
       DB_PORT: 5432
@@ -122,6 +251,12 @@ services:
       # Security
       MASTER_KEY: ${MASTER_KEY}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      MAIL_CREDENTIAL_ENCRYPTION_KEYS: "${MAIL_CREDENTIAL_ENCRYPTION_KEYS:-}"
+      MAIL_CREDENTIAL_ACTIVE_KEY_VERSION: "${MAIL_CREDENTIAL_ACTIVE_KEY_VERSION:-v1}"
+      WORKFLOW_NODE_SECRET_ENCRYPTION_KEYS: "${WORKFLOW_NODE_SECRET_ENCRYPTION_KEYS:-}"
+      WORKFLOW_NODE_SECRET_ACTIVE_KEY_VERSION: "${WORKFLOW_NODE_SECRET_ACTIVE_KEY_VERSION:-v1}"
+      LLM_CREDENTIAL_ENCRYPTION_KEYS: "${LLM_CREDENTIAL_ENCRYPTION_KEYS:-}"
+      LLM_CREDENTIAL_ACTIVE_KEY_VERSION: "${LLM_CREDENTIAL_ACTIVE_KEY_VERSION:-v1}"
 
       # Sandbox
       SANDBOX_URL: http://sandbox:8194
@@ -133,23 +268,49 @@ services:
       AWS_REGION: ${AWS_REGION:-ap-northeast-2}
       S3_BUCKET_NAME: ${S3_BUCKET_NAME:-}
 
-      # Proxy
-      HTTP_PROXY: http://proxy:3128
-      HTTPS_PROXY: http://proxy:3128
-      NO_PROXY: "localhost,127.0.0.1,sandbox,postgres,redis,gateway,log_system,proxy"
+      # Generic HTTP keeps its explicit port-80 compatibility on a separate
+      # proxy listener. All HTTPS operations use CONNECT on the same listener.
+      OUTBOUND_TRANSPORT_MODE: proxy_guarded_external
+      OUTBOUND_PROXY_URL: http://proxy:3129
+      OUTBOUND_PROXY_ALLOWED_HOSTS: proxy
+      OUTBOUND_PROXY_POLICY_REVISION: proxy-v1
+      CONNECTOR_EGRESS_PROXY_URL: http://proxy:3130
+      CONNECTOR_EGRESS_PROXY_ALLOWED_HOSTS: proxy
+      CONNECTOR_EGRESS_POLICY_REVISION: connector-egress-v1
+      CONNECTOR_EGRESS_ALLOWED_PORTS: "${CONNECTOR_EGRESS_ALLOWED_PORTS:-22,5432}"
 
       # Python
       PYTHONUNBUFFERED: 1
       PYTHONPATH: /app
+
+      # Durable schedule dispatch must match Gateway settings
+      SCHEDULE_DISPATCH_MODE: disabled
+      SCHEDULE_DISPATCH_MODE_FINGERPRINT: "v1|disabled|${SCHEDULE_DISPATCH_POLL_SECONDS:-5}|${SCHEDULE_OCCURRENCE_BATCH_SIZE:-50}|${SCHEDULE_DISPATCH_BATCH_SIZE:-10}|${SCHEDULE_RECOVERY_BATCH_SIZE:-50}|${SCHEDULE_CLEANUP_BATCH_SIZE:-100}|${SCHEDULE_DISPATCH_LEASE_SECONDS:-60}|${SCHEDULE_ENQUEUED_DELIVERY_TIMEOUT_SECONDS:-120}|${SCHEDULE_EXECUTION_DEADLINE_SECONDS:-900}|${SCHEDULE_WORKFLOW_RUN_VISIBILITY_TIMEOUT_SECONDS:-120}|${SCHEDULE_DISPATCH_MAX_ATTEMPTS:-5}|${SCHEDULE_DISPATCH_RETRY_BASE_SECONDS:-5}|${SCHEDULE_DISPATCH_RETENTION_DAYS:-30}|${SCHEDULE_DISPATCH_DEAD_LETTER_RETENTION_DAYS:-180}"
+      SCHEDULE_DISPATCH_POLL_SECONDS: ${SCHEDULE_DISPATCH_POLL_SECONDS:-5}
+      SCHEDULE_OCCURRENCE_BATCH_SIZE: ${SCHEDULE_OCCURRENCE_BATCH_SIZE:-50}
+      SCHEDULE_DISPATCH_BATCH_SIZE: ${SCHEDULE_DISPATCH_BATCH_SIZE:-10}
+      SCHEDULE_RECOVERY_BATCH_SIZE: ${SCHEDULE_RECOVERY_BATCH_SIZE:-50}
+      SCHEDULE_CLEANUP_BATCH_SIZE: ${SCHEDULE_CLEANUP_BATCH_SIZE:-100}
+      SCHEDULE_DISPATCH_LEASE_SECONDS: ${SCHEDULE_DISPATCH_LEASE_SECONDS:-60}
+      SCHEDULE_ENQUEUED_DELIVERY_TIMEOUT_SECONDS: ${SCHEDULE_ENQUEUED_DELIVERY_TIMEOUT_SECONDS:-120}
+      SCHEDULE_EXECUTION_DEADLINE_SECONDS: ${SCHEDULE_EXECUTION_DEADLINE_SECONDS:-900}
+      SCHEDULE_WORKFLOW_RUN_VISIBILITY_TIMEOUT_SECONDS: ${SCHEDULE_WORKFLOW_RUN_VISIBILITY_TIMEOUT_SECONDS:-120}
+      SCHEDULE_DISPATCH_MAX_ATTEMPTS: ${SCHEDULE_DISPATCH_MAX_ATTEMPTS:-5}
+      SCHEDULE_DISPATCH_RETRY_BASE_SECONDS: ${SCHEDULE_DISPATCH_RETRY_BASE_SECONDS:-5}
+      SCHEDULE_DISPATCH_RETENTION_DAYS: ${SCHEDULE_DISPATCH_RETENTION_DAYS:-30}
+      SCHEDULE_DISPATCH_DEAD_LETTER_RETENTION_DAYS: ${SCHEDULE_DISPATCH_DEAD_LETTER_RETENTION_DAYS:-180}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+      proxy:
+        condition: service_healthy
     volumes:
       - gateway_uploads:/app/uploads
     networks:
       - moduly-network
+      - proxy-http-clients
 
   # Log System (Celery Worker)
   log_system:
@@ -183,17 +344,46 @@ services:
     networks:
       - moduly-network
 
+  # Log System (Celery Beat)
+  log_system_beat:
+    build:
+      context: ..
+      dockerfile: docker/log_system/Dockerfile
+    container_name: moduly-log-system-beat
+    entrypoint:
+      - celery
+      - -A
+      - apps.log_system.main
+      - beat
+      - --loglevel=info
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: admin
+      DB_PASSWORD: admin123
+      DB_NAME: moduly_local
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_DB: 0
+      REDIS_PASSWORD: ""
+      REDIS_URL: redis://redis:6379/0
+      PYTHONUNBUFFERED: 1
+      PYTHONPATH: /app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - moduly-network
+
   # Frontend (Next.js)
   frontend:
     build:
       context: ..
       dockerfile: docker/client/Dockerfile
-      args:
-        # Nginx를 통한 API 접근 (브라우저에서 접근 가능)
-        NEXT_PUBLIC_API_URL: http://localhost
     container_name: moduly-frontend
     environment:
-      NEXT_PUBLIC_API_URL: http://localhost
       API_URL: http://gateway:8000
       NODE_ENV: production
       NEXT_TELEMETRY_DISABLED: 1
@@ -209,7 +399,7 @@ services:
           "--no-verbose",
           "--tries=1",
           "--spider",
-          "http://localhost:3000",
+          "http://127.0.0.1:3000",
         ]
       interval: 60s
       timeout: 10s
@@ -226,9 +416,6 @@ services:
     environment:
       TZ: Asia/Seoul
       
-      # 네트워크 허용 여부
-      SANDBOX_ENABLE_NETWORK: "${SANDBOX_ENABLE_NETWORK:-false}"
-
       # 워커 설정
       SANDBOX_MIN_WORKERS: "${SANDBOX_MIN_WORKERS:-2}"
       SANDBOX_MAX_WORKERS: "${SANDBOX_MAX_WORKERS:-8}"
@@ -261,7 +448,7 @@ services:
     mem_limit: 512m
     cpus: 0.5
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8194/v1/sandbox/health"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8194/v1/sandbox/health', timeout=3).read()"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -295,38 +482,45 @@ services:
           "--no-verbose",
           "--tries=1",
           "--spider",
-          "http://localhost/health",
+          "http://127.0.0.1/health",
         ]
       interval: 30s
       timeout: 5s
       retries: 3
 
-  # ============================================================================
-  # HTTP Proxy (Squid) - 선택사항
-  # ============================================================================
-  # 역할: 외부 API 호출 시 보안 필터링 (AWS 메타데이터, 사설 IP 차단)
-  #
-  # ⚠️  Proxy를 비활성화하려면:
-  # 1. 아래 proxy 서비스 전체를 주석 처리하세요
-  # 2. gateway, workflow_engine, sandbox의 HTTP_PROXY 환경변수도 주석 처리하세요
-  #
-  # ⚠️  주의: Code 노드에서 외부 URL을 호출하는 경우 보안상 Proxy 사용을 권장합니다.
-  # ============================================================================
+  # Outbound HTTP/HTTPS proxy. Target workloads have no other Internet-capable
+  # network, so proxy failure remains fail-closed.
   proxy:
     build:
       context: ..
       dockerfile: docker/proxy/Dockerfile
     container_name: moduly-proxy
-    ports:
-      - "3128:3128"
+    environment:
+      CONNECTOR_EGRESS_ALLOWED_PORTS: "${CONNECTOR_EGRESS_ALLOWED_PORTS:-22,5432}"
     networks:
-      - moduly-network
-    volumes:
-      - ./proxy/squid.conf:/etc/squid/squid.conf:ro
+      - proxy-https-clients
+      - proxy-http-clients
+      - proxy-egress
+    user: "13:13"
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - "/run/squid:rw,noexec,nosuid,nodev,uid=13,gid=13,mode=0700"
+      - /var/log/squid
+      - /var/spool/squid
+      - /tmp
+    pids_limit: 128
+    mem_limit: 256m
+    cpus: 0.50
+    restart: unless-stopped
     healthcheck:
-      test: ["CMD", "squid", "-k", "check"]
+      test: ["CMD", "bash", "-ec", "exec 3<>/dev/tcp/127.0.0.1/3128"]
       interval: 30s
       timeout: 5s
+      start_period: 10s
       retries: 3
 
 volumes:
@@ -336,4 +530,19 @@ volumes:
 
 networks:
   moduly-network:
+    driver: bridge
+    internal: true
+  proxy-https-clients:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.30.250.0/24
+  proxy-http-clients:
+    driver: bridge
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.30.251.0/24
+  proxy-egress:
     driver: bridge

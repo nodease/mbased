@@ -1,14 +1,10 @@
-"""GitHub 노드 테스트 [GEVENT] Sync 버전
+from __future__ import annotations
 
-GithubNode가 _run 내에서 `import requests`로 로컬 임포트하므로
-requests.get/requests.post를 직접 패치합니다.
-"""
-
-from unittest.mock import MagicMock, patch
+from unittest.mock import Mock
 
 import pytest
-import requests
 
+from apps.workflow_engine.adapters.providers.github import GithubProviderError
 from apps.workflow_engine.workflow.nodes.github.entities import (
     GithubAction,
     GithubNodeData,
@@ -16,211 +12,168 @@ from apps.workflow_engine.workflow.nodes.github.entities import (
 )
 from apps.workflow_engine.workflow.nodes.github.github_node import GithubNode
 
-# ============================================================================
-# 1. Get PR Diff 정상 동작
-# ============================================================================
+
+class _ReadProvider:
+    def __init__(self, *, error=None):
+        self.error = error
+        self.calls = []
+
+    def get_pull_request(self, **kwargs):
+        self.calls.append(kwargs)
+        if self.error is not None:
+            raise self.error
+        return (
+            {
+                "title": "Add new feature",
+                "body": "This PR adds a new feature",
+                "state": "open",
+                "number": 123,
+                "diff_url": "https://github.com/owner/repo/pull/123.diff",
+            },
+            [
+                {
+                    "filename": "src/app.py",
+                    "status": "modified",
+                    "additions": 10,
+                    "deletions": 5,
+                    "changes": 15,
+                    "patch": "@@ -1,5 +1,10 @@\n+new code",
+                }
+            ],
+        )
 
 
-@patch("requests.get")
-def test_get_pr_success(mock_get):
-    """Get PR Diff 액션이 정상적으로 PR 정보를 조회한다"""
-    # PR 정보 응답
-    pr_response = MagicMock()
-    pr_response.json.return_value = {
-        "title": "Add new feature",
-        "body": "This PR adds a new feature",
-        "state": "open",
-        "number": 123,
-        "diff_url": "https://github.com/owner/repo/pull/123.diff",
-    }
+class _CommentAdapter:
+    def __init__(self):
+        self.calls = []
 
-    # 파일 목록 응답
-    files_response = MagicMock()
-    files_response.json.return_value = [
-        {
-            "filename": "src/app.py",
-            "status": "modified",
-            "additions": 10,
-            "deletions": 5,
-            "changes": 15,
-            "patch": "@@ -1,5 +1,10 @@\n+new code",
+    def create_comment(self, request):
+        self.calls.append(request)
+        return {
+            "comment_id": 456789,
+            "comment_url": "https://github.com/owner/repo/pull/123#issuecomment-456789",
+            "comment_body": request.comment_body,
         }
-    ]
 
-    mock_get.side_effect = [pr_response, files_response]
 
-    # 노드 생성 및 실행
-    node_data = GithubNodeData(
-        title="GitHub",
-        action=GithubAction.GET_PR,
-        api_token="ghp_test_token",
-        repo_owner="facebook",
-        repo_name="react",
-        pr_number="123",
+def _node(data, *, read_provider=None, comment_adapter=None, extra_context=None):
+    context = dict(extra_context or {})
+    if read_provider is not None:
+        context["github_read_provider_factory"] = lambda: read_provider
+    if comment_adapter is not None:
+        context["github_comment_effect_adapter_factory"] = lambda: comment_adapter
+    return GithubNode(id="github-1", data=data, execution_context=context)
+
+
+def test_get_pr_success():
+    provider = _ReadProvider()
+    node = _node(
+        GithubNodeData(
+            title="GitHub",
+            action=GithubAction.GET_PR,
+            api_token="synthetic-token",
+            repo_owner="facebook",
+            repo_name="react",
+            pr_number="123",
+        ),
+        read_provider=provider,
     )
-    node = GithubNode(id="github-1", data=node_data)
 
-    # [GEVENT] sync 호출
     result = node._run(inputs={})
 
-    # 검증
     assert result["pr_title"] == "Add new feature"
-    assert result["pr_body"] == "This PR adds a new feature"
-    assert result["pr_state"] == "open"
-    assert result["pr_number"] == 123
     assert result["files_count"] == 1
-    assert len(result["files"]) == 1
     assert result["files"][0]["filename"] == "src/app.py"
-    assert result["files"][0]["additions"] == 10
-    assert result["files"][0]["deletions"] == 5
-    assert result["diff_url"] == "https://github.com/owner/repo/pull/123.diff"
-
-    # API 호출 확인
-    assert mock_get.call_count == 2
+    assert result["diff_url"].endswith("/123.diff")
+    assert provider.calls[0]["repo_owner"] == "facebook"
 
 
-# ============================================================================
-# 2. Comment PR 정상 동작
-# ============================================================================
-
-
-@patch("requests.post")
-def test_comment_pr_success(mock_post):
-    """Comment PR 액션이 정상적으로 댓글을 작성한다"""
-    # 댓글 작성 응답
-    comment_response = MagicMock()
-    comment_response.json.return_value = {
-        "id": 456789,
-        "html_url": "https://github.com/owner/repo/pull/123#issuecomment-456789",
-        "body": "Great work!",
-    }
-
-    mock_post.return_value = comment_response
-
-    # 노드 생성 및 실행
-    node_data = GithubNodeData(
-        title="GitHub",
-        action=GithubAction.COMMENT_PR,
-        api_token="ghp_test_token",
-        repo_owner="facebook",
-        repo_name="react",
-        pr_number="123",
-        comment_body="Great work!",
+def test_get_pr_resolves_opaque_secret_reference_at_runtime():
+    provider = _ReadProvider()
+    resolver = Mock(return_value="resolved-runtime-token")
+    node = _node(
+        GithubNodeData(
+            title="GitHub",
+            action=GithubAction.GET_PR,
+            api_token="workflow-node-secret://00000000-0000-4000-8000-000000000001",
+            repo_owner="owner",
+            repo_name="repo",
+            pr_number="1",
+        ),
+        read_provider=provider,
+        extra_context={
+            "workflow_id": "00000000-0000-4000-8000-000000000010",
+            "organization_id": "00000000-0000-4000-8000-000000000020",
+            "workflow_node_secret_resolver": resolver,
+        },
     )
-    node = GithubNode(id="github-1", data=node_data)
 
-    # [GEVENT] sync 호출
+    node._run(inputs={})
+
+    assert provider.calls[0]["token"] == "resolved-runtime-token"
+    resolver.assert_called_once()
+
+
+def test_comment_pr_success():
+    adapter = _CommentAdapter()
+    node = _node(
+        GithubNodeData(
+            title="GitHub",
+            action=GithubAction.COMMENT_PR,
+            api_token="synthetic-token",
+            repo_owner="facebook",
+            repo_name="react",
+            pr_number="123",
+            comment_body="Great work!",
+        ),
+        comment_adapter=adapter,
+    )
+
     result = node._run(inputs={})
 
-    # 검증
     assert result["comment_id"] == 456789
-    assert (
-        result["comment_url"]
-        == "https://github.com/owner/repo/pull/123#issuecomment-456789"
-    )
     assert result["comment_body"] == "Great work!"
-
-    # 호출 확인
-    mock_post.assert_called_once()
-    call_args = mock_post.call_args
-    assert "/issues/123/comments" in call_args[0][0]
-    assert call_args[1]["json"]["body"] == "Great work!"
+    assert adapter.calls[0].repo_name == "react"
 
 
-# ============================================================================
-# 3. 변수 치환 (Jinja2)
-# ============================================================================
-
-
-@patch("requests.post")
-def test_variable_substitution_simple(mock_post):
-    """Jinja2 변수 치환이 정상 동작한다"""
-    # Mock 설정
-    comment_response = MagicMock()
-    comment_response.json.return_value = {
-        "id": 1,
-        "html_url": "https://github.com/test",
-        "body": "Review result: LGTM!",
-    }
-    mock_post.return_value = comment_response
-
-    # referenced_variables 설정
-    node_data = GithubNodeData(
-        title="GitHub",
-        action=GithubAction.COMMENT_PR,
-        api_token="ghp_test_token",
-        repo_owner="facebook",
-        repo_name="react",
-        pr_number="123",
-        comment_body="Review result: {{ review }}",
-        referenced_variables=[
-            GithubVariable(name="review", value_selector=["llm-1", "text"])
-        ],
+def test_variable_substitution_simple():
+    adapter = _CommentAdapter()
+    node = _node(
+        GithubNodeData(
+            title="GitHub",
+            action=GithubAction.COMMENT_PR,
+            api_token="synthetic-token",
+            repo_owner="facebook",
+            repo_name="react",
+            pr_number="123",
+            comment_body="Review result: {{ review }}",
+            referenced_variables=[
+                GithubVariable(name="review", value_selector=["llm-1", "text"])
+            ],
+        ),
+        comment_adapter=adapter,
     )
-    node = GithubNode(id="github-1", data=node_data)
 
-    # 입력 데이터 (이전 노드 결과)
-    inputs = {"llm-1": {"text": "LGTM!"}}
+    node._run(inputs={"llm-1": {"text": "LGTM!"}})
 
-    # [GEVENT] sync 호출
-    node._run(inputs=inputs)
-
-    # 검증: 변수가 치환되어 댓글 작성됨
-    mock_post.assert_called_once()
-    call_args = mock_post.call_args
-    assert call_args[1]["json"]["body"] == "Review result: LGTM!"
+    assert adapter.calls[0].comment_body == "Review result: LGTM!"
 
 
-# ============================================================================
-# 4. 에러 처리
-# ============================================================================
-
-
-@patch("requests.get")
-def test_invalid_token_error(mock_get):
-    """API 호출 에러(401)는 RuntimeError를 발생시킨다"""
-    # Mock 설정 - 인증 실패
-    error_response = MagicMock()
-    error_response.raise_for_status.side_effect = requests.exceptions.HTTPError(
-        "401 Unauthorized"
+@pytest.mark.parametrize(
+    "reason_code", ["github.provider_rejected", "github.unavailable"]
+)
+def test_provider_failure_uses_safe_runtime_error(reason_code):
+    node = _node(
+        GithubNodeData(
+            title="GitHub",
+            action=GithubAction.GET_PR,
+            api_token="synthetic-token",
+            repo_owner="owner",
+            repo_name="repo",
+            pr_number="123",
+        ),
+        read_provider=_ReadProvider(error=GithubProviderError(reason_code)),
     )
-    mock_get.return_value = error_response
 
-    node_data = GithubNodeData(
-        title="GitHub",
-        action=GithubAction.GET_PR,
-        api_token="invalid_token",
-        repo_owner="facebook",
-        repo_name="react",
-        pr_number="123",
-    )
-    node = GithubNode(id="github-1", data=node_data)
-
-    with pytest.raises(RuntimeError, match="GitHub API 오류"):
-        # [GEVENT] sync 호출
-        node._run(inputs={})
-
-
-@patch("requests.get")
-def test_github_not_found_error(mock_get):
-    """리포지토리/PR이 없으면 RuntimeError를 발생시킨다"""
-    # Mock 설정 - Not Found
-    error_response = MagicMock()
-    error_response.raise_for_status.side_effect = requests.exceptions.HTTPError(
-        "404 Not Found"
-    )
-    mock_get.return_value = error_response
-
-    node_data = GithubNodeData(
-        title="GitHub",
-        action=GithubAction.GET_PR,
-        api_token="ghp_test_token",
-        repo_owner="nonexistent",
-        repo_name="repo",
-        pr_number="123",
-    )
-    node = GithubNode(id="github-1", data=node_data)
-
-    with pytest.raises(RuntimeError, match="GitHub API 오류"):
-        # [GEVENT] sync 호출
+    with pytest.raises(RuntimeError, match="^GitHub API 오류$"):
         node._run(inputs={})

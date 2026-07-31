@@ -2,14 +2,17 @@
 Sandbox API - Execute Endpoint
 """
 from typing import Any, Dict, Optional
-from uuid import UUID
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from apps.sandbox.config import settings
+from apps.sandbox.core.network_policy import (
+    SandboxNetworkAccessUnsupported,
+    require_network_access_disabled,
+)
 from apps.sandbox.core.scheduler import SandboxScheduler
 from apps.sandbox.models.job import Priority
-from apps.sandbox.config import settings
 
 
 router = APIRouter()
@@ -22,8 +25,14 @@ class ExecuteRequest(BaseModel):
     timeout: int = Field(default=10, ge=1, le=60, description="타임아웃 (초)")
     priority: Optional[str] = Field(default=None, description="우선순위 (high, normal, low), None이면 SJF 기반 자동 결정")
     trigger_type: Optional[str] = Field(default=None, description="트리거 유형 (manual, schedule, webhook, batch)，첫 실행 시 fallback 우선순위 결정용")
-    enable_network: bool = Field(default=False, description="네트워크 허용 여부")
-    tenant_id: Optional[str] = Field(default=None, description="테넌트 ID, 지금은 user_id (공정 스케줄링용)")
+    enable_network: bool = Field(
+        default=False,
+        description="네트워크 허용 여부 (현재 지원하지 않음)",
+    )
+    organization_id: Optional[str] = Field(
+        default=None,
+        description="Canonical organization ID for tenant-aware fair scheduling",
+    )
 
 
 class ExecuteResponse(BaseModel):
@@ -69,6 +78,14 @@ async def execute_code(request: ExecuteRequest):
         return {"result": x * 2}
     ```
     """
+    try:
+        require_network_access_disabled(request.enable_network)
+    except SandboxNetworkAccessUnsupported as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"reason_code": exc.reason_code},
+        ) from None
+
     scheduler = SandboxScheduler.get_instance()
     
     # 우선순위 파싱
@@ -96,7 +113,7 @@ async def execute_code(request: ExecuteRequest):
             priority=priority,
             trigger_mode=trigger_mode,
             enable_network=request.enable_network,
-            tenant_id=request.tenant_id,
+            organization_id=request.organization_id,
         )
         
         return ExecuteResponse(
@@ -108,6 +125,11 @@ async def execute_code(request: ExecuteRequest):
             memory_used_mb=result.memory_used_mb,
         )
         
+    except SandboxNetworkAccessUnsupported as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"reason_code": exc.reason_code},
+        ) from None
     except ValueError as e:
         # Backpressure: 서비스 과부하
         raise HTTPException(status_code=503, detail=str(e))

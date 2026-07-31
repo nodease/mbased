@@ -41,9 +41,6 @@ class SandboxSettings:
     NSJAIL_CONFIG_PATH: str = os.getenv("SANDBOX_NSJAIL_CONFIG_PATH", "/app/nsjail/sandbox.cfg")
     PYTHON_PATH: str = os.getenv("SANDBOX_PYTHON_PATH", "/usr/local/bin/python3")
     
-    # 네트워크 설정
-    ENABLE_NETWORK: bool = os.getenv("SANDBOX_ENABLE_NETWORK", "false").lower() == "true"
-    
     # 임시 파일 경로
     TEMP_DIR: str = os.getenv("SANDBOX_TEMP_DIR", "/tmp/sandbox")
     

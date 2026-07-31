@@ -7,10 +7,148 @@ import {
   createNewCaseForConnection,
 } from '../utils/conditionNodeHelpers';
 import { arrangeConditionNodeChildren } from '../utils/arrangeConditionNodes';
+import { useWorkflowStore } from '../store/useWorkflowStore';
+import type { NodeDefinition } from '../config/nodeRegistry';
+import {
+  WORKFLOW_NODE_GAP,
+  WORKFLOW_NODE_SIZE,
+  snapCanvasPosition,
+} from '../utils/workflowCanvasGeometry';
+
+const SOURCE_AMBIGUOUS_NODE_TYPES = new Set(['conditionNode']);
+const SOURCE_BLOCKED_NODE_TYPES = new Set(['answerNode']);
+const NON_WORKFLOW_NODE_TYPES = new Set(['note']);
+
+export const getLastNodes = (nodes: AppNode[], edges: Edge[]) => {
+  const workflowNodeIds = new Set(
+    nodes
+      .filter((node) => !NON_WORKFLOW_NODE_TYPES.has(node.type || ''))
+      .map((node) => node.id),
+  );
+  const nodesWithOutgoingEdge = new Set(
+    edges
+      .filter(
+        (edge) =>
+          workflowNodeIds.has(edge.source) && workflowNodeIds.has(edge.target),
+      )
+      .map((edge) => edge.source),
+  );
+  return nodes.filter(
+    (node) =>
+      workflowNodeIds.has(node.id) && !nodesWithOutgoingEdge.has(node.id),
+  );
+};
+
+export const findAddAfterTarget = (nodes: AppNode[], edges: Edge[]) => {
+  const selectedNodes = nodes.filter((node) => node.selected);
+  if (selectedNodes.length === 1) {
+    const selectedNode = selectedNodes[0];
+    return NON_WORKFLOW_NODE_TYPES.has(selectedNode.type || '')
+      ? null
+      : selectedNode;
+  }
+  if (selectedNodes.length > 1) return null;
+
+  const terminalCandidates = getLastNodes(nodes, edges);
+
+  if (terminalCandidates.length !== 1) return null;
+  const terminalNode = terminalCandidates[0];
+  if (SOURCE_BLOCKED_NODE_TYPES.has(terminalNode.type || '')) return null;
+  return terminalNode;
+};
+
+const canUseNodeAsAddAfterSource = (node?: AppNode | null) => {
+  if (!node) return false;
+  const nodeType = node.type || '';
+  return (
+    !NON_WORKFLOW_NODE_TYPES.has(nodeType) &&
+    !SOURCE_BLOCKED_NODE_TYPES.has(nodeType) &&
+    !SOURCE_AMBIGUOUS_NODE_TYPES.has(nodeType)
+  );
+};
+
+const canUseDefinitionAsAddAfterTarget = (nodeDef?: NodeDefinition | null) => {
+  if (!nodeDef) return false;
+  return nodeDef.category !== 'trigger' && nodeDef.type !== 'workflowNode';
+};
+
+export const canAddNodeDefinitionAfterTarget = (
+  nodeDef: NodeDefinition,
+  nodes: AppNode[],
+  edges: Edge[],
+) => {
+  const targetNode = findAddAfterTarget(nodes, edges);
+  return (
+    canUseNodeAsAddAfterSource(targetNode) &&
+    canUseDefinitionAsAddAfterTarget(nodeDef)
+  );
+};
+
+const getNodeSize = (node: AppNode) => {
+  const measuredNode = node as AppNode & {
+    measured?: { width?: number; height?: number };
+    width?: number;
+    height?: number;
+  };
+
+  return {
+    width:
+      measuredNode.measured?.width ??
+      measuredNode.width ??
+      WORKFLOW_NODE_SIZE.width,
+    height:
+      measuredNode.measured?.height ??
+      measuredNode.height ??
+      WORKFLOW_NODE_SIZE.height,
+  };
+};
+
+const doRectsOverlap = (
+  first: { x: number; y: number; width: number; height: number },
+  second: { x: number; y: number; width: number; height: number },
+) =>
+  first.x < second.x + second.width &&
+  first.x + first.width > second.x &&
+  first.y < second.y + second.height &&
+  first.y + first.height > second.y;
+
+export const getNonOverlappingPosition = (
+  nodes: AppNode[],
+  basePosition: { x: number; y: number },
+) => {
+  let nextPosition = snapCanvasPosition(basePosition);
+  let attempts = 0;
+
+  while (
+    attempts < 12 &&
+    nodes.some((node) => {
+      const nodeSize = getNodeSize(node);
+      return doRectsOverlap(
+        {
+          x: nextPosition.x,
+          y: nextPosition.y,
+          width: WORKFLOW_NODE_SIZE.width,
+          height: WORKFLOW_NODE_SIZE.height,
+        },
+        {
+          x: node.position.x,
+          y: node.position.y,
+          ...nodeSize,
+        },
+      );
+    })
+  ) {
+    attempts += 1;
+    nextPosition = snapCanvasPosition({
+      x: basePosition.x,
+      y: basePosition.y + WORKFLOW_NODE_GAP.addAfterY * attempts,
+    });
+  }
+
+  return nextPosition;
+};
 
 interface UseNodeCreationProps {
-  nodes: AppNode[];
-  setNodes: (nodes: AppNode[]) => void;
   edges: Edge[];
   setEdges: (edges: Edge[]) => void;
   previewState: {
@@ -26,8 +164,6 @@ interface UseNodeCreationProps {
 }
 
 export function useNodeCreation({
-  nodes,
-  setNodes,
   edges,
   setEdges,
   previewState,
@@ -35,6 +171,9 @@ export function useNodeCreation({
   setSearchModalContext,
 }: UseNodeCreationProps) {
   const { screenToFlowPosition } = useReactFlow();
+  const addNode = useWorkflowStore((state) => state.addNode);
+  const addNodeWithEdge = useWorkflowStore((state) => state.addNodeWithEdge);
+  const nodes = useWorkflowStore((state) => state.nodes) as AppNode[];
 
   // Handle node drop from library
   const onDrop = useCallback(
@@ -61,15 +200,12 @@ export function useNodeCreation({
         return;
       }
 
-      // Remove ghost node and create real node
-      const filteredNodes = nodes.filter((n) => n.id !== 'GHOST');
-
-      const newNode: AppNode = {
+      const baseNode = {
         id: `${nodeDef.id}-${Date.now()}`,
-        type: nodeDef.type as any,
-        data: nodeDef.defaultData() as any,
+        type: nodeDef.type,
+        data: nodeDef.defaultData(),
         position,
-      };
+      } as unknown as AppNode;
 
       // Auto-connect if there's a nearest node
       let sourceHandle: string | undefined;
@@ -97,47 +233,46 @@ export function useNodeCreation({
         }
       }
 
-      // Update nodes: add new node and update condition node if needed
-      let nodesToSet: AppNode[];
-      if (updatedConditionNode) {
-        const updatedNodes = filteredNodes.map((node) =>
-          node.id === updatedConditionNode!.id ? updatedConditionNode! : node,
-        );
-        nodesToSet = [...updatedNodes, newNode];
-      } else {
-        nodesToSet = [...filteredNodes, newNode];
-      }
+      const newNode = addNode(baseNode, (currentNodes, numberedNode) => {
+        const filteredNodes = currentNodes.filter((n) => n.id !== 'GHOST');
+        let nodesToSet: AppNode[];
 
-      // If connected to a condition node, arrange all its children
-      if (
-        previewState.nearestNode &&
-        previewState.nearestNode.type === 'conditionNode'
-      ) {
-        // Create temporary edges array to include the new edge
-        const tempEdges = previewState.nearestNode
-          ? [
-              ...edges,
-              {
-                id: `temp-${Date.now()}`,
-                source: previewState.isRight
-                  ? previewState.nearestNode.id
-                  : newNode.id,
-                target: previewState.isRight
-                  ? newNode.id
-                  : previewState.nearestNode.id,
-                sourceHandle: sourceHandle || undefined,
-              },
-            ]
-          : edges;
+        if (updatedConditionNode) {
+          const updatedNodes = filteredNodes.map((node) =>
+            node.id === updatedConditionNode!.id ? updatedConditionNode! : node,
+          );
+          nodesToSet = [...updatedNodes, numberedNode];
+        } else {
+          nodesToSet = [...filteredNodes, numberedNode];
+        }
 
-        nodesToSet = arrangeConditionNodeChildren(
-          updatedConditionNode || previewState.nearestNode,
-          nodesToSet,
-          tempEdges as Edge[],
-        );
-      }
+        if (
+          previewState.nearestNode &&
+          previewState.nearestNode.type === 'conditionNode'
+        ) {
+          const tempEdges = [
+            ...edges,
+            {
+              id: `temp-${Date.now()}`,
+              source: previewState.isRight
+                ? previewState.nearestNode.id
+                : numberedNode.id,
+              target: previewState.isRight
+                ? numberedNode.id
+                : previewState.nearestNode.id,
+              sourceHandle: sourceHandle || undefined,
+            },
+          ];
 
-      setNodes(nodesToSet);
+          nodesToSet = arrangeConditionNodeChildren(
+            updatedConditionNode || previewState.nearestNode,
+            nodesToSet,
+            tempEdges as Edge[],
+          );
+        }
+
+        return nodesToSet;
+      });
 
       // Create edge if there's a nearest node
       if (previewState.nearestNode) {
@@ -161,13 +296,12 @@ export function useNodeCreation({
     },
     [
       screenToFlowPosition,
-      setNodes,
-      nodes,
       resetPreview,
       previewState,
       setEdges,
       edges,
       setSearchModalContext,
+      addNode,
     ],
   );
 
@@ -182,20 +316,65 @@ export function useNodeCreation({
         y: window.innerHeight / 2,
       });
 
-      const newNode: AppNode = {
+      const baseNode = {
         id: `${nodeDef.id}-${Date.now()}`,
-        type: nodeDef.type as any,
-        data: nodeDef.defaultData() as any,
+        type: nodeDef.type,
+        data: nodeDef.defaultData(),
         position: centerPos,
-      };
-
-      setNodes([...nodes, newNode]);
+      } as unknown as AppNode;
+      addNode(baseNode);
     },
-    [screenToFlowPosition, setNodes, nodes],
+    [screenToFlowPosition, addNode],
+  );
+
+  const handleAddNodeAfterSelected = useCallback(
+    (nodeDefId: string) => {
+      const nodeDef = getNodeDefinition(nodeDefId);
+      const targetNode = findAddAfterTarget(nodes, edges);
+      if (
+        !nodeDef ||
+        !canUseNodeAsAddAfterSource(targetNode) ||
+        !canUseDefinitionAsAddAfterTarget(nodeDef)
+      ) {
+        return;
+      }
+
+      const position = getNonOverlappingPosition(nodes, {
+        x: targetNode!.position.x + WORKFLOW_NODE_GAP.addAfterX,
+        y: targetNode!.position.y,
+      });
+      const baseNode = {
+        id: `${nodeDef.id}-${Date.now()}`,
+        type: nodeDef.type,
+        data: nodeDef.defaultData(),
+        position,
+      } as unknown as AppNode;
+
+      addNodeWithEdge(
+        baseNode,
+        {
+          id: `e-${targetNode!.id}-${nodeDef.id}-${Date.now()}`,
+          source: targetNode!.id,
+          type: 'puzzle',
+        },
+        (currentNodes, numberedNode) => [
+          ...currentNodes.map((node) => ({
+            ...node,
+            selected: false,
+          })),
+          {
+            ...numberedNode,
+            selected: true,
+          },
+        ],
+      );
+    },
+    [addNodeWithEdge, edges, nodes],
   );
 
   return {
     onDrop,
     handleAddNodeFromLibrary,
+    handleAddNodeAfterSelected,
   };
 }

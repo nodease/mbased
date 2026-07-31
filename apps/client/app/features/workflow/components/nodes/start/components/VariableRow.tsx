@@ -9,6 +9,7 @@ import {
   List,
   FileText,
 } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import { WorkflowVariable, VariableType } from '../../../../types/Nodes';
 
 interface VariableRowProps {
@@ -67,16 +68,21 @@ export const VariableRow = ({
   const SelectedIcon = selectedOption?.icon || Type;
 
   return (
-    <div className="group flex flex-col gap-2 rounded-lg border border-gray-200 bg-white p-3 shadow-sm transition-all hover:border-gray-300 hover:shadow-md">
+    <div
+      className={cn(
+        'group flex min-w-0 max-w-full flex-col gap-2 overflow-visible rounded-lg border border-gray-200 bg-white p-3 shadow-sm transition-all hover:border-gray-300 hover:shadow-md',
+        isTypeOpen && 'relative z-50',
+      )}
+    >
       {/* 아이템 헤더 */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-1.5">
+      <div className="flex min-w-0 items-center justify-between">
+        <div className="flex min-w-0 items-center gap-1.5">
           <div className="h-1.5 w-1.5 rounded-full bg-blue-500/50" />
           <span className="text-[10px] font-bold tracking-wider text-gray-400">
             입력변수 {index + 1}
           </span>
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="flex shrink-0 items-center gap-1.5">
           {/* 필수 체크박스 - 주변과 어우러지는 subtle한 스타일 */}
           <label className="flex items-center gap-1 cursor-pointer opacity-60 hover:opacity-100 transition-opacity">
             <input
@@ -103,22 +109,22 @@ export const VariableRow = ({
       </div>
 
       {/* 메인 입력 영역 */}
-      <div className="flex flex-col gap-2">
-        {/* 첫 번째 줄: 변수명 | 타입 */}
-        <div className="flex flex-row items-center gap-2">
-          {/* 변수명 입력 */}
-          <div className="flex-1">
+      <div className="flex min-w-0 flex-col gap-2">
+        {/* 첫 번째 줄: 표시명 | 타입 */}
+        <div className="flex min-w-0 flex-row items-center gap-2">
+          {/* 표시명 입력 */}
+          <div className="min-w-0 flex-1">
             <input
               type="text"
-              className="w-full rounded-md border border-gray-200 bg-gray-50 px-2 py-1.5 text-xs font-semibold text-blue-600 placeholder:font-normal placeholder:text-gray-400 transition-colors focus:border-blue-500 focus:bg-white focus:outline-none"
-              placeholder="변수명 (예: user_name)"
-              value={variable.name}
-              onChange={(e) => onUpdate(variable.id, { name: e.target.value })}
+              className="w-full min-w-0 rounded-md border border-gray-200 bg-gray-50 px-2 py-1.5 text-xs font-semibold text-blue-600 placeholder:font-normal placeholder:text-gray-500 transition-colors focus:border-blue-500 focus:bg-white focus:outline-none"
+              placeholder="표시명 (예: 고객 문의)"
+              value={variable.label ?? ''}
+              onChange={(e) => onUpdate(variable.id, { label: e.target.value })}
             />
           </div>
 
           {/* 타입 선택 - 커스텀 드롭다운 */}
-          <div className="flex-1 relative" ref={typeDropdownRef}>
+          <div className="relative z-10 min-w-0 flex-1" ref={typeDropdownRef}>
             {/* 트리거 버튼 */}
             <button
               type="button"
@@ -142,7 +148,7 @@ export const VariableRow = ({
 
             {/* 드롭다운 팝오버 */}
             {isTypeOpen && (
-              <div className="absolute z-50 mt-1 w-full bg-white rounded-lg border border-gray-200 shadow-lg overflow-hidden">
+              <div className="absolute left-0 top-full z-[80] mt-1 w-full overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg">
                 <div className="py-1">
                   {TYPE_OPTIONS.map((option) => {
                     const Icon = option.icon;
@@ -187,17 +193,17 @@ export const VariableRow = ({
         </div>
 
         {/* 두 번째 줄: 옵션 (타입에 따라) */}
-        <div className="flex flex-row items-center gap-2">
+        <div className="flex min-w-0 flex-row items-center gap-2">
           {/* 최대 길이 (text, paragraph) */}
           {(variable.type === 'text' || variable.type === 'paragraph') && (
             <>
               <span className="text-xs text-gray-600 whitespace-nowrap">
                 최대 길이:
               </span>
-              <div className="flex-1">
+              <div className="min-w-0 flex-1">
                 <input
                   type="number"
-                  className="w-full rounded-md border border-gray-200 bg-gray-50 px-2 py-1.5 text-xs font-medium text-gray-700 transition-colors focus:border-blue-500 focus:bg-white focus:outline-none"
+                  className="w-full min-w-0 rounded-md border border-gray-200 bg-gray-50 px-2 py-1.5 text-xs font-medium text-gray-700 transition-colors focus:border-blue-500 focus:bg-white focus:outline-none"
                   placeholder="255"
                   value={variable.maxLength || ''}
                   onChange={(e) =>
@@ -218,10 +224,10 @@ export const VariableRow = ({
               <span className="text-xs text-gray-600 whitespace-nowrap">
                 최대 크기 (MB):
               </span>
-              <div className="flex-1">
+              <div className="min-w-0 flex-1">
                 <input
                   type="number"
-                  className="w-full rounded-md border border-gray-200 bg-gray-50 px-2 py-1.5 text-xs font-medium text-gray-700 transition-colors focus:border-blue-500 focus:bg-white focus:outline-none"
+                  className="w-full min-w-0 rounded-md border border-gray-200 bg-gray-50 px-2 py-1.5 text-xs font-medium text-gray-700 transition-colors focus:border-blue-500 focus:bg-white focus:outline-none"
                   placeholder="10"
                   value={
                     variable.maxFileSize
@@ -243,8 +249,8 @@ export const VariableRow = ({
 
         {/* Select 타입일 때: 옵션 리스트 */}
         {variable.type === 'select' && (
-          <div className="mt-2 flex flex-col gap-2 rounded border border-gray-200 bg-gray-50 p-2">
-            <div className="flex items-center justify-between">
+          <div className="mt-2 flex min-w-0 max-w-full flex-col gap-2 overflow-hidden rounded border border-gray-200 bg-gray-50 p-2">
+            <div className="flex min-w-0 items-center justify-between gap-2">
               <span className="text-[10px] font-semibold text-gray-500">
                 선택 옵션
               </span>
@@ -262,10 +268,10 @@ export const VariableRow = ({
             </div>
 
             {(variable.options || []).map((option, optIndex) => (
-              <div key={optIndex} className="flex items-center gap-1">
+              <div key={optIndex} className="flex min-w-0 items-center gap-1">
                 <input
                   type="text"
-                  className="flex-1 rounded border border-gray-200 bg-white px-2 py-1 text-xs placeholder:text-gray-400 focus:border-blue-500 focus:outline-none"
+                  className="min-w-0 flex-1 rounded border border-gray-200 bg-white px-2 py-1 text-xs text-gray-700 placeholder:text-gray-500 focus:border-blue-500 focus:outline-none"
                   placeholder="라벨"
                   value={option.label}
                   onChange={(e) => {
@@ -279,7 +285,7 @@ export const VariableRow = ({
                 />
                 <input
                   type="text"
-                  className="flex-1 rounded border border-gray-200 bg-white px-2 py-1 text-xs placeholder:text-gray-400 focus:border-blue-500 focus:outline-none"
+                  className="min-w-0 flex-1 rounded border border-gray-200 bg-white px-2 py-1 text-xs text-gray-700 placeholder:text-gray-500 focus:border-blue-500 focus:outline-none"
                   placeholder="값"
                   value={option.value}
                   onChange={(e) => {
@@ -297,7 +303,7 @@ export const VariableRow = ({
                     newOptions.splice(optIndex, 1);
                     onUpdate(variable.id, { options: newOptions });
                   }}
-                  className="text-red-500 hover:text-red-700"
+                  className="shrink-0 text-red-500 hover:text-red-700"
                   title="옵션 삭제"
                 >
                   <Trash2 className="h-3 w-3" />

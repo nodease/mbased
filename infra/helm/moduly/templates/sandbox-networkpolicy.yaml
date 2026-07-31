@@ -21,11 +21,13 @@ spec:
       port: 8194
   
   egress:
-  # 1. DNS 허용 (필수)
-  - ports:
-    - protocol: UDP
-      port: 53
-    - protocol: TCP
-      port: 53
-  # 2. 나머지는 모두 차단 (기본 Deny)
+    # Operator-owned cluster DNS only.
+    - to:
+        {{- include "moduly.dnsEgressPeer" . | nindent 8 }}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    # All other destinations remain denied.
 {{- end }}

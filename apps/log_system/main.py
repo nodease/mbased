@@ -12,6 +12,8 @@ import logging
 import os
 import sys
 
+from dotenv import load_dotenv
+
 # ===================================================
 # 로깅 설정 (Celery Worker 시작 전 )
 # ===================================================
@@ -30,8 +32,6 @@ PROJECT_ROOT = os.path.dirname(
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from dotenv import load_dotenv
-
 # 환경변수 로드 (프로젝트 루트의 .env)
 env_path = os.path.join(PROJECT_ROOT, ".env")
 if os.path.exists(env_path):
@@ -41,8 +41,13 @@ else:
     load_dotenv()
 
 # Celery 앱 import (tasks 모듈이 자동으로 등록됨)
-from apps.log_system import tasks  # noqa: F401 - Celery 태스크 등록
-from apps.shared.celery_app import celery_app
+from apps.log_system import (  # noqa: E402
+    audit_tasks,  # noqa: F401 - audit.record 태스크 등록
+    provider_usage_tasks,  # noqa: F401 - provider usage recovery task 등록
+    tasks,  # noqa: F401 - Celery 태스크 등록
+)
+from apps.memory import tasks as memory_tasks  # noqa: E402,F401 - retention task
+from apps.shared.celery_app import celery_app  # noqa: E402
 
 # Celery 앱 export
 app = celery_app

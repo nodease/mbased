@@ -27,7 +27,7 @@ export const BasicInfoInputs = ({
           value={variable.name}
           onChange={(e) => onUpdate(variable.id, { name: e.target.value })}
           placeholder="key_name"
-          className={`h-7 w-full rounded border px-2 text-xs focus:outline-none ${
+          className={`h-7 w-full rounded border px-2 text-xs text-gray-700 placeholder:text-gray-500 focus:outline-none ${
             error
               ? 'border-red-500 focus:border-red-500' // 에러 시 빨간색
               : 'border-border bg-background focus:border-primary' // 평소
@@ -46,7 +46,7 @@ export const BasicInfoInputs = ({
           value={variable.label}
           onChange={(e) => onUpdate(variable.id, { label: e.target.value })}
           placeholder="필드 이름"
-          className="h-7 w-full rounded border border-border bg-background px-2 text-xs focus:border-primary focus:outline-none"
+          className="h-7 w-full rounded border border-border bg-background px-2 text-xs text-gray-700 placeholder:text-gray-500 focus:border-primary focus:outline-none"
         />
       </div>
     </div>

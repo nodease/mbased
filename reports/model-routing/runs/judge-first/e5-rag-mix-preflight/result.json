@@ -1,0 +1,22 @@
+{
+  "results": [
+    {
+      "case_id": "rag-20",
+      "node_id": "llm-rag",
+      "category": "rag_grounded",
+      "expected_difficulty": "balanced",
+      "requires_rag": true,
+      "workflow_success": true,
+      "schema_pass": false,
+      "selected_model": "gpt-4.1",
+      "task_cost_usd": 0.0,
+      "task_latency_ms": 24,
+      "routing_judge_cost_usd": 0.0,
+      "routing_judge_tokens": 0,
+      "routing": {},
+      "rag_context": {},
+      "error": null
+    }
+  ],
+  "stopped_reason": "rag-20:schema_contract_failed"
+}

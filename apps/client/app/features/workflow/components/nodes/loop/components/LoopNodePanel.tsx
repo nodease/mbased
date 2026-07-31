@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { LoopNodeData, LoopNodeInput } from '../../../../types/Nodes';
+import { LoopNodeData } from '../../../../types/Nodes';
 import { useWorkflowStore } from '@/app/features/workflow/store/useWorkflowStore';
 import { getUpstreamNodes } from '../../../../utils/getUpstreamNodes';
 import { CollapsibleSection } from '../../ui/CollapsibleSection';

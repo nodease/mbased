@@ -1,0 +1,221 @@
+{{- include "moduly.validateKnowledgeWorker" . -}}
+{{- if .Values.knowledgeWorker.enabled }}
+{{- $storageType := include "moduly.storageType" . }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "moduly.fullname" . }}-knowledge-worker
+  labels:
+    {{- include "moduly.componentLabels" (dict "component" "knowledge-worker" "context" .) | nindent 4 }}
+spec:
+  replicas: {{ .Values.knowledgeWorker.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "moduly.componentSelectorLabels" (dict "component" "knowledge-worker" "context" .) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "moduly.componentSelectorLabels" (dict "component" "knowledge-worker" "context" .) | nindent 8 }}
+        {{- if .Values.egressProxy.enabled }}
+        nodease.io/egress-mode: proxy-v1
+        {{- end }}
+      annotations:
+        nodease.io/egress-enforcement-phase: {{ .Values.egressProxy.networkPolicy.enforcementPhase | quote }}
+        checksum/config: {{ toYaml .Values | sha256sum }}
+        checksum/secret: {{ toYaml .Values.secrets | sha256sum }}
+    spec:
+      serviceAccountName: {{ include "moduly.serviceAccountName" . }}
+      {{- if and (eq $storageType "LOCAL") .Values.knowledgeWorker.localStorage.enabled }}
+      securityContext:
+        fsGroup: {{ .Values.knowledgeWorker.localStorage.fsGroup }}
+        fsGroupChangePolicy: OnRootMismatch
+      {{- end }}
+      initContainers:
+      - name: wait-for-knowledge-schema
+        image: "{{ default .Values.gateway.image.repository .Values.knowledgeWorker.image.repository }}:{{ default (.Values.gateway.image.tag | default .Chart.AppVersion) .Values.knowledgeWorker.image.tag }}"
+        imagePullPolicy: {{ default .Values.gateway.image.pullPolicy .Values.knowledgeWorker.image.pullPolicy }}
+        command:
+        - python
+        - -m
+        - apps.gateway.knowledge_worker_readiness
+        env:
+        - name: DB_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "moduly.configMapName" . }}
+              key: DB_HOST
+        - name: DB_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "moduly.configMapName" . }}
+              key: DB_PORT
+        - name: DB_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "moduly.configMapName" . }}
+              key: DB_NAME
+        - name: DB_USER
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "moduly.configMapName" . }}
+              key: DB_USER
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "moduly.secretName" . }}
+              key: DB_PASSWORD
+        {{- if .Values.secrets.encryptionKey }}
+        - name: ENCRYPTION_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "moduly.secretName" . }}
+              key: ENCRYPTION_KEY
+        {{- end }}
+        {{- if .Values.secrets.llmCredentialEncryptionKeys }}
+        - name: LLM_CREDENTIAL_ENCRYPTION_KEYS
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "moduly.secretName" . }}
+              key: LLM_CREDENTIAL_ENCRYPTION_KEYS
+        - name: LLM_CREDENTIAL_ACTIVE_KEY_VERSION
+          value: {{ .Values.secrets.llmCredentialActiveKeyVersion | default "v1" | quote }}
+        {{- end }}
+      containers:
+      - name: knowledge-worker
+        image: "{{ default .Values.gateway.image.repository .Values.knowledgeWorker.image.repository }}:{{ default (.Values.gateway.image.tag | default .Chart.AppVersion) .Values.knowledgeWorker.image.tag }}"
+        imagePullPolicy: {{ default .Values.gateway.image.pullPolicy .Values.knowledgeWorker.image.pullPolicy }}
+        command:
+        - celery
+        args:
+        - -A
+        - apps.gateway.knowledge_worker:app
+        - worker
+        - --loglevel=info
+        - --queues=knowledge
+        - --hostname=knowledge@%h
+        - --concurrency={{ .Values.knowledgeWorker.concurrency }}
+        - --prefetch-multiplier=1
+        env:
+        {{- include "moduly.outboundProxyEnv" (dict "context" . "port" .Values.egressProxy.service.httpsPort) | nindent 8 }}
+        - name: CELERY_WORKER_ROLE
+          value: knowledge
+        - name: DB_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "moduly.configMapName" . }}
+              key: DB_HOST
+        - name: DB_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "moduly.configMapName" . }}
+              key: DB_PORT
+        - name: DB_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "moduly.configMapName" . }}
+              key: DB_NAME
+        - name: DB_USER
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "moduly.configMapName" . }}
+              key: DB_USER
+        - name: DB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "moduly.secretName" . }}
+              key: DB_PASSWORD
+        - name: REDIS_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "moduly.configMapName" . }}
+              key: REDIS_HOST
+        - name: REDIS_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "moduly.configMapName" . }}
+              key: REDIS_PORT
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "moduly.secretName" . }}
+              key: REDIS_PASSWORD
+        - name: REDIS_BROKER_DB
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "moduly.configMapName" . }}
+              key: REDIS_BROKER_DB
+        - name: REDIS_BACKEND_DB
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "moduly.configMapName" . }}
+              key: REDIS_BACKEND_DB
+        - name: STORAGE_TYPE
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "moduly.configMapName" . }}
+              key: STORAGE_TYPE
+        {{- if eq $storageType "CLOUD" }}
+        - name: S3_BUCKET_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "moduly.configMapName" . }}
+              key: S3_BUCKET_NAME
+        - name: AWS_REGION
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "moduly.configMapName" . }}
+              key: AWS_REGION
+        {{- end }}
+        - name: NODE_ENV
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "moduly.configMapName" . }}
+              key: NODE_ENV
+        {{- if .Values.secrets.masterKey }}
+        - name: MASTER_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "moduly.secretName" . }}
+              key: MASTER_KEY
+        {{- end }}
+        {{- if .Values.secrets.encryptionKey }}
+        - name: ENCRYPTION_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "moduly.secretName" . }}
+              key: ENCRYPTION_KEY
+        {{- end }}
+        {{- if .Values.secrets.llmCredentialEncryptionKeys }}
+        - name: LLM_CREDENTIAL_ENCRYPTION_KEYS
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "moduly.secretName" . }}
+              key: LLM_CREDENTIAL_ENCRYPTION_KEYS
+        - name: LLM_CREDENTIAL_ACTIVE_KEY_VERSION
+          value: {{ .Values.secrets.llmCredentialActiveKeyVersion | default "v1" | quote }}
+        {{- end }}
+        resources:
+          {{- toYaml .Values.knowledgeWorker.resources | nindent 10 }}
+        readinessProbe:
+          exec:
+            command:
+            - python
+            - -m
+            - apps.gateway.knowledge_worker_health
+          initialDelaySeconds: 2
+          periodSeconds: 15
+          timeoutSeconds: 5
+          failureThreshold: 3
+          successThreshold: 1
+        {{- if and (eq $storageType "LOCAL") .Values.knowledgeWorker.localStorage.enabled }}
+        volumeMounts:
+        - name: knowledge-uploads
+          mountPath: /app/uploads
+        {{- end }}
+      {{- if and (eq $storageType "LOCAL") .Values.knowledgeWorker.localStorage.enabled }}
+      volumes:
+      - name: knowledge-uploads
+        persistentVolumeClaim:
+          claimName: {{ include "moduly.knowledgeUploadClaimName" . }}
+      {{- end }}
+{{- end }}

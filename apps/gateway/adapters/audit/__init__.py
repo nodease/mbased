@@ -1,0 +1,1 @@
+"""Audit recording Gateway adapters."""

@@ -1,0 +1,5 @@
+{{/*
+Schedule dispatch mode is a chart-wide deployment contract. Keep this
+validation independent from optional workload templates.
+*/}}
+{{- include "moduly.validateScheduleDispatchMode" . -}}

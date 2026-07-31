@@ -1,3 +1,4 @@
+# ruff: noqa: E402
 """
 Workflow-Engine Celery 앱 설정
 """
@@ -39,9 +40,17 @@ if ENV_PATH.exists():
     load_dotenv(dotenv_path=ENV_PATH, override=False)
 
 from apps.shared.celery_app import celery_app
+from apps.workflow_engine.composition.external_effect_logging import (
+    configure_external_effect_transport_logging,
+)
+
+configure_external_effect_transport_logging()
+
+from apps.workflow_engine import external_effect_startup  # noqa: F401, E402
 
 # Celery가 tasks 모듈을 인식하도록 import
 from apps.workflow_engine import tasks  # noqa: F401
+from apps.workflow_engine import knowledge_collection_sync_tasks  # noqa: F401
 
 # Celery 앱을 apps.shared에서 재사용
 __all__ = ["celery_app"]

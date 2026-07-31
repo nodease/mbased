@@ -1,10 +1,23 @@
+import logging
 from typing import Any, Dict, List, Literal, Optional
 
 from jinja2 import BaseLoader, Environment, TemplateSyntaxError, UndefinedError
 from pydantic import BaseModel, Field
 
+from apps.shared.domain.workflow_execution_identity import InvocationSegment
+from apps.shared.domain.workflow_graph import (
+    WorkflowGraphValidationError,
+    validate_loop_subgraph,
+)
+from apps.workflow_engine.domain.external_effect import ExternalEffectError
+from apps.workflow_engine.workflow.core.runtime_dependencies import (
+    WorkflowRuntimeDependencies,
+)
 from apps.workflow_engine.workflow.nodes.base.entities import BaseNodeData
 from apps.workflow_engine.workflow.nodes.base.node import Node
+
+
+logger = logging.getLogger(__name__)
 
 
 class LoopNodeInput(BaseModel):
@@ -59,7 +72,14 @@ class LoopNode(Node[LoopNodeData]):
             loader=BaseLoader(),
             autoescape=False,  # 자동 이스케이프 비활성화
         )
-        self._subgraph_engine = None  # 재사용할 엔진
+        self._subgraph_engine = None
+        self._runtime_dependencies: WorkflowRuntimeDependencies | None = None
+
+    def bind_runtime_dependencies(
+        self,
+        runtime_dependencies: WorkflowRuntimeDependencies,
+    ) -> None:
+        self._runtime_dependencies = runtime_dependencies
 
     def _render_template(self, template: str, context: Dict[str, Any]) -> Any:
         """
@@ -111,9 +131,14 @@ class LoopNode(Node[LoopNodeData]):
         # 1. 서브그래프 검증
         if not self.data.subGraph or not self.data.subGraph.get("nodes"):
             return {"error": "No subgraph defined", "results": []}
+        try:
+            entry_node_id = validate_loop_subgraph(self.data.subGraph)
+        except WorkflowGraphValidationError:
+            raise ValueError("workflow_graph_invalid") from None
 
         # 2. 하이브리드 입력 매핑
         mapped_inputs = self._map_inputs_hybrid(inputs)
+        subgraph_inputs = {**inputs, **mapped_inputs}
 
         # 3. 반복 대상 배열 가져오기
         array_to_iterate = self._get_iteration_array(inputs, mapped_inputs)
@@ -133,13 +158,19 @@ class LoopNode(Node[LoopNodeData]):
             try:
                 # 변수 컨텍스트 구축 (모든 외부 변수 + loop 변수)
                 context = self._build_variable_context(
-                    inputs, item=item, index=iteration_count
+                    subgraph_inputs, item=item, index=iteration_count
                 )
 
                 # 서브그래프 실행 (스코프 기반, 동기)
-                result = self._execute_subgraph_scoped(context)
+                result = self._execute_subgraph_scoped(
+                    context,
+                    iteration_index=iteration_count,
+                    entry_node_id=entry_node_id,
+                )
                 results.append(result)
 
+            except ExternalEffectError:
+                raise
             except Exception as e:
                 # 오류 처리 전략 적용
                 if self.data.error_strategy == "end":
@@ -175,7 +206,13 @@ class LoopNode(Node[LoopNodeData]):
             # 암시적: 모든 외부 변수 전달
             return inputs.copy()
 
-    def _execute_subgraph_scoped(self, context: Dict[str, Any]) -> Dict[str, Any]:
+    def _execute_subgraph_scoped(
+        self,
+        context: Dict[str, Any],
+        *,
+        iteration_index: int,
+        entry_node_id: str,
+    ) -> Dict[str, Any]:
         """
         스코프 기반 서브그래프 실행.
 
@@ -185,26 +222,51 @@ class LoopNode(Node[LoopNodeData]):
         """
         from apps.workflow_engine.workflow.core.workflow_engine import WorkflowEngine
 
-        # 첫 실행 시에만 엔진 생성
-        if self._subgraph_engine is None:
-            self._subgraph_engine = WorkflowEngine(
-                graph={
-                    "nodes": self.data.subGraph["nodes"],
-                    "edges": self.data.subGraph.get("edges", []),
-                },
-                user_input=context,
-                execution_context=self.execution_context.copy(),
-                is_deployed=False,
-                db=self.execution_context.get("db"),
-                workflow_timeout=300,
-            )
-
-        # 컨텍스트 업데이트 (스코프 변경)
-        self._subgraph_engine.user_input = context
-
-        # 실행
-        result = self._subgraph_engine.execute()
-        return result
+        control = self._runtime_control
+        engine = WorkflowEngine.create_child(
+            graph={
+                "nodes": self.data.subGraph["nodes"],
+                "edges": self.data.subGraph.get("edges", []),
+            },
+            user_input=context,
+            execution_context=self.execution_context,
+            runtime_control=control,
+            runtime_dependencies=self._runtime_dependencies,
+            invocation_segment=InvocationSegment(
+                "loop",
+                self.id,
+                str(iteration_index),
+            ),
+            is_deployed=False,
+            db=self.execution_context.get("db"),
+            workflow_timeout=300,
+            entry_node_id=entry_node_id,
+            workflow_node_bindings=(
+                control.workflow_node_bindings if control is not None else None
+            ),
+            binding_container_path=(
+                control.binding_container_path + (("loop", self.id),)
+                if control is not None
+                else ()
+            ),
+        )
+        self._subgraph_engine = engine
+        try:
+            result = engine.execute()
+            if engine._external_effect_output_sensitive:
+                self._trace_metadata = {
+                    "external_effect_output": {"sensitive": True}
+                }
+            return result
+        finally:
+            try:
+                engine.cleanup()
+            except Exception as exc:
+                logger.warning(
+                    "Loop child cleanup failed: error_type=%s",
+                    type(exc).__name__,
+                )
+            self._subgraph_engine = None
 
     def _resolve_variable(
         self, value_selector: List[str], inputs: Dict[str, Any]

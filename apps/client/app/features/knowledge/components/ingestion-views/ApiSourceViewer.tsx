@@ -1,91 +1,44 @@
-import React, { useState } from 'react';
+import { DocumentApiEditConfigSummary } from '@/app/features/knowledge/types/Knowledge';
 
 interface ApiSourceViewerProps {
-  apiOriginalData: any;
-  apiConfig?: any;
+  apiConfig?: DocumentApiEditConfigSummary | null;
 }
 
-// JSON 트리 뷰어 컴포넌트
-const JsonTreeViewer = ({ data }: { data: any }) => {
-  if (data === null) return <span className="text-gray-400">null</span>;
-  if (typeof data !== 'object') {
-    const isString = typeof data === 'string';
-    return (
-      <span
-        className={
-          isString
-            ? 'text-green-600 dark:text-green-400'
-            : 'text-blue-600 dark:text-blue-400'
-        }
-      >
-        {isString ? `"${data}"` : String(data)}
-      </span>
-    );
-  }
-  // eslint-disable-next-line react-hooks/rules-of-hooks
-  const [isExpanded, setIsExpanded] = useState(true);
-  const isArray = Array.isArray(data);
-  const keys = Object.keys(data);
-  const isEmpty = keys.length === 0;
-  if (isEmpty)
-    return <span className="text-gray-500">{isArray ? '[]' : '{}'}</span>;
+export default function ApiSourceViewer({ apiConfig }: ApiSourceViewerProps) {
   return (
-    <div className="font-mono text-xs ml-4">
-      <div
-        className="flex items-center gap-1 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700/50 rounded px-1"
-        onClick={(e) => {
-          e.stopPropagation();
-          setIsExpanded(!isExpanded);
-        }}
-      >
-        <span className="text-gray-500 font-bold">{isArray ? '[' : '{'}</span>
-        {!isExpanded && <span className="text-gray-400 m-1">...</span>}
-        {!isExpanded && (
-          <span className="text-gray-500 font-bold">{isArray ? ']' : '}'}</span>
-        )}
-        {!isExpanded && (
-          <span className="text-gray-400 ml-2 text-[10px]">
-            {keys.length} items
-          </span>
-        )}
-      </div>
-      {isExpanded && (
-        <div className="border-l border-gray-200 dark:border-gray-700 pl-2">
-          {keys.map((key, idx) => (
-            <div key={key} className="my-1 flex items-start">
-              <span className="text-purple-600 dark:text-purple-400 mr-1">
-                {key}:
-              </span>
-              <JsonTreeViewer data={data[key]} />
-              {idx < keys.length - 1 && (
-                <span className="text-gray-400">,</span>
-              )}
-            </div>
-          ))}
-          <div className="text-gray-500 font-bold">{isArray ? ']' : '}'}</div>
-        </div>
+    <div className="w-full h-full bg-white rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 dark:bg-gray-800 overflow-auto p-6">
+      {apiConfig ? (
+        <dl className="grid grid-cols-1 gap-4 text-sm sm:grid-cols-2">
+          <div>
+            <dt className="text-gray-500 dark:text-gray-400">소스</dt>
+            <dd className="mt-1 font-medium text-gray-900 dark:text-gray-100">
+              {apiConfig.safe_label}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-gray-500 dark:text-gray-400">요청 방식</dt>
+            <dd className="mt-1 font-medium text-gray-900 dark:text-gray-100">
+              {apiConfig.method}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-gray-500 dark:text-gray-400">헤더 설정</dt>
+            <dd className="mt-1 font-medium text-gray-900 dark:text-gray-100">
+              {apiConfig.has_headers ? '설정됨' : '없음'}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-gray-500 dark:text-gray-400">본문 설정</dt>
+            <dd className="mt-1 font-medium text-gray-900 dark:text-gray-100">
+              {apiConfig.has_body ? '설정됨' : '없음'}
+            </dd>
+          </div>
+        </dl>
+      ) : (
+        <p className="text-sm text-gray-600 dark:text-gray-300">
+          API 소스 설정은 수정 권한과 안전한 설정 복원이 확인된 경우에만 표시됩니다.
+        </p>
       )}
-    </div>
-  );
-};
-
-export default function ApiSourceViewer({
-  apiOriginalData,
-  apiConfig,
-}: ApiSourceViewerProps) {
-  return (
-    <div className="w-full h-full bg-white rounded-lg shadow-sm border border-gray-200 dark:border-gray-700 dark:bg-gray-800 overflow-auto p-4">
-      <div className="p-4">
-        {apiOriginalData ? (
-          <JsonTreeViewer data={apiOriginalData} />
-        ) : (
-          <pre className="whitespace-pre-wrap text-sm font-mono text-gray-800 dark:text-gray-200">
-            {apiConfig
-              ? JSON.stringify(apiConfig, null, 2)
-              : 'API 데이터를 불러오는 중이거나 미리보기가 없습니다.'}
-          </pre>
-        )}
-      </div>
     </div>
   );
 }

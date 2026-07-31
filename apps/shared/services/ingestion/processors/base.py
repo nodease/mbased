@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
+from uuid import UUID
 
 from pydantic import BaseModel
 
@@ -23,16 +24,23 @@ class BaseProcessor(ABC):
     Strategy Pattern의 Context 역할을 하는 Factory에 의해 호출됩니다.
     """
 
-    def __init__(self, db_session=None, user_id=None):
+    def __init__(
+        self,
+        db_session=None,
+        user_id=None,
+        organization_id: Optional[UUID] = None,
+    ):
         """
         공통적으로 필요한 DB 세션과 사용자 ID를 초기화합니다.
 
         Args:
             db_session: Database Session (SQLAlchemy)
             user_id: 요청한 사용자의 UUID (권한 확인 및 로깅용)
+            organization_id: 검증된 active organization UUID
         """
         self.db = db_session
         self.user_id = user_id
+        self.organization_id = organization_id
 
     @abstractmethod
     def process(self, source_config: Dict[str, Any]) -> ProcessingResult:

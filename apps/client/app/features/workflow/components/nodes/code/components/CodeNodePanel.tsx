@@ -1,13 +1,14 @@
 import { useCallback, useState, useMemo } from 'react';
 import { useWorkflowStore } from '@/app/features/workflow/store/useWorkflowStore';
 import Editor from '@monaco-editor/react';
-import { Maximize2, Minimize2, Wand2, AlertTriangle } from 'lucide-react';
+import { Maximize2, Minimize2, Wand2 } from 'lucide-react';
 import { CodeNodeData, CodeNodeInput } from '../../../../types/Nodes';
 import { getUpstreamNodes } from '../../../../utils/getUpstreamNodes';
 import { CollapsibleSection } from '../../ui/CollapsibleSection';
 import { ReferencedVariablesControl } from '../../ui/ReferencedVariablesControl';
 import { CodeWizardModal } from '../../../modals/CodeWizardModal';
 import { IncompleteVariablesAlert } from '../../../ui/IncompleteVariablesAlert';
+import { resolveWorkflowWizardOrganizationId } from '@/app/features/workflow/utils/resolveWorkflowWizardOrganizationId';
 
 interface CodeNodePanelProps {
   nodeId: string;
@@ -33,7 +34,12 @@ const DEFAULT_CODE = `def main(inputs):
 `;
 
 export function CodeNodePanel({ nodeId, data }: CodeNodePanelProps) {
-  const { updateNodeData, nodes, edges } = useWorkflowStore();
+  const { updateNodeData, nodes, edges, activeWorkflowId, workflowAccess } =
+    useWorkflowStore();
+  const wizardOrganizationId = resolveWorkflowWizardOrganizationId(
+    workflowAccess,
+    activeWorkflowId,
+  );
   const [isExpanded, setIsExpanded] = useState(false);
   const [isCodeWizardOpen, setIsCodeWizardOpen] = useState(false);
 
@@ -244,7 +250,13 @@ export function CodeNodePanel({ nodeId, data }: CodeNodePanelProps) {
 
       {/* 확장 모달(코드 에디터) */}
       {isExpanded && (
-        <div className="fixed inset-0 z-50 bg-black bg-opacity-50 flex items-center justify-center p-8">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Python 코드 편집기"
+          data-canvas-shortcut-scope="blocked"
+          className="fixed inset-0 z-50 bg-black bg-opacity-50 flex items-center justify-center p-8"
+        >
           <div className="bg-white rounded-lg shadow-2xl w-full max-w-6xl h-[80vh] flex flex-col">
             {/* 모달 헤더 */}
             <div className="px-6 py-4 bg-gray-800 rounded-t-lg flex items-center justify-between">
@@ -307,6 +319,7 @@ export function CodeNodePanel({ nodeId, data }: CodeNodePanelProps) {
         isOpen={isCodeWizardOpen}
         onClose={() => setIsCodeWizardOpen(false)}
         inputVariables={inputVariableNames}
+        organizationId={wizardOrganizationId}
         onApply={handleApplyCode}
       />
     </div>

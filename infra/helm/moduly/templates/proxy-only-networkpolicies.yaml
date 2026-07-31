@@ -1,0 +1,416 @@
+{{- if and .Values.egressProxy.enabled .Values.egressProxy.networkPolicy.enabled .Values.egressProxy.networkPolicy.enforced }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "moduly.fullname" . }}-egress-proxy-ingress
+  labels:
+    {{- include "moduly.componentLabels" (dict "component" "egress-proxy" "context" .) | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "moduly.componentSelectorLabels" (dict "component" "egress-proxy" "context" .) | nindent 6 }}
+      nodease.io/egress-mode: proxy-v1
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "moduly.componentSelectorLabels" (dict "component" "gateway" "context" .) | nindent 14 }}
+              {{- include "moduly.egressWorkloadSelectorLabel" . | nindent 14 }}
+        - podSelector:
+            matchLabels:
+              {{- include "moduly.componentSelectorLabels" (dict "component" "knowledge-worker" "context" .) | nindent 14 }}
+              {{- include "moduly.egressWorkloadSelectorLabel" . | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: 3128
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "moduly.componentSelectorLabels" (dict "component" "worker" "context" .) | nindent 14 }}
+              {{- include "moduly.egressWorkloadSelectorLabel" . | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: 3129
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "moduly.componentSelectorLabels" (dict "component" "gateway" "context" .) | nindent 14 }}
+              {{- include "moduly.egressWorkloadSelectorLabel" . | nindent 14 }}
+        - podSelector:
+            matchLabels:
+              {{- include "moduly.componentSelectorLabels" (dict "component" "knowledge-worker" "context" .) | nindent 14 }}
+              {{- include "moduly.egressWorkloadSelectorLabel" . | nindent 14 }}
+        - podSelector:
+            matchLabels:
+              {{- include "moduly.componentSelectorLabels" (dict "component" "worker" "context" .) | nindent 14 }}
+              {{- include "moduly.egressWorkloadSelectorLabel" . | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: 3130
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "moduly.fullname" . }}-gateway-proxy-only-egress
+  labels:
+    {{- include "moduly.componentLabels" (dict "component" "gateway" "context" .) | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "moduly.componentSelectorLabels" (dict "component" "gateway" "context" .) | nindent 6 }}
+      {{- include "moduly.egressWorkloadSelectorLabel" . | nindent 6 }}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        {{- include "moduly.dnsEgressPeer" . | nindent 8 }}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "moduly.componentSelectorLabels" (dict "component" "egress-proxy" "context" .) | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: 3128
+        - protocol: TCP
+          port: 3130
+    {{- if .Values.postgresql.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: {{ .Release.Name }}
+              app.kubernetes.io/name: postgresql
+      ports:
+        - protocol: TCP
+          port: {{ include "moduly.postgresql.port" . }}
+    {{- end }}
+    {{- if .Values.redis.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: {{ .Release.Name }}
+              app.kubernetes.io/name: redis
+      ports:
+        - protocol: TCP
+          port: 6379
+    {{- end }}
+    {{- if .Values.sandbox.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "moduly.componentSelectorLabels" (dict "component" "sandbox" "context" .) | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: 8194
+    {{- end }}
+    {{- range .Values.worker.networkPolicy.externalDatabaseCidrs }}
+    - to:
+        - ipBlock:
+            cidr: {{ . | quote }}
+      ports:
+        - protocol: TCP
+          port: {{ include "moduly.postgresql.port" $ }}
+    {{- end }}
+    {{- range .Values.worker.networkPolicy.externalRedisCidrs }}
+    - to:
+        - ipBlock:
+            cidr: {{ . | quote }}
+      ports:
+        - protocol: TCP
+          port: 6379
+    {{- end }}
+    {{- range .Values.worker.networkPolicy.externalSandboxCidrs }}
+    - to:
+        - ipBlock:
+            cidr: {{ . | quote }}
+      ports:
+        - protocol: TCP
+          port: 8194
+    {{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "moduly.fullname" . }}-knowledge-worker-proxy-only-egress
+  labels:
+    {{- include "moduly.componentLabels" (dict "component" "knowledge-worker" "context" .) | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "moduly.componentSelectorLabels" (dict "component" "knowledge-worker" "context" .) | nindent 6 }}
+      {{- include "moduly.egressWorkloadSelectorLabel" . | nindent 6 }}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        {{- include "moduly.dnsEgressPeer" . | nindent 8 }}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "moduly.componentSelectorLabels" (dict "component" "egress-proxy" "context" .) | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: 3128
+        - protocol: TCP
+          port: 3130
+    {{- if .Values.postgresql.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: {{ .Release.Name }}
+              app.kubernetes.io/name: postgresql
+      ports:
+        - protocol: TCP
+          port: {{ include "moduly.postgresql.port" . }}
+    {{- end }}
+    {{- if .Values.redis.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: {{ .Release.Name }}
+              app.kubernetes.io/name: redis
+      ports:
+        - protocol: TCP
+          port: 6379
+    {{- end }}
+    {{- range .Values.worker.networkPolicy.externalDatabaseCidrs }}
+    - to:
+        - ipBlock:
+            cidr: {{ . | quote }}
+      ports:
+        - protocol: TCP
+          port: {{ include "moduly.postgresql.port" $ }}
+    {{- end }}
+    {{- range .Values.worker.networkPolicy.externalRedisCidrs }}
+    - to:
+        - ipBlock:
+            cidr: {{ . | quote }}
+      ports:
+        - protocol: TCP
+          port: 6379
+    {{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "moduly.fullname" . }}-logger-internal-only-egress
+  labels:
+    {{- include "moduly.componentLabels" (dict "component" "logger" "context" .) | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "moduly.componentSelectorLabels" (dict "component" "logger" "context" .) | nindent 6 }}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        {{- include "moduly.dnsEgressPeer" . | nindent 8 }}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    {{- if .Values.postgresql.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: {{ .Release.Name }}
+              app.kubernetes.io/name: postgresql
+      ports:
+        - protocol: TCP
+          port: {{ include "moduly.postgresql.port" . }}
+    {{- end }}
+    {{- if .Values.redis.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: {{ .Release.Name }}
+              app.kubernetes.io/name: redis
+      ports:
+        - protocol: TCP
+          port: 6379
+    {{- end }}
+    {{- range .Values.worker.networkPolicy.externalDatabaseCidrs }}
+    - to:
+        - ipBlock:
+            cidr: {{ . | quote }}
+      ports:
+        - protocol: TCP
+          port: {{ include "moduly.postgresql.port" $ }}
+    {{- end }}
+    {{- range .Values.worker.networkPolicy.externalRedisCidrs }}
+    - to:
+        - ipBlock:
+            cidr: {{ . | quote }}
+      ports:
+        - protocol: TCP
+          port: 6379
+    {{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "moduly.fullname" . }}-beat-internal-only-egress
+  labels:
+    {{- include "moduly.componentLabels" (dict "component" "beat" "context" .) | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "moduly.componentSelectorLabels" (dict "component" "beat" "context" .) | nindent 6 }}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        {{- include "moduly.dnsEgressPeer" . | nindent 8 }}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    {{- if .Values.redis.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: {{ .Release.Name }}
+              app.kubernetes.io/name: redis
+      ports:
+        - protocol: TCP
+          port: 6379
+    {{- end }}
+    {{- range .Values.worker.networkPolicy.externalRedisCidrs }}
+    - to:
+        - ipBlock:
+            cidr: {{ . | quote }}
+      ports:
+        - protocol: TCP
+          port: 6379
+    {{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "moduly.fullname" . }}-frontend-internal-only-egress
+  labels:
+    {{- include "moduly.componentLabels" (dict "component" "frontend" "context" .) | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "moduly.componentSelectorLabels" (dict "component" "frontend" "context" .) | nindent 6 }}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        {{- include "moduly.dnsEgressPeer" . | nindent 8 }}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    {{- if .Values.gateway.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "moduly.componentSelectorLabels" (dict "component" "gateway" "context" .) | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.gateway.service.port }}
+    {{- end }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "moduly.fullname" . }}-egress-proxy-egress
+  labels:
+    {{- include "moduly.componentLabels" (dict "component" "egress-proxy" "context" .) | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "moduly.componentSelectorLabels" (dict "component" "egress-proxy" "context" .) | nindent 6 }}
+      nodease.io/egress-mode: proxy-v1
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        {{- include "moduly.dnsEgressPeer" . | nindent 8 }}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 0.0.0.0/8
+              - 10.0.0.0/8
+              - 100.64.0.0/10
+              - 127.0.0.0/8
+              - 169.254.0.0/16
+              - 172.16.0.0/12
+              - 192.0.0.0/24
+              - 192.0.2.0/24
+              - 192.88.99.0/24
+              - 192.168.0.0/16
+              - 198.18.0.0/15
+              - 198.51.100.0/24
+              - 203.0.113.0/24
+              - 224.0.0.0/4
+              - 240.0.0.0/4
+      ports:
+        {{- range .Values.egressProxy.connectorAllowedPorts }}
+        - protocol: TCP
+          port: {{ . }}
+        {{- end }}
+        - protocol: TCP
+          port: 80
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 143
+        - protocol: TCP
+          port: 993
+    - to:
+        - ipBlock:
+            cidr: ::/0
+            except:
+              - ::/96
+              - ::/128
+              - ::1/128
+              - 64:ff9b::/96
+              - 64:ff9b:1::/48
+              - 100::/64
+              - 2001::/23
+              - 2001:db8::/32
+              - 2002::/16
+              - 3ffe::/16
+              - 3fff::/20
+              - 5f00::/16
+              - fc00::/7
+              - fe80::/10
+              - fec0::/10
+              - ff00::/8
+      ports:
+        {{- range .Values.egressProxy.connectorAllowedPorts }}
+        - protocol: TCP
+          port: {{ . }}
+        {{- end }}
+        - protocol: TCP
+          port: 80
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 143
+        - protocol: TCP
+          port: 993
+{{- end }}

@@ -9,8 +9,6 @@ import {
   Plus,
   Copy,
   Trash2,
-  Eye,
-  EyeOff,
   HelpCircle,
   ArrowRight,
 } from 'lucide-react';
@@ -19,6 +17,7 @@ import { appApi } from '@/app/features/app/api/appApi';
 import { webhookApi } from '@/app/features/workflow/api/webhookApi';
 import { toast } from 'sonner';
 import { PayloadViewerModal } from './PayloadViewerModal';
+import { AppAuthSecretControl } from '@/app/features/app/components/AppAuthSecretControl';
 
 interface WebhookTriggerNodePanelProps {
   nodeId: string;
@@ -101,12 +100,6 @@ export function WebhookTriggerNodePanel({
 
   const [isCaptureMode, setIsCaptureMode] = useState(false);
   const [webhookUrl, setWebhookUrl] = useState<string>('');
-  const [webhookUrlWithToken, setWebhookUrlWithToken] = useState<string>('');
-  const [authSecret, setAuthSecret] = useState<string>('');
-  const [showSecret, setShowSecret] = useState(false);
-  const [urlFormat, setUrlFormat] = useState<'integrated' | 'standard'>(
-    'standard',
-  ); // 통합 URL vs 표준 API
   const [isLoadingUrl, setIsLoadingUrl] = useState(true);
   const [urlSlug, setUrlSlug] = useState<string>('');
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -118,6 +111,10 @@ export function WebhookTriggerNodePanel({
   // 폴링 interval과 timeout을 저장하기 위한 ref
   const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const captureSessionRef = useRef<{
+    urlSlug: string;
+    captureId: string;
+  } | null>(null);
 
   // 현재 워크플로우의 appId 가져오기
   const currentWorkflow = workflows.find((w) => w.id === activeWorkflowId);
@@ -137,18 +134,9 @@ export function WebhookTriggerNodePanel({
         if (app.url_slug) {
           setUrlSlug(app.url_slug);
           const baseUrl = window.location.origin;
-          const secret = app.auth_secret || '[auth-secret]';
 
-          // 분리 방식: URL만
           const url = `${baseUrl}/api/v1/hooks/${app.url_slug}`;
           setWebhookUrl(url);
-
-          // 통합 방식: URL + Query Parameter
-          const urlWithToken = `${baseUrl}/api/v1/hooks/${app.url_slug}?token=${secret}`;
-          setWebhookUrlWithToken(urlWithToken);
-
-          // Secret 저장
-          setAuthSecret(secret);
         } else {
           setWebhookUrl('URL Slug가 없습니다');
         }
@@ -163,6 +151,56 @@ export function WebhookTriggerNodePanel({
     fetchAppAndGenerateUrl();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    return () => {
+      clearCaptureTimers();
+      const session = captureSessionRef.current;
+      captureSessionRef.current = null;
+      if (session) {
+        void webhookApi
+          .cancelCapture(session.urlSlug, session.captureId)
+          .catch((error) => {
+            console.error('Failed to cancel capture on unmount:', error);
+          });
+      }
+    };
+  }, []);
+
+  const toViewerPayload = (payload: unknown): Record<string, unknown> => {
+    if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+      return payload as Record<string, unknown>;
+    }
+    return { payload };
+  };
+
+  const clearCaptureTimers = () => {
+    if (pollIntervalRef.current) {
+      clearInterval(pollIntervalRef.current);
+      pollIntervalRef.current = null;
+    }
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+  };
+
+  const cancelActiveCapture = async () => {
+    const session = captureSessionRef.current;
+    captureSessionRef.current = null;
+    clearCaptureTimers();
+    setIsCaptureMode(false);
+
+    if (!session) {
+      return;
+    }
+
+    try {
+      await webhookApi.cancelCapture(session.urlSlug, session.captureId);
+    } catch (error) {
+      console.error('Failed to cancel capture:', error);
+    }
+  };
 
   const handleAddMapping = () => {
     const newMapping: VariableMapping = {
@@ -201,16 +239,23 @@ export function WebhookTriggerNodePanel({
     }
 
     try {
-      await webhookApi.startCapture(urlSlug);
+      const capture = await webhookApi.startCapture(urlSlug);
+      captureSessionRef.current = {
+        urlSlug,
+        captureId: capture.capture_id,
+      };
       setIsCaptureMode(true);
 
       // 폴링 시작: 2초마다 상태 확인
       pollIntervalRef.current = setInterval(async () => {
         try {
-          const status = await webhookApi.getCaptureStatus(urlSlug);
-          if (status.status === 'captured' && status.payload) {
+          const status = await webhookApi.getCaptureStatus(
+            urlSlug,
+            capture.capture_id,
+          );
+          if (status.status === 'captured' && status.payload !== undefined) {
             // Payload 캡처 성공
-            setCapturedPayload(status.payload);
+            setCapturedPayload(toViewerPayload(status.payload));
 
             // 노드 데이터에 캡처된 Paylaod 저장 (테스트용)
             updateNodeData(nodeId, {
@@ -219,7 +264,9 @@ export function WebhookTriggerNodePanel({
             });
 
             setIsModalOpen(true);
-            handleCancelCapture();
+            captureSessionRef.current = null;
+            clearCaptureTimers();
+            setIsCaptureMode(false);
             toast.success('Webhook Payload가 캡처되었습니다!', {
               duration: 3000,
             });
@@ -231,7 +278,7 @@ export function WebhookTriggerNodePanel({
 
       // 30초 후 자동 취소
       timeoutRef.current = setTimeout(() => {
-        handleCancelCapture();
+        void cancelActiveCapture();
       }, 30000);
     } catch (error) {
       console.error('Failed to start capture:', error);
@@ -240,19 +287,10 @@ export function WebhookTriggerNodePanel({
   };
 
   const handleCancelCapture = () => {
-    // Interval과 timeout 정리
-    if (pollIntervalRef.current) {
-      clearInterval(pollIntervalRef.current);
-      pollIntervalRef.current = null;
-    }
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current);
-      timeoutRef.current = null;
-    }
-    setIsCaptureMode(false);
+    void cancelActiveCapture();
   };
 
-  const handlePayloadSelect = (path: string, value: any) => {
+  const handlePayloadSelect = (path: string) => {
     // 변수명 자동 생성: 경로의 마지막 부분 (e.g. issue.fields.summary -> summary)
     // 숫자로만 된 건 제외하거나 prefix 붙임 (e.g. issues[0] -> issues_0)
     let varName = path.split('.').pop() || 'variable';
@@ -280,12 +318,18 @@ export function WebhookTriggerNodePanel({
     toast.success(`변수 '${finalVarName}' (경로: ${path}) 추가됨!`);
   };
 
+  const modalPayload =
+    capturedPayload ??
+    (data.captured_payload === undefined
+      ? null
+      : toViewerPayload(data.captured_payload));
+
   return (
     <>
       <PayloadViewerModal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
-        payload={capturedPayload}
+        payload={modalPayload}
         onSelect={handlePayloadSelect}
       />
       <div className="flex flex-col gap-2">
@@ -313,50 +357,6 @@ export function WebhookTriggerNodePanel({
           }
         >
           <div className="space-y-4">
-            {/* URL 형식 토글 */}
-            <div className="flex w-full rounded-md border border-gray-300 bg-gray-50 p-0.5">
-              <PortalTooltip
-                className="flex-1 flex"
-                content={
-                  <div>
-                    <strong className="text-purple-300">통합 URL:</strong> Jira,
-                    Slack 등 URL만 입력 가능한 서비스용 (인증키 포함)
-                  </div>
-                }
-              >
-                <button
-                  onClick={() => setUrlFormat('integrated')}
-                  className={`flex-1 px-4 py-1.5 text-xs font-medium rounded transition-colors ${
-                    urlFormat === 'integrated'
-                      ? 'bg-white text-gray-900 shadow-sm'
-                      : 'text-gray-600 hover:text-gray-900'
-                  }`}
-                >
-                  통합 URL
-                </button>
-              </PortalTooltip>
-              <PortalTooltip
-                className="flex-1 flex"
-                content={
-                  <div>
-                    <strong className="text-blue-300">표준 API:</strong> 자체
-                    개발, GitHub 등 보안과 헤더 설정이 필요한 환경용 (권장)
-                  </div>
-                }
-              >
-                <button
-                  onClick={() => setUrlFormat('standard')}
-                  className={`flex-1 px-4 py-1.5 text-xs font-medium rounded transition-colors ${
-                    urlFormat === 'standard'
-                      ? 'bg-white text-gray-900 shadow-sm'
-                      : 'text-gray-600 hover:text-gray-900'
-                  }`}
-                >
-                  표준 API
-                </button>
-              </PortalTooltip>
-            </div>
-
             {/* URL Display Area - HTTP Request Style */}
             <div className="pt-2">
               <label className="text-xs font-medium text-gray-700 mb-1.5 block">
@@ -367,21 +367,11 @@ export function WebhookTriggerNodePanel({
                   <textarea
                     readOnly
                     className="w-full rounded-md border border-gray-300 px-3 py-[7px] text-sm shadow-sm bg-gray-50 font-mono resize-none h-20 leading-[22px] focus:outline-none"
-                    value={
-                      isLoadingUrl
-                        ? 'URL 생성 중...'
-                        : urlFormat === 'integrated'
-                          ? webhookUrlWithToken
-                          : webhookUrl
-                    }
+                    value={isLoadingUrl ? 'URL 생성 중...' : webhookUrl}
                   />
                   <button
                     onClick={() => {
-                      const text =
-                        urlFormat === 'integrated'
-                          ? webhookUrlWithToken
-                          : webhookUrl;
-                      navigator.clipboard.writeText(text);
+                      navigator.clipboard.writeText(webhookUrl);
                       toast.success('URL이 복사되었습니다!');
                     }}
                     className="absolute top-2 right-2 p-1.5 hover:bg-gray-200 rounded transition-colors bg-white/50 backdrop-blur-sm"
@@ -393,45 +383,7 @@ export function WebhookTriggerNodePanel({
               </div>
             </div>
 
-            {/* Secret Key (Standard Only) */}
-            {urlFormat === 'standard' && (
-              <div className="flex flex-col gap-1">
-                <label className="text-xs font-medium text-gray-700">
-                  Secret Key
-                </label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type={showSecret ? 'text' : 'password'}
-                    value={isLoadingUrl ? '로딩 중...' : authSecret}
-                    readOnly
-                    className="flex-1 px-3 py-2 text-sm border rounded bg-gray-50 font-mono focus:outline-none"
-                  />
-                  <button
-                    onClick={() => setShowSecret(!showSecret)}
-                    disabled={isLoadingUrl}
-                    className="p-2 hover:bg-gray-100 rounded transition-colors disabled:opacity-50 border border-gray-200"
-                    title={showSecret ? 'Hide' : 'Show'}
-                  >
-                    {showSecret ? (
-                      <EyeOff className="w-4 h-4 text-gray-600" />
-                    ) : (
-                      <Eye className="w-4 h-4 text-gray-600" />
-                    )}
-                  </button>
-                  <button
-                    onClick={() => {
-                      navigator.clipboard.writeText(authSecret);
-                      toast.success('Secret Key가 복사되었습니다!');
-                    }}
-                    disabled={isLoadingUrl}
-                    className="p-2 hover:bg-gray-100 rounded transition-colors disabled:opacity-50 border border-gray-200"
-                    title="Copy Secret"
-                  >
-                    <Copy className="w-4 h-4 text-gray-600" />
-                  </button>
-                </div>
-              </div>
-            )}
+            {appId && <AppAuthSecretControl appId={appId} />}
 
             {/* 캡처 버튼 */}
             <div>
@@ -527,7 +479,7 @@ export function WebhookTriggerNodePanel({
                           )
                         }
                         placeholder="예: issue.key"
-                        className="w-full h-7 rounded border border-gray-300 px-2 text-xs text-gray-600 bg-white font-mono focus:border-blue-500 focus:outline-none placeholder:text-gray-400"
+                        className="w-full h-7 rounded border border-gray-300 px-2 text-xs text-gray-700 bg-white font-mono focus:border-blue-500 focus:outline-none placeholder:text-gray-500"
                       />
                     </div>
                   </div>

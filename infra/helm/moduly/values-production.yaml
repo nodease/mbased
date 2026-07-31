@@ -1,20 +1,60 @@
 # =============================================================================
-# Moduly Helm Chart - Production Values (AWS EKS Reference)
+# Moduly Helm Chart - Provider-neutral production reference
 # =============================================================================
-# This file contains example configuration for AWS EKS production deployment.
-# Use this as a reference and override specific values for your environment.
+# Provider-neutral production reference. Operators must supply environment-specific
+# storage, ingress, network, image, and secret values before deployment.
 #
 # Usage:
-#   helm install moduly ./infra/helm/moduly -f values-production.yaml
+#   helm install moduly ./infra/helm/moduly \
+#     -f values-production.yaml -f operator-values.yaml
 
 # Global settings
 global:
   imagePullPolicy: Always  # Always pull latest images in production
-  storageClass: "gp3"      # AWS EBS gp3 storage class
+  storageClass: ""  # Use the cluster default unless the operator selects one.
+
+# Intentionally incomplete until the operator supplies both coordinates.
+# CLOUD renders fail closed when bucketName or region is empty.
+storage:
+  type: "CLOUD"
+  bucketName: ""
+  region: ""
+
+egressProxy:
+  enabled: true
+  policyRevision: "proxy-v1"
+  replicaCount: 2
+  image:
+    repository: ubuntu/squid
+    tag: "6.6-24.04_edge"
+    digest: "sha256:8a3baed477e2c282ab8aa5edad442f69873246964f225c5c2ae8364b6610963c"
+    pullPolicy: IfNotPresent
+  networkPolicy:
+    enabled: true
+    enforced: true
+    enforcementPhase: "final"
+    # Supply the exact pod CIDRs in operator-values.yaml.
+    authorizedSourceCidrs: []
+    # Override when the production cluster DNS endpoint is not in kube-system.
+    dns:
+      namespace: "kube-system"
+      podSelectorLabels: {}
 
 # =============================================================================
 # Application Services
 # =============================================================================
+
+# Start production in disabled mode. Activate claim mode only after the
+# migration-first rollout and legacy task drain gate have passed.
+scheduleDispatch:
+  mode: "disabled"
+
+memoryPublicConversation:
+  enabled: false
+  purgeWorkerReady: false
+  replayBackupErasureMode: "unconfirmed"
+  capabilityHmacPrimaryVersion: ""
+  replayEncryptionPrimaryVersion: ""
 
 # Gateway (API Server)
 gateway:
@@ -22,7 +62,7 @@ gateway:
   replicaCount: 2  # Higher replica count for production
   
   image:
-    repository: 912894834396.dkr.ecr.ap-northeast-2.amazonaws.com/moduly-gateway
+    repository: ghcr.io/nodease/moduly-gateway
     tag: latest  # Use specific version tags in production
     pullPolicy: Always
   
@@ -39,21 +79,24 @@ gateway:
       memory: 1Gi
   
   env:
-    # Database configuration (using external RDS)
-    DB_HOST: "moduly-postgresql.chimouss4wpm.ap-northeast-2.rds.amazonaws.com"
+    # External PostgreSQL configuration
+    DB_HOST: "postgresql.example.invalid"
     DB_PORT: "5432"
     DB_NAME: "moduly"
     DB_USER: "postgres"
     # DB_PASSWORD is in secrets
     
-    # Redis configuration (using external ElastiCache)
+    # Redis configuration
     REDIS_HOST: "redis-master.default.svc.cluster.local"
     REDIS_PORT: "6379"
     REDIS_DB: "0"
     # REDIS_PASSWORD is in secrets
+    # Required when ingress is enabled. Set this to the actual trusted proxy
+    # CIDR; do not use a broad guessed network.
+    AUTH_LOGIN_TRUSTED_PROXY_CIDRS: ""
     
     # CORS and Security
-    CORS_ORIGINS: "https://moduly-ai.cloud,https://www.moduly-ai.cloud,http://localhost:3000"
+    CORS_ORIGINS: "https://nodease.example.invalid"
     # SECRET_KEY is in secrets
     
     # Sandbox configuration
@@ -63,22 +106,24 @@ gateway:
     # Encryption keys for external DB connections
     # MASTER_KEY and ENCRYPTION_KEY are in secrets
     
-    # Storage configuration (using S3 with IRSA)
-    STORAGE_TYPE: "CLOUD"
-    S3_BUCKET_NAME: "moduly-dev-file-upload"
-    AWS_REGION: "ap-northeast-2"
-    
     # Google OAuth (optional)
     # GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are in secrets
     
     # Node environment
     NODE_ENV: "production"
   
-  # Service Account with IRSA for S3 access
-  serviceAccount:
-    create: true
-    annotations:
-      eks.amazonaws.com/role-arn: "arn:aws:iam::912894834396:role/moduly-gateway-role"
+# The resource is rendered in the production reference. Apply the release's
+# additive migration first; the init and worker bootstep fail closed until the
+# migration and credential keyring are ready.
+knowledgeWorker:
+  enabled: true
+  replicaCount: 2
+  concurrency: 2
+
+# Durable Knowledge ingestion recovery is part of the supported production
+# worker contract. The chart rejects a worker-only deployment without Beat.
+beat:
+  enabled: true
 
 # Worker (Workflow Engine)
 worker:
@@ -86,7 +131,7 @@ worker:
   replicaCount: 4  # More workers for production workload
   
   image:
-    repository: 912894834396.dkr.ecr.ap-northeast-2.amazonaws.com/moduly-workflow-engine
+    repository: ghcr.io/nodease/moduly-workflow-engine
     tag: latest
     pullPolicy: Always
   
@@ -100,7 +145,7 @@ worker:
   
   env:
     # Database configuration
-    DB_HOST: "moduly-postgresql.chimouss4wpm.ap-northeast-2.rds.amazonaws.com"
+    DB_HOST: "postgresql.example.invalid"
     DB_PORT: "5432"
     DB_NAME: "moduly"
     DB_USER: "postgres"
@@ -113,9 +158,13 @@ worker:
     # Sandbox configuration
     SANDBOX_URL: "http://{{ .Release.Name }}-sandbox:8194"
     
-    # Storage configuration
-    S3_BUCKET_NAME: "moduly-dev-file-upload"
-    AWS_REGION: "ap-northeast-2"
+  networkPolicy:
+    enabled: true
+    # Replace with the actual external dependency CIDR before deployment.
+    externalDatabaseCidrs:
+      - "10.0.0.0/16"
+    externalRedisCidrs: []
+    externalSandboxCidrs: []
 
 # Logger (Logging System)
 logger:
@@ -123,7 +172,7 @@ logger:
   replicaCount: 2  # More replicas for production
   
   image:
-    repository: 912894834396.dkr.ecr.ap-northeast-2.amazonaws.com/moduly-logger
+    repository: ghcr.io/nodease/moduly-logger
     tag: latest
     pullPolicy: Always
   
@@ -141,7 +190,7 @@ logger:
   
   env:
     # Database configuration
-    DB_HOST: "moduly-postgresql.chimouss4wpm.ap-northeast-2.rds.amazonaws.com"
+    DB_HOST: "postgresql.example.invalid"
     DB_PORT: "5432"
     DB_NAME: "moduly"
     DB_USER: "postgres"
@@ -157,7 +206,7 @@ frontend:
   replicaCount: 3
   
   image:
-    repository: 912894834396.dkr.ecr.ap-northeast-2.amazonaws.com/moduly-client
+    repository: ghcr.io/nodease/moduly-client
     tag: latest
     pullPolicy: Always
   
@@ -174,9 +223,10 @@ frontend:
       memory: 1Gi
   
   env:
-    # Next.js backend API URL (internal service)
-    NEXT_PUBLIC_API_URL: "http://{{ .Release.Name }}-gateway:8000"
-    API_URL: "http://{{ .Release.Name }}-gateway:8000"
+    # Browser calls use same-origin /api through the public HTTPS ingress.
+    NEXT_PUBLIC_API_URL: ""
+    # Empty uses the chart template's release-aware internal Gateway URL.
+    API_URL: ""
 
 # Sandbox (Code Execution)
 sandbox:
@@ -184,7 +234,7 @@ sandbox:
   replicaCount: 3
   
   image:
-    repository: 912894834396.dkr.ecr.ap-northeast-2.amazonaws.com/moduly-sandbox
+    repository: ghcr.io/nodease/moduly-sandbox
     tag: latest
     pullPolicy: Always
   
@@ -248,11 +298,15 @@ sandbox:
 # =============================================================================
 # Secrets Configuration
 # =============================================================================
-# IMPORTANT: In production, use external secrets management (AWS Secrets Manager, etc.)
+# IMPORTANT: In production, use an external secret manager.
 # These should NOT be committed to git.
 
+connectorTest:
+  allowedPorts:
+    - 5432
+
 secrets:
-  # Database password (from AWS Secrets Manager)
+  # Database password (from the operator-selected secret manager)
   dbPassword: ""  # Override with --set or external secrets
   
   # Redis password
@@ -261,9 +315,25 @@ secrets:
   # JWT secret key
   secretKey: ""
   
+  # Required HMAC key for connector test admission identity digests (32+ bytes).
+  connectorTestAdmissionHmacKey: ""
+
+  memoryPublicCapabilityHmacKey: ""
+  memoryPublicCapabilityHmacKeys: ""
+  memoryPublicReplayEncryptionKey: ""
+  memoryPublicReplayEncryptionKeys: ""
+  memoryPublicAdmissionHmacKey: ""
+
   # Master encryption keys
   masterKey: ""
   encryptionKey: ""
+  mailCredentialEncryptionKeys: ""
+  mailCredentialActiveKeyVersion: "v1"
+  workflowNodeSecretEncryptionKeys: ""
+  workflowNodeSecretActiveKeyVersion: "v1"
+  llmCredentialEncryptionKeys: ""
+  llmCredentialActiveKeyVersion: "v1"
+  authLoginFingerprintKeys: ""  # Override with external secret
   
   # Sandbox API key
   sandboxApiKey: ""
@@ -273,14 +343,14 @@ secrets:
   googleClientSecret: ""
 
 # =============================================================================
-# PostgreSQL (Disabled - Using External RDS)
+# PostgreSQL (disabled; configure an external service)
 # =============================================================================
 postgresql:
-  enabled: false  # Using external AWS RDS instead
+  enabled: false  # Configure an external PostgreSQL service.
   
   # External database configuration
   # Set these via --set flags or external secrets
-  # externalHost: moduly-postgresql.chimouss4wpm.ap-northeast-2.rds.amazonaws.com
+  # externalHost: postgresql.example.invalid
   # externalPort: 5432
   # externalDatabase: moduly
   # externalUser: postgres
@@ -302,7 +372,7 @@ redis:
     persistence:
       enabled: true
       size: 8Gi
-      storageClass: "gp3"
+      storageClass: ""
     
     resources:
       requests:
@@ -312,72 +382,28 @@ redis:
         cpu: 500m
         memory: 1Gi
   
-  # Note: If migrating to external ElastiCache in the future:
-  # 1. Set enabled: false
-  # 2. Update REDIS_HOST in all service env vars to ElastiCache endpoint
-  # 3. Configure external Redis settings as needed
+  # To use external Redis, disable this dependency and configure each service's
+  # Redis endpoint and network policy explicitly.
 
 # =============================================================================
-# Ingress (ALB)
+# Ingress (operator configured)
 # =============================================================================
 ingress:
-  enabled: true  # Enable for production
-  
-  className: alb  # AWS ALB Ingress Controller
-  
-  annotations:
-    # ALB configuration
-    alb.ingress.kubernetes.io/scheme: internet-facing
-    alb.ingress.kubernetes.io/target-type: ip
-    
-    # HTTPS configuration
-    alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
-    alb.ingress.kubernetes.io/certificate-arn: "arn:aws:acm:ap-northeast-2:912894834396:certificate/621853e1-ec5a-4334-9c21-d774be44d965"
-    alb.ingress.kubernetes.io/ssl-redirect: "443"
-    
-    # Health check
-    alb.ingress.kubernetes.io/healthcheck-protocol: HTTP
-    alb.ingress.kubernetes.io/healthcheck-path: /
-    alb.ingress.kubernetes.io/healthcheck-interval-seconds: "15"
-    alb.ingress.kubernetes.io/healthcheck-timeout-seconds: "5"
-    alb.ingress.kubernetes.io/success-codes: "200"
-  
-  hosts:
-    - host: moduly-ai.cloud
-      paths:
-        - path: /api
-          pathType: Prefix
-          backend: gateway
-        - path: /static
-          pathType: Prefix
-          backend: gateway
-        - path: /
-          pathType: Prefix
-          backend: frontend
-    
-    - host: www.moduly-ai.cloud
-      paths:
-        - path: /api
-          pathType: Prefix
-          backend: gateway
-        - path: /static
-          pathType: Prefix
-          backend: gateway
-        - path: /
-          pathType: Prefix
-          backend: frontend
-  
-  tls: []  # TLS handled by ACM certificate
+  enabled: false  # Operator must explicitly configure ingress.
+  publicChatTimeoutSeconds: 610
+  className: ""
+  annotations: {}
+  hosts: []
+  tls: []
 
 # =============================================================================
-# Service Account (IRSA)
+# Shared workload identity for Gateway, Workflow Worker and Knowledge Worker.
+# Provider-specific annotations are operator supplied here.
 # =============================================================================
 serviceAccount:
   create: true
-  annotations:
-    # IRSA for S3 access
-    eks.amazonaws.com/role-arn: "arn:aws:iam::912894834396:role/moduly-api-server-role"
-  name: "api-server-sa"
+  annotations: {}
+  name: ""
 
 # =============================================================================
 # Pod Security Context

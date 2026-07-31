@@ -1,5 +1,5 @@
 import { WorkflowRun } from '@/app/features/workflow/types/Api';
-import { X, CheckCircle2, XCircle, PlayCircle, Clock } from 'lucide-react';
+import { X, CheckCircle2, XCircle, PlayCircle } from 'lucide-react';
 import { format } from 'date-fns';
 import { ko } from 'date-fns/locale';
 import { LogExecutionPath } from '../detail-components/LogExecutionPath';
@@ -25,7 +25,13 @@ export const LogCompareSelectionModal = ({
   const availableLogs = logs.filter(log => log.id !== currentRunId);
 
   return (
-    <div className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="비교할 실행 로그 선택"
+      data-canvas-shortcut-scope="blocked"
+      className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+    >
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col overflow-hidden animate-in fade-in zoom-in duration-200">
         
         <div className="px-6 py-4 border-b border-gray-100 flex items-center justify-between">

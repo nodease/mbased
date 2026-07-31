@@ -1,9 +1,14 @@
 import json
 from typing import Any, Dict
 
-import httpx
 from jinja2 import Environment
 
+from apps.workflow_engine.adapters.providers.generic_http import (
+    GenericHttpRequest,
+)
+from apps.workflow_engine.composition.generic_http import (
+    build_generic_http_effect_adapter,
+)
 from apps.workflow_engine.workflow.nodes.base.node import Node
 from apps.workflow_engine.workflow.nodes.http.entities import HttpRequestNodeData
 
@@ -86,7 +91,6 @@ class HttpRequestNode(Node[HttpRequestNodeData]):  # Node 상속
                 headers[api_key_header] = api_key_value
 
         # 3. Body 처리
-        # 현재는 JSON만 지원 (추후 form-data, XML 등 확장 가능)
         if body:
             # Content-Type이 명시되지 않은 경우 기본값으로 JSON 설정
             content_type_keys = [
@@ -98,51 +102,26 @@ class HttpRequestNode(Node[HttpRequestNodeData]):  # Node 상속
         # 4. HTTP 요청 실행 (동기 - gevent 호환)
         method = data.method.value
         timeout = data.timeout / 1000.0  # ms -> seconds
-
+        slack_mode = self.runtime_node_type == "slackPostNode"
+        adapter = build_generic_http_effect_adapter(slack_mode=slack_mode)
+        request = GenericHttpRequest(
+            method=method,
+            url=url,
+            headers=headers,
+            body=body,
+            timeout_seconds=timeout,
+            slack_mode=slack_mode,
+        )
         try:
-            # [GEVENT] 동기 httpx.Client 사용
-            with httpx.Client(timeout=timeout) as client:
-                if body:
-                    try:
-                        json_body = json.loads(body)
-
-                        response = client.request(
-                            method=method,
-                            url=url,
-                            headers={
-                                k: v
-                                for k, v in headers.items()
-                                if k.lower() != "content-type"
-                            },
-                            json=json_body,
-                        )
-                    except json.JSONDecodeError as e:
-                        # JSON 파싱 실패 시 에러 발생
-                        raise ValueError(
-                            f"Body는 유효한 JSON 형식이어야 합니다: {str(e)}"
-                        )
-                else:
-                    # Body가 없는 경우 (GET 요청 등)
-                    response = client.request(
-                        method=method,
-                        url=url,
-                        headers=headers,
-                        content=None,
-                    )
-
-                # 5. 응답 처리
-                try:
-                    response_body = response.json()
-                except json.JSONDecodeError:
-                    response_body = response.text
-
-                return {
-                    "status": response.status_code,
-                    "data": response_body,
-                    "headers": dict(response.headers),
-                }
-        except httpx.RequestError as e:
-            raise RuntimeError(f"HTTP 요청 실패: {str(e)}")
+            if method == "GET" and not slack_mode:
+                self._guard_read_only_effect_slot()
+                output = adapter.invoke_read_only(request).output
+            else:
+                output = self._run_external_effect(adapter, request)
+        finally:
+            self._capture_provider_trace(adapter)
+        self._trace_payloads = []
+        return output
 
     def _render_template(
         self, template_text: str, inputs: Dict[str, Any], json_context: bool = False

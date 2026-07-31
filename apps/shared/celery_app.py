@@ -9,6 +9,13 @@ Moduly Celery 앱 설정
 
 import os
 
+from apps.shared.domain.schedule_dispatch import (
+    schedule_dispatch_settings_from_environment,
+)
+from apps.shared.services.workflow_task_publisher import (
+    PUBLIC_CHAT_WORKFLOW_QUEUE,
+    PUBLIC_CHAT_WORKFLOW_TASK_NAME,
+)
 from celery import Celery
 
 # Redis 연결 설정 (개별 환경변수로 URL 동적 생성 )
@@ -48,8 +55,53 @@ celery_app.conf.update(
     enable_utc=True,
     # 태스크 라우팅: 큐별로 분리
     task_routes={
+        PUBLIC_CHAT_WORKFLOW_TASK_NAME: {
+            "queue": PUBLIC_CHAT_WORKFLOW_QUEUE
+        },
         "workflow.*": {"queue": "workflow"},
         "log.*": {"queue": "log"},
+        "audit.*": {"queue": "log"},  # 감사 로그도 log_system 워커가 소비
+        "security_alert.*": {"queue": "log"},
+        "knowledge.*": {"queue": "knowledge"},
+        "memory.*": {"queue": "log"},
+        "provider_usage.*": {"queue": "log"},
+    },
+    beat_schedule={
+        "security-alert-reconciliation": {
+            "task": "security_alert.reconcile",
+            "schedule": 60.0,
+            "options": {"queue": "log"},
+        },
+        "security-alert-notification-outbox": {
+            "task": "security_alert.notification_outbox.deliver",
+            "schedule": 30.0,
+            "options": {"queue": "log"},
+        },
+        "audit-event-outbox": {
+            "task": "audit.event_outbox.process",
+            "schedule": 30.0,
+            "options": {"queue": "log"},
+        },
+        "provider-usage-reconciliation": {
+            "task": "provider_usage.reconcile",
+            "schedule": 60.0,
+            "options": {"queue": "log"},
+        },
+        "memory-secret-replay-retention": {
+            "task": "memory.secret_replay_retention_purge",
+            "schedule": 60.0,
+            "options": {"queue": "log"},
+        },
+        "knowledge-collection-sync-recovery": {
+            "task": "workflow.knowledge_collection_sync.recover",
+            "schedule": 30.0,
+            "options": {"queue": "workflow"},
+        },
+        "knowledge-document-ingestion-recovery": {
+            "task": "knowledge.document_ingestion.recover",
+            "schedule": 30.0,
+            "options": {"queue": "knowledge"},
+        },
     },
     # 태스크 설정
     task_track_started=False,  # [FIX] STARTED 상태 추적 비활성화 (Protocol Error 방지)
@@ -60,6 +112,7 @@ celery_app.conf.update(
     worker_concurrency=100,  # [NEW] gevent pool: 높은 동시성 (4 → 100)
     # 결과 설정
     result_expires=3600,  # 결과 만료 시간 (1시간)
+    task_store_errors_even_if_ignored=False,
     # [NEW] 메모리 누수 방지 설정 (워커 재시작)
     worker_max_tasks_per_child=1000,  # [UPDATE] gevent: 1000개 태스크 처리 후 재시작
     worker_max_memory_per_child=500000,  # [UPDATE] gevent: 500MB 초과 시 재시작 (단일 프로세스)
@@ -78,42 +131,46 @@ celery_app.conf.update(
 
 # [FIX] 워커 프로세스 초기화 시 DB 커넥션 풀 리셋
 # gevent pool은 단일 프로세스지만 greenlet 간 DB 연결 공유 이슈 방지
-from celery.signals import worker_process_init  # noqa: E402
+from celery.signals import worker_init, worker_process_init  # noqa: E402
+
+
+@worker_init.connect
+def validate_worker_schedule_schema(**kwargs):
+    """Fail worker startup before consuming claim tasks on a stale schema."""
+    if os.getenv("CELERY_WORKER_ROLE") == "knowledge":
+        return
+    from apps.shared.db.session import engine
+    from apps.shared.services.schedule_dispatch_schema_readiness import (
+        require_schedule_dispatch_migration_ready,
+    )
+
+    settings = schedule_dispatch_settings_from_environment(os.environ)
+    require_schedule_dispatch_migration_ready(engine, settings=settings)
 
 
 @worker_process_init.connect
 def init_worker_process(**kwargs):
     """
     워커 프로세스가 시작될 때 실행됩니다.
-    1. .env 환경 변수를 다시 로드 (override=True)
-    2. 상속받은 SQL Engine의 커넥션 풀 폐기 (DB 연결 초기화)
+    상속받은 SQL Engine의 커넥션 풀을 폐기하고 startup에서 확정된
+    schedule schema/settings 계약을 다시 확인한다.
 
     Note: gevent pool은 단일 프로세스지만 초기화 시 DB 연결 리셋 필요
     """
-    import os
-    from pathlib import Path
-
-    # 1. 환경 변수 다시 로드 (설정 리로드)
-    try:
-        from dotenv import load_dotenv
-
-        # moduly 루트 디렉토리 찾기 (현재 파일: apps/shared/celery_app.py)
-        # ../../.env
-        current_dir = Path(__file__).resolve().parent
-        root_dir = current_dir.parent.parent
-        env_path = root_dir / ".env"
-
-        if env_path.exists():
-            load_dotenv(dotenv_path=env_path, override=True)
-            print(f"Worker process ({os.getpid()}): .env reloaded.")
-    except ImportError:
-        pass
-
-    # 2. DB 연결 초기화
     from apps.shared.db.session import engine
+    from apps.shared.services.schedule_dispatch_schema_readiness import (
+        require_schedule_dispatch_migration_ready,
+    )
+
+    if os.getenv("CELERY_WORKER_ROLE") == "knowledge":
+        engine.dispose()
+        return
+
+    settings = schedule_dispatch_settings_from_environment(os.environ)
 
     # 기존 커넥션 풀 폐기 (연결 종료가 아니라 풀 객체만 리셋)
     engine.dispose()
+    require_schedule_dispatch_migration_ready(engine, settings=settings)
     print(
         f"Worker process initialized. (PID: {os.getpid()}) - DB Engine disposed, Config checked."
     )

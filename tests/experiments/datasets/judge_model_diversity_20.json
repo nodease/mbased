@@ -1,0 +1,182 @@
+[
+  {
+    "case_id": "diversity-routine-01",
+    "category": "routine_guidance",
+    "expected_difficulty": "economy",
+    "customer_tier": "business",
+    "message": "실행 로그에서 실패한 항목만 보는 필터 위치를 한 문장으로 안내해 주세요.",
+    "expected_models": ["gpt-4o-mini", "gpt-5-mini", "gpt-5.6-luna"],
+    "hypothesis": "짧고 정형화된 사용 안내"
+  },
+  {
+    "case_id": "diversity-routine-02",
+    "category": "routine_extraction",
+    "expected_difficulty": "economy",
+    "customer_tier": "business",
+    "message": "문의에서 제품명과 오류 코드만 추출하고 나머지는 추가 확인 필요로 표시해 주세요. 제품은 Nodease이고 오류 코드는 E-104입니다.",
+    "expected_models": ["gpt-4o-mini", "gpt-5-mini", "gpt-5.6-luna"],
+    "hypothesis": "명시된 두 값의 단순 추출"
+  },
+  {
+    "case_id": "diversity-routine-03",
+    "category": "routine_rewrite",
+    "expected_difficulty": "economy",
+    "customer_tier": "startup",
+    "message": "배포 주소는 게시 메뉴에서 복사할 수 있습니다라는 내용을 고객 안내 문장 두 개로 다듬어 주세요.",
+    "expected_models": ["gpt-4o-mini", "gpt-5-mini", "gpt-5.6-luna"],
+    "hypothesis": "주어진 사실의 짧은 문장 변환"
+  },
+  {
+    "case_id": "diversity-routine-04",
+    "category": "routine_classification",
+    "expected_difficulty": "economy",
+    "customer_tier": "business",
+    "message": "비밀번호를 잊어 로그인할 수 없다는 문의를 계정 문제로 분류하고 비밀번호 재설정 안내만 작성해 주세요.",
+    "expected_models": ["gpt-4o-mini", "gpt-5-mini", "gpt-5.6-luna"],
+    "hypothesis": "분류 결과와 조치가 명시된 요청"
+  },
+  {
+    "case_id": "diversity-balanced-05",
+    "category": "integration_diagnosis",
+    "expected_difficulty": "balanced",
+    "customer_tier": "business",
+    "message": "웹훅은 200을 반환하지만 워크플로우가 실행되지 않습니다. 서명 검증, payload 형식, 배포 상태를 순서대로 확인하는 고객 안내를 작성해 주세요.",
+    "expected_models": ["gpt-4.1-mini", "gpt-4o", "gpt-5.4-mini", "gpt-5.6-terra"],
+    "hypothesis": "몇 개의 독립 점검 조건을 정리하는 일반 업무"
+  },
+  {
+    "case_id": "diversity-balanced-06",
+    "category": "billing_reconciliation",
+    "expected_difficulty": "balanced",
+    "customer_tier": "business",
+    "message": "대시보드 비용은 12만원인데 청구서에는 13만원입니다. 기간, 환율, 지연 반영을 확인하되 환불을 확정하지 않는 답변을 작성해 주세요.",
+    "expected_models": ["gpt-4.1-mini", "gpt-4o", "gpt-5.4-mini", "gpt-5.6-terra"],
+    "hypothesis": "세 조건을 확인하는 중간 복잡도 고객 응답"
+  },
+  {
+    "case_id": "diversity-balanced-07",
+    "category": "access_review",
+    "expected_difficulty": "balanced",
+    "customer_tier": "enterprise",
+    "message": "협력사 계정을 일주일 연장해 달라는 요청입니다. 요청자 권한, 만료일, 읽기 전용 여부를 확인한 뒤 승인 전 보류 안내를 작성해 주세요.",
+    "expected_models": ["gpt-4.1-mini", "gpt-4o", "gpt-5.4-mini", "gpt-5.6-terra"],
+    "hypothesis": "명확한 승인 전 확인 절차"
+  },
+  {
+    "case_id": "diversity-balanced-08",
+    "category": "data_validation",
+    "expected_difficulty": "balanced",
+    "customer_tier": "business",
+    "message": "팀별 사용량 합계가 전체 합계보다 3% 큽니다. 중복 집계, 시간대, 취소된 실행을 점검하는 순서를 제시해 주세요.",
+    "expected_models": ["gpt-4.1-mini", "gpt-4o", "gpt-5.4-mini", "gpt-5.6-terra"],
+    "hypothesis": "일상적인 데이터 점검 계획"
+  },
+  {
+    "case_id": "diversity-instruction-09",
+    "category": "strict_instruction_following",
+    "expected_difficulty": "advanced",
+    "customer_tier": "enterprise",
+    "message": "답변은 사실, 미확인 사항, 고객 조치, 내부 조치 순서로 작성하고 각 항목은 두 문장을 넘기지 마세요. 보상을 약속하지 말고 날짜는 절대값으로 쓰며 담당 조직을 임의로 정하지 마세요. 현재 확인된 사실은 7월 18일 배포 이후 일부 EU 고객의 다운로드가 실패했다는 것뿐입니다.",
+    "expected_models": ["gpt-4.1", "gpt-5.4-mini", "gpt-5.6-terra"],
+    "hypothesis": "추론보다 다수의 명시적 지시 준수가 핵심"
+  },
+  {
+    "case_id": "diversity-instruction-10",
+    "category": "long_context_instruction",
+    "expected_difficulty": "advanced",
+    "customer_tier": "enterprise",
+    "message": "고객 회신에는 원인 단정, 복구 시각 약속, 보상 확약을 넣지 마세요. 대신 확인된 로그 범위, 고객이 제공할 정보, 다음 업데이트 조건을 포함하세요. 내부 계획에는 최근 두 배포 비교, 지역별 오류율 확인, 재시도 큐 점검, 데이터 정합성 검증을 넣되 고객 회신과 섞지 마세요.",
+    "expected_models": ["gpt-4.1", "gpt-5.4-mini", "gpt-5.6-terra"],
+    "hypothesis": "긴 지시와 섹션 경계를 정확히 지켜야 함"
+  },
+  {
+    "case_id": "diversity-professional-11",
+    "category": "executive_incident_report",
+    "expected_difficulty": "advanced",
+    "customer_tier": "enterprise",
+    "message": "세 리전에서 서로 다른 증상이 발생했고 결제 지연, 알림 누락, 보고서 수치 불일치가 동시에 관찰됐습니다. 공통 원인과 독립 원인을 구분하는 경영진용 조사 계획과 고객 공지 원칙을 작성해 주세요.",
+    "expected_models": ["gpt-5.4", "gpt-5.6-sol"],
+    "hypothesis": "복합 전문 업무를 완성도 높은 결과물로 종합"
+  },
+  {
+    "case_id": "diversity-professional-12",
+    "category": "governance_transition",
+    "expected_difficulty": "advanced",
+    "customer_tier": "enterprise",
+    "message": "개인정보 처리 위탁사를 교체해야 하지만 고객별 동의 상태, 국가별 보존 의무, 기존 업체의 삭제 증명 시점이 다릅니다. 서비스 중단 없이 전환하기 위한 의사결정 문서의 목차와 핵심 검토사항을 작성해 주세요.",
+    "expected_models": ["gpt-5.4", "gpt-5.6-sol"],
+    "hypothesis": "여러 업무 영역을 결합한 전문 의사결정 문서"
+  },
+  {
+    "case_id": "diversity-professional-13",
+    "category": "enterprise_migration",
+    "expected_difficulty": "advanced",
+    "customer_tier": "enterprise",
+    "message": "4개 사업부가 서로 다른 SSO, 권한 체계, 데이터 보존 정책을 사용합니다. 하나의 조직으로 통합할 때 단계별 이행안, 되돌리기 기준, 이해관계자 커뮤니케이션 계획을 함께 작성해 주세요.",
+    "expected_models": ["gpt-5.4", "gpt-5.6-sol"],
+    "hypothesis": "광범위한 엔터프라이즈 전환 계획"
+  },
+  {
+    "case_id": "diversity-professional-14",
+    "category": "architecture_review",
+    "expected_difficulty": "advanced",
+    "customer_tier": "enterprise",
+    "message": "감사 로그는 유실되면 안 되고 워크플로우 실행은 중복될 수 있습니다. 트랜잭션, outbox, idempotency, 재처리 전략을 함께 고려해 운영 가능한 아키텍처 검토안을 작성해 주세요.",
+    "expected_models": ["gpt-5.4", "gpt-5.6-sol", "o3"],
+    "hypothesis": "전문 아키텍처 완성도와 기술 추론이 모두 중요"
+  },
+  {
+    "case_id": "diversity-reasoning-15",
+    "category": "formal_cost_optimization",
+    "expected_difficulty": "advanced",
+    "customer_tier": "enterprise",
+    "message": "세 모델 A, B, C의 요청당 비용은 2, 5, 11이고 실패율은 8%, 3%, 1%입니다. 실패 시 C로 한 번 재시도하며 실패 비용도 포함합니다. 기대비용을 식으로 비교하고 실패율 2% 이하 조건을 만족하는 최저비용 정책을 논증해 주세요.",
+    "expected_models": ["o3"],
+    "hypothesis": "수식과 제약을 결합한 형식적 최적화"
+  },
+  {
+    "case_id": "diversity-reasoning-16",
+    "category": "concurrency_reasoning",
+    "expected_difficulty": "advanced",
+    "customer_tier": "enterprise",
+    "message": "동일 정책 행의 카운터가 19일 때 두 worker가 동시에 완료 이벤트를 처리합니다. read-modify-write와 SELECT FOR UPDATE 각각에서 가능한 상태 전이를 순서대로 열거하고 중복 갱신과 유실 갱신이 생기는 조건을 증명해 주세요.",
+    "expected_models": ["o3"],
+    "hypothesis": "동시성 상태 전이의 다단계 논증"
+  },
+  {
+    "case_id": "diversity-reasoning-17",
+    "category": "statistical_reasoning",
+    "expected_difficulty": "advanced",
+    "customer_tier": "enterprise",
+    "message": "후보 모델이 5회 모두 성공했고 기존 모델은 200회 중 190회 성공했습니다. 단순 성공률만 비교하지 말고 표본 불확실성을 반영해 후보를 자동 적용해도 되는지 신뢰구간 관점에서 논증해 주세요.",
+    "expected_models": ["o3"],
+    "hypothesis": "작은 표본의 통계적 불확실성 추론"
+  },
+  {
+    "case_id": "diversity-reasoning-18",
+    "category": "policy_logic_proof",
+    "expected_difficulty": "advanced",
+    "customer_tier": "enterprise",
+    "message": "정책은 관리자이면서 보안교육을 이수했거나, 사고대응 당직자이면서 승인 티켓이 있는 경우에만 접근을 허용합니다. 네 조건의 모든 참·거짓 조합을 검토해 최소 권한 원칙을 위반하는 예외가 있는지 논리식으로 증명해 주세요.",
+    "expected_models": ["o3"],
+    "hypothesis": "불리언 조합 전체를 검증하는 형식 논리"
+  },
+  {
+    "case_id": "diversity-frontier-19",
+    "category": "cross_domain_decision",
+    "expected_difficulty": "advanced",
+    "customer_tier": "enterprise",
+    "message": "대규모 장애 복구를 위해 보존 중인 개인정보 로그를 해외 지원팀과 공유해야 할 수 있습니다. 복구 긴급성, 계약상 지역 제한, 최소 공개, 사후 감사 가능성을 함께 만족하는 의사결정안을 작성해 주세요.",
+    "expected_models": ["gpt-5.4", "gpt-5.6-sol"],
+    "hypothesis": "여러 전문 영역의 상충 목표를 종합"
+  },
+  {
+    "case_id": "diversity-balanced-20",
+    "category": "everyday_reasoning",
+    "expected_difficulty": "balanced",
+    "customer_tier": "business",
+    "message": "두 번 결제된 것으로 보이지만 한 건은 승인 대기 상태입니다. 중복 청구를 단정하지 않고 사용자가 확인할 항목과 내부 조회 순서를 간결하게 작성해 주세요.",
+    "expected_models": ["gpt-4.1-mini", "gpt-4o", "gpt-5.4-mini", "gpt-5.6-terra"],
+    "hypothesis": "일상적인 판단과 비용 균형이 적합"
+  }
+]

@@ -1,0 +1,134 @@
+services:
+  connector-test-tls-init:
+    profiles: ["connector-demo"]
+    build:
+      context: ..
+      dockerfile: docker/connector-test-postgres/Dockerfile
+    entrypoint: ["/usr/local/bin/generate-connector-test-certificates"]
+    user: "0:0"
+    restart: "no"
+    network_mode: "none"
+    volumes:
+      - connector_test_server_tls:/tls/server
+      - connector_test_postgres_admin_credentials:/tls/admin-credentials
+      - connector_test_demo_credentials:/tls/connector-credentials
+      - ../local/connector-test-tls/docker:/tls/public
+
+  connector-test-redis:
+    profiles: ["connector-demo"]
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "127.0.0.1:56379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 10
+    networks:
+      - connector-demo-network
+
+  connector-test-postgres:
+    profiles: ["connector-demo"]
+    build:
+      context: ..
+      dockerfile: docker/connector-test-postgres/Dockerfile
+    environment:
+      POSTGRES_DB: connector_demo
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD_FILE: /tls/admin-credentials/postgres-password
+      CONNECTOR_DEMO_PASSWORD_FILE: /tls/connector-credentials/demo-password
+    command:
+      - postgres
+      - -c
+      - ssl=on
+      - -c
+      - ssl_cert_file=/tls/server/server.crt
+      - -c
+      - ssl_key_file=/tls/server/server.key
+      - -c
+      - ssl_min_protocol_version=TLSv1.2
+      - -c
+      - password_encryption=scram-sha-256
+      - -c
+      - hba_file=/etc/postgresql/connector-demo-pg_hba.conf
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - connector_test_demo_data_v3:/var/lib/postgresql/data
+      - connector_test_server_tls:/tls/server:ro
+      - connector_test_postgres_admin_credentials:/tls/admin-credentials:ro
+      - connector_test_demo_credentials:/tls/connector-credentials:ro
+    depends_on:
+      connector-test-tls-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          PGPASSWORD="$$(cat /tls/connector-credentials/demo-password)"
+          psql
+          "host=localhost port=5432 dbname=connector_demo user=connector_demo_user sslmode=verify-full sslrootcert=/tls/server/ca.crt"
+          -Atqc
+          "SELECT (SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()) AND current_setting('transaction_read_only')::boolean AND NOT (SELECT rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR rolbypassrls FROM pg_roles WHERE rolname = current_user)"
+          | grep -qx t
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    networks:
+      - connector-demo-network
+
+  connector-test-runtime-verifier:
+    profiles: ["connector-demo-verify"]
+    build:
+      context: ..
+      dockerfile: docker/gateway/Dockerfile
+    entrypoint: ["python", "/app/demo/verify_connector_demo_runtime.py"]
+    user: "999:999"
+    environment:
+      CONNECTOR_DEMO_REDIS_URL: "redis://connector-test-redis:6379/15"
+      CONNECTOR_DEMO_CA_FILE: "/run/connector-test-ca/ca.crt"
+      CONNECTOR_DEMO_POSTGRES_PASSWORD_FILE: "/run/connector-credentials/demo-password"
+    volumes:
+      - ../scripts/verify_connector_demo_runtime.py:/app/demo/verify_connector_demo_runtime.py:ro
+      - ../local/connector-test-tls/docker:/run/connector-test-ca:ro
+      - connector_test_demo_credentials:/run/connector-credentials:ro
+    depends_on:
+      connector-test-tls-init:
+        condition: service_completed_successfully
+      connector-test-postgres:
+        condition: service_healthy
+      connector-test-redis:
+        condition: service_healthy
+    networks:
+      - connector-demo-network
+
+  gateway:
+    environment:
+      NODE_ENV: development
+      CONNECTOR_TEST_LOCAL_PROFILE_ENABLED: "true"
+      CONNECTOR_TEST_ALLOWED_PORTS: "5432"
+      CONNECTOR_TEST_TRUSTED_LOCAL_TARGETS: "connector-test-postgres:5432"
+      CONNECTOR_TEST_TRUSTED_LOCAL_CA_FILE: "/run/connector-test-ca/ca.crt"
+      CONNECTOR_TEST_REDIS_URL: "redis://connector-test-redis:6379/15"
+    volumes:
+      - ../local/connector-test-tls/docker:/run/connector-test-ca:ro
+    depends_on:
+      connector-test-tls-init:
+        condition: service_completed_successfully
+      connector-test-postgres:
+        condition: service_healthy
+      connector-test-redis:
+        condition: service_healthy
+    networks:
+      - connector-demo-network
+
+volumes:
+  connector_test_server_tls:
+  connector_test_postgres_admin_credentials:
+  connector_test_demo_credentials:
+  connector_test_demo_data_v3:
+
+networks:
+  connector-demo-network:
+    driver: bridge

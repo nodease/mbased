@@ -1,0 +1,4 @@
+# Model routing runs on CPU-only Gateway/Workflow Engine containers.
+# Pinning the +cpu wheel prevents pip from pulling multi-gigabyte CUDA packages.
+# transformers 4.57+ blocks PyTorch <2.6 when it must read legacy .bin weights.
+torch==2.6.0+cpu

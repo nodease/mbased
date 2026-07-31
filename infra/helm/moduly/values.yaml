@@ -2,7 +2,7 @@
 # Moduly Helm Chart - Default Values (Open Source)
 # =============================================================================
 # This file contains default configuration for local Kubernetes deployment.
-# For production AWS EKS, see values-production.yaml
+# For a provider-neutral production reference, see values-production.yaml
 
 # Global settings
 global:
@@ -11,6 +11,85 @@ global:
   
   # Storage class (use default for most environments)
   storageClass: ""
+
+# Shared document object-storage contract. Gateway, Workflow Worker and
+# Knowledge Worker consume this one root block through the shared ConfigMap.
+storage:
+  type: "LOCAL"
+  bucketName: ""
+  region: ""
+
+# The base chart is a local/development profile and keeps direct-pinned
+# transport. Production values explicitly enable the proxy and supply exact
+# cluster pod CIDRs for the Squid source ACL.
+egressProxy:
+  enabled: false
+  policyRevision: "proxy-v1"
+  replicaCount: 2
+  image:
+    repository: ubuntu/squid
+    tag: "6.6-24.04_edge"
+    digest: "sha256:8a3baed477e2c282ab8aa5edad442f69873246964f225c5c2ae8364b6610963c"
+    pullPolicy: IfNotPresent
+  # Immutable proxy-v1 listener contract. Helm validation rejects overrides.
+  service:
+    httpsPort: 3128
+    httpCompatiblePort: 3129
+    connectorTcpPort: 3130
+  # Deployment-owned public DB/SSH ports accepted by connector-egress-v1.
+  connectorAllowedPorts:
+    - 22
+    - 5432
+  networkPolicy:
+    enabled: true
+    enforced: true
+    enforcementPhase: "final"
+    authorizedSourceCidrs: []
+    # Cluster DNS coordinates shared by every proxy-only egress policy.
+    # Override these values when DNS runs outside kube-system or uses a
+    # deployment-specific pod label.
+    dns:
+      namespace: "kube-system"
+      podSelectorLabels: {}
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+# Durable distributed schedule dispatch. Keep disabled until the migration-first
+# rollout has completed and the legacy dispatcher has been drained.
+scheduleDispatch:
+  mode: "disabled"
+  pollSeconds: 5
+  occurrenceBatchSize: 50
+  dispatchBatchSize: 10
+  recoveryBatchSize: 50
+  cleanupBatchSize: 100
+  leaseSeconds: 60
+  deliveryTimeoutSeconds: 120
+  executionDeadlineSeconds: 900
+  workflowRunVisibilityTimeoutSeconds: 120
+  maxAttempts: 5
+  retryBaseSeconds: 5
+  retentionDays: 30
+  deadLetterRetentionDays: 180
+
+# Deployment-managed strict connector-test port allowlist.
+connectorTest:
+  allowedPorts:
+    - 5432
+
+# Public Conversation Memory remains unavailable until the independent keys
+# and an approved replay backup-erasure contract are provisioned.
+memoryPublicConversation:
+  enabled: false
+  purgeWorkerReady: false
+  replayBackupErasureMode: "unconfirmed"
+  capabilityHmacPrimaryVersion: ""
+  replayEncryptionPrimaryVersion: ""
 
 # =============================================================================
 # Application Services
@@ -22,7 +101,7 @@ gateway:
   replicaCount: 2
   
   image:
-    repository: ghcr.io/jungle-scope/moduly-gateway
+    repository: ghcr.io/nodease/moduly-gateway
     tag: latest
     pullPolicy: IfNotPresent
   
@@ -55,9 +134,16 @@ gateway:
     REDIS_PORT: "6379"
     REDIS_DB: "0"
     # REDIS_PASSWORD is in secrets
+    AUTH_LOGIN_LIMITER_REDIS_DB: "2"
+    AUTH_LOGIN_LIMITER_POLICY_VERSION: "v1"
+    AUTH_LOGIN_FINGERPRINT_PRIMARY_VERSION: "v1"
+    AUTH_LOGIN_TRUSTED_PROXY_CIDRS: ""
+    APP_AUTH_SECRET_LIFECYCLE_MODE: "disabled"
+    PUBLIC_CHAT_CONVERSATION_ROLLOUT_MODE: "compatibility"
     
     # CORS and Security
     CORS_ORIGINS: "http://localhost:3000,http://127.0.0.1:3000"
+    NODE_ENV: "development"
     # SECRET_KEY is in secrets
     
     # Sandbox configuration
@@ -67,16 +153,35 @@ gateway:
     # Encryption keys for external DB connections
     # MASTER_KEY and ENCRYPTION_KEY are in secrets
     
-    # Storage configuration
-    STORAGE_TYPE: "LOCAL"
-    S3_BUCKET_NAME: ""
-    AWS_REGION: "ap-northeast-2"
-    
     # Google OAuth (optional)
     # GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET are in secrets
     
-    # Node environment
-    NODE_ENV: "production"
+# Knowledge document ingestion worker. Enable only after the additive
+# migration has been applied; startup readiness rejects a stale schema.
+knowledgeWorker:
+  enabled: false
+  replicaCount: 1
+  concurrency: 2
+  # LOCAL storage is valid only when Gateway and worker share this PVC.
+  # Production CLOUD storage does not mount it.
+  localStorage:
+    enabled: false
+    existingClaim: ""
+    size: 5Gi
+    fsGroup: 1000
+    accessModes:
+      - ReadWriteOnce
+  image:
+    repository: ""
+    tag: ""
+    pullPolicy: ""
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
 
 # Worker (Workflow Engine)
 worker:
@@ -84,7 +189,7 @@ worker:
   replicaCount: 4
   
   image:
-    repository: ghcr.io/jungle-scope/moduly-workflow-engine
+    repository: ghcr.io/nodease/moduly-workflow-engine
     tag: latest
     pullPolicy: IfNotPresent
   
@@ -116,17 +221,39 @@ worker:
     SANDBOX_URL: "http://{{ .Release.Name }}-sandbox:8194"
     # SANDBOX_API_KEY is in secrets
     
-    # Storage configuration (for file processing)
-    S3_BUCKET_NAME: ""
-    AWS_REGION: "ap-northeast-2"
-    
+  # Worker outbound defense-in-depth. External dependency CIDRs are allowed
+  # only on their service ports; generic public egress remains port-limited.
+  networkPolicy:
+    enabled: true
+    externalDatabaseCidrs: []
+    externalRedisCidrs: []
+    externalSandboxCidrs: []
+
+# Singleton Celery Beat scheduler. An empty image field reuses the Workflow
+# Engine image so the shared Celery schedule and task routes stay identical.
+beat:
+  enabled: true
+
+  image:
+    repository: ""
+    tag: ""
+    pullPolicy: ""
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 96Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
 # Logger (Logging System)
 logger:
   enabled: true
   replicaCount: 1
   
   image:
-    repository: ghcr.io/jungle-scope/moduly-logger
+    repository: ghcr.io/nodease/moduly-logger
     tag: latest
     pullPolicy: IfNotPresent
   
@@ -162,7 +289,7 @@ frontend:
   replicaCount: 2
   
   image:
-    repository: ghcr.io/jungle-scope/moduly-client
+    repository: ghcr.io/nodease/moduly-client
     tag: latest
     pullPolicy: IfNotPresent
   
@@ -180,10 +307,10 @@ frontend:
       memory: 512Mi
   
   env:
-    # Next.js backend API URL
-    # Internal cluster service name for server-side calls
-    NEXT_PUBLIC_API_URL: "http://{{ .Release.Name }}-gateway:8000"
-    API_URL: "http://{{ .Release.Name }}-gateway:8000"
+    # Browser requests use same-origin /api through ingress.
+    NEXT_PUBLIC_API_URL: ""
+    # Empty uses the chart template's release-aware internal Gateway URL.
+    API_URL: ""
 
 # Sandbox (Code Execution)
 sandbox:
@@ -191,7 +318,7 @@ sandbox:
   replicaCount: 2
   
   image:
-    repository: ghcr.io/jungle-scope/moduly-sandbox
+    repository: ghcr.io/nodease/moduly-sandbox
     tag: latest
     pullPolicy: IfNotPresent
   
@@ -269,9 +396,26 @@ secrets:
   # JWT secret key
   secretKey: "changeme_secret_key_for_jwt"
   
+  # Required HMAC key for connector test admission identity digests (32+ bytes).
+  connectorTestAdmissionHmacKey: ""
+
+  memoryPublicCapabilityHmacKey: ""
+  memoryPublicCapabilityHmacKeys: ""
+  memoryPublicReplayEncryptionKey: ""
+  memoryPublicReplayEncryptionKeys: ""
+  memoryPublicAdmissionHmacKey: ""
+
   # Master encryption key (generate with: openssl rand -base64 32)
   masterKey: ""
   encryptionKey: ""
+  mailCredentialEncryptionKeys: ""
+  mailCredentialActiveKeyVersion: "v1"
+  workflowNodeSecretEncryptionKeys: ""
+  workflowNodeSecretActiveKeyVersion: "v1"
+  llmCredentialEncryptionKeys: ""
+  llmCredentialActiveKeyVersion: "v1"
+  # Versioned password-login fingerprint keyring JSON. Override via secret store.
+  authLoginFingerprintKeys: ""
   
   # Sandbox API key
   sandboxApiKey: "Modulycallsandbox306"
@@ -357,6 +501,9 @@ redis:
 # =============================================================================
 ingress:
   enabled: false
+  # Ingress must not terminate a Public Chatbot request before the Gateway's
+  # 600-second absolute deadline. Operators may override annotations explicitly.
+  publicChatTimeoutSeconds: 610
   
   className: nginx
   

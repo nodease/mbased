@@ -1,15 +1,31 @@
 import logging
 from typing import Any, Dict
 
-import requests
-
 from apps.gateway.services.ingestion.parsers.json_parser import JsonParser
 from apps.shared.services.ingestion.processors.base import (
     BaseProcessor,
     ProcessingResult,
 )
+from apps.shared.services.egress_guard import (
+    EgressGuardError,
+    safe_http_request,
+)
+from apps.shared.services.outbound_operation_policy import KNOWLEDGE_API_FETCH
 
 logger = logging.getLogger(__name__)
+_TRANSIENT_EGRESS_REASONS = frozenset(
+    {
+        "egress.connection_failed",
+        "egress.dns_resolution_failed",
+        "egress.timeout",
+    }
+)
+
+
+def _http_failure_reason(status_code: int) -> str:
+    if status_code in {408, 425, 429} or status_code >= 500:
+        return "source.temporarily_unavailable"
+    return "configuration.invalid"
 
 
 class ApiProcessor(BaseProcessor):
@@ -38,7 +54,7 @@ class ApiProcessor(BaseProcessor):
                 import json
 
                 headers = json.loads(headers)
-            except:
+            except (TypeError, ValueError):
                 headers = {}
 
         # body가 JSON string일 수 있으므로 파싱
@@ -47,21 +63,36 @@ class ApiProcessor(BaseProcessor):
                 import json
 
                 body = json.loads(body)
-            except:
+            except (TypeError, ValueError):
                 body = None
 
         if not url:
-            return ProcessingResult(chunks=[], metadata={"error": "No URL provided"})
+            return ProcessingResult(
+                chunks=[],
+                metadata={
+                    "error": "No URL provided",
+                    "reason_code": "configuration.invalid",
+                },
+            )
 
         try:
-            response = requests.request(
+            response = safe_http_request(
                 method=method,
                 url=url,
                 headers=headers,
-                json=body if method != "GET" else None,
-                timeout=30,
+                json_body=body,
+                operation_id=KNOWLEDGE_API_FETCH,
             )
-            response.raise_for_status()
+            if response.status_code >= 400:
+                reason_code = _http_failure_reason(response.status_code)
+                return ProcessingResult(
+                    chunks=[],
+                    metadata={
+                        "error": "External API returned an error.",
+                        "status_code": response.status_code,
+                        "reason_code": reason_code,
+                    },
+                )
 
             parser = JsonParser()
             try:
@@ -77,15 +108,38 @@ class ApiProcessor(BaseProcessor):
                 chunks.append(
                     {
                         "content": block["text"],
-                        "metadata": {"source": url, "page": block["page"]},
+                        "metadata": {"source": "api_response", "page": block["page"]},
                     }
                 )
 
             return ProcessingResult(
                 chunks=chunks,
-                metadata={"url": url, "status_code": response.status_code},
+                metadata={"source_type": "API", "status_code": response.status_code},
             )
 
+        except EgressGuardError as e:
+            reason_code = (
+                "source.temporarily_unavailable"
+                if e.reason_code in _TRANSIENT_EGRESS_REASONS
+                else "configuration.invalid"
+            )
+            logger.warning(
+                "[ApiProcessor] Egress guard denied request: reason_code=%s",
+                reason_code,
+            )
+            return ProcessingResult(
+                chunks=[],
+                metadata={
+                    "error": "Outbound request denied.",
+                    "reason_code": reason_code,
+                },
+            )
         except Exception as e:
-            logger.error(f"[ApiProcessor] Request failed: {e}")
-            return ProcessingResult(chunks=[], metadata={"error": str(e)})
+            logger.error("[ApiProcessor] Request failed: %s", type(e).__name__)
+            return ProcessingResult(
+                chunks=[],
+                metadata={
+                    "error": "Request failed.",
+                    "reason_code": "processing.failed",
+                },
+            )

@@ -1,23 +1,10 @@
-import axios from 'axios';
-import { DeploymentType } from '../../workflow/types/Deployment';
-
-const API_BASE_URL = '/api/v1';
-
-const api = axios.create({
-  baseURL: API_BASE_URL,
-  withCredentials: true,
-});
-
-// 401 에러 인터셉터
-api.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    if (error.response?.status === 401) {
-      window.location.href = '/auth/login';
-    }
-    return Promise.reject(error);
-  },
-);
+import type {
+  DeploymentBrowserAccessPolicy,
+  DeploymentBrowserAccessRevisionCreate,
+  DeploymentType,
+} from '../../workflow/types/Deployment';
+import { apiClient as api, publicApiClient } from '@/lib/apiClient';
+import type { BudgetStatusPayload } from '../../budget/types';
 
 export interface AppIcon {
   type: string;
@@ -31,16 +18,33 @@ export interface App {
   description?: string;
   icon: AppIcon;
   url_slug?: string;
-  auth_secret?: string;
   is_market: boolean;
   forked_from?: string;
   workflow_id?: string;
   active_deployment_id?: string;
   active_deployment_type?: DeploymentType;
   active_deployment_is_active?: boolean;
+  budget_status?: BudgetStatusPayload | null;
   owner_name?: string;
   created_at: string;
   updated_at: string;
+}
+
+export interface AppAuthSecretStatus {
+  configured: boolean;
+  version: number;
+  rotation_enabled: boolean;
+  rotated_at?: string | null;
+  previous_grace_active: boolean;
+  previous_valid_until?: string | null;
+}
+
+export interface AppAuthSecretRotation {
+  secret: string;
+  version: number;
+  rotated_at: string;
+  previous_grace_active: boolean;
+  previous_valid_until?: string | null;
 }
 
 export interface Deployment {
@@ -48,6 +52,7 @@ export interface Deployment {
   app_id: string;
   version: number;
   type: DeploymentType;
+  url_slug?: string;
   description?: string;
   is_active: boolean;
   created_at: string;
@@ -56,6 +61,7 @@ export interface Deployment {
   input_schema?: unknown;
   output_schema?: unknown;
   config?: unknown;
+  browser_access_policy?: DeploymentBrowserAccessPolicy | null;
 }
 
 export const appApi = {
@@ -67,7 +73,7 @@ export const appApi = {
 
   // 탐색 페이지 (공개 앱) 조회
   getExploreApps: async (): Promise<App[]> => {
-    const response = await api.get('/apps/explore');
+    const response = await publicApiClient.get('/apps/explore');
     return response.data;
   },
 
@@ -85,6 +91,27 @@ export const appApi = {
   // 앱 상세 조회
   getApp: async (appId: string): Promise<App> => {
     const response = await api.get(`/apps/${appId}`);
+    return response.data;
+  },
+
+  getAuthSecretStatus: async (
+    appId: string,
+  ): Promise<AppAuthSecretStatus> => {
+    const response = await api.get(`/apps/${appId}/auth-secret/status`);
+    return response.data;
+  },
+
+  rotateAuthSecret: async (
+    appId: string,
+    data: {
+      expected_version: number;
+      revoke_previous_immediately: boolean;
+    },
+  ): Promise<AppAuthSecretRotation> => {
+    const response = await api.post(
+      `/apps/${appId}/auth-secret/rotate`,
+      data,
+    );
     return response.data;
   },
 
@@ -124,6 +151,17 @@ export const appApi = {
   // 배포 토글 (활성화/비활성화)
   toggleDeployment: async (deploymentId: string): Promise<Deployment> => {
     const response = await api.patch(`/deployments/${deploymentId}/toggle`);
+    return response.data;
+  },
+
+  createBrowserAccessRevision: async (
+    sourceDeploymentId: string,
+    data: DeploymentBrowserAccessRevisionCreate,
+  ): Promise<Deployment> => {
+    const response = await api.post(
+      `/deployments/${sourceDeploymentId}/browser-access-revisions`,
+      data,
+    );
     return response.data;
   },
 };

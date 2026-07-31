@@ -44,6 +44,7 @@ COPY --from=builder /install /usr/local
 # 앱 코드 복사 (모노레포 구조 유지)
 COPY apps/shared /app/apps/shared
 COPY apps/log_system /app/apps/log_system
+COPY apps/memory /app/apps/memory
 
 # Entrypoint 스크립트 복사
 COPY docker/log_system/docker-entrypoint.sh /docker-entrypoint.sh

@@ -6,6 +6,7 @@ import { Search, Loader2, Copy, Maximize } from 'lucide-react';
 import { appApi, App } from '@/app/features/app/api/appApi';
 import { toast } from 'sonner';
 import { AppGraphModal } from './components/AppGraphModal';
+import { DashboardTitle } from '@/app/features/dashboard/components/DashboardSurface';
 
 interface AppWithStats extends App {
   rating: number;
@@ -75,21 +76,32 @@ export default function ExplorePage() {
   }
 
   return (
-    <div className="p-8 bg-white min-h-full">
+    <div className="min-h-full bg-white px-8 py-8">
       {/* Page Title */}
-      <h1 className="text-2xl font-bold text-gray-800 mb-6">마켓플레이스</h1>
-
-      {/* 검색창 */}
-      <div className="mb-6 flex items-center justify-end">
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-          <input
-            type="text"
-            placeholder="모듈 검색..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-64 rounded-lg border border-gray-200 bg-white py-2 pl-9 pr-4 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
+      <div className="mb-6 flex items-end justify-between gap-4">
+        <div>
+          <DashboardTitle
+            icon={Search}
+            title="마켓플레이스"
+            className="text-2xl font-black text-slate-950"
           />
+          <p className="mt-1 text-sm font-semibold text-slate-500">
+            다른 사용자가 공개한 모듈을 탐색하고 복제합니다.
+          </p>
+        </div>
+
+        {/* 검색창 */}
+        <div className="flex items-center justify-end">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+            <input
+              type="text"
+              placeholder="모듈 검색..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="h-10 w-64 rounded-md border border-slate-200 bg-white py-2 pl-9 pr-4 text-sm font-semibold text-slate-900 placeholder:text-slate-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-100"
+            />
+          </div>
         </div>
       </div>
 
@@ -98,7 +110,7 @@ export default function ExplorePage() {
         {filteredModules.map((app) => (
           <div
             key={app.id}
-            className="group flex cursor-pointer flex-col rounded-lg border border-gray-200 bg-white p-6 shadow-sm transition-all hover:shadow-md dark:border-gray-800 dark:bg-gray-950 dark:hover:border-gray-700"
+            className="group flex cursor-pointer flex-col rounded-lg border border-slate-200 bg-white p-6 shadow-sm transition-all hover:border-slate-300 hover:shadow-md"
           >
             {/* 모듈 정보 */}
             <div className="flex-1">
@@ -116,10 +128,10 @@ export default function ExplorePage() {
                   )}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <h3 className="text-lg font-semibold text-gray-900 transition-colors group-hover:text-blue-600 dark:text-white dark:group-hover:text-blue-400 truncate">
+                  <h3 className="truncate text-base font-black text-slate-950 transition-colors group-hover:text-blue-600">
                     {app.name}
                   </h3>
-                  <div className="flex items-center gap-3 text-xs text-gray-500 mt-1">
+                  <div className="mt-1 flex items-center gap-3 text-xs font-semibold text-slate-500">
                     <div className="flex items-center gap-1">
                       <svg
                         className="w-3 h-3 text-yellow-400 fill-current"
@@ -148,7 +160,7 @@ export default function ExplorePage() {
                   </div>
                 </div>
               </div>
-              <p className="mt-2 text-sm text-gray-600 line-clamp-2 dark:text-gray-400">
+              <p className="mt-2 line-clamp-2 text-sm font-semibold leading-relaxed text-slate-500">
                 {app.description || '설명이 없습니다.'}
               </p>
 
@@ -159,7 +171,7 @@ export default function ExplorePage() {
                     <div className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-100 text-[10px] font-medium text-blue-600">
                       {app.owner_name.charAt(0).toUpperCase()}
                     </div>
-                    <span className="text-xs text-gray-500">
+                    <span className="text-xs font-semibold text-slate-500">
                       {app.owner_name}
                     </span>
                   </>
@@ -168,20 +180,22 @@ export default function ExplorePage() {
                     <div className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-100 text-[10px] font-medium text-blue-600">
                       U
                     </div>
-                    <span className="text-xs text-gray-500">Unknown</span>
+                    <span className="text-xs font-semibold text-slate-500">
+                      Unknown
+                    </span>
                   </>
                 )}
               </div>
             </div>
 
             {/* 작업 푸터 */}
-            <div className="mt-4 border-t border-gray-100 pt-4 dark:border-gray-800 flex gap-2">
+            <div className="mt-4 flex gap-2 border-t border-slate-100 pt-4">
               <button
                 onClick={(e) => {
                   e.stopPropagation();
                   setSelectedAppForGraph(app);
                 }}
-                className="flex flex-1 items-center justify-center gap-2 rounded-md border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 hover:text-gray-900 dark:border-gray-800 dark:bg-gray-950 dark:text-gray-300 dark:hover:bg-gray-900 dark:hover:text-white"
+                className="flex flex-1 items-center justify-center gap-2 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 hover:text-slate-950"
               >
                 <Maximize className="h-4 w-4" />
                 미리보기
@@ -189,7 +203,7 @@ export default function ExplorePage() {
               <button
                 onClick={(e) => handleClone(e, app.id)}
                 disabled={cloningId === app.id}
-                className="flex flex-1 items-center justify-center gap-2 rounded-md border border-gray-200 bg-blue-50 px-3 py-2 text-sm font-medium text-blue-700 transition-colors hover:bg-blue-100 hover:text-blue-900 disabled:opacity-50 disabled:cursor-not-allowed dark:bg-blue-900/20 dark:text-blue-300 dark:hover:bg-blue-900/40 dark:hover:text-blue-200"
+                className="flex flex-1 items-center justify-center gap-2 rounded-md border border-slate-950 bg-slate-950 px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {cloningId === app.id ? (
                   <Loader2 className="h-4 w-4 animate-spin" />

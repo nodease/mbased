@@ -63,8 +63,10 @@ export default function ChangeEmbeddingModelModal({
               setSelectedModel(json[0].model_id_for_api_call);
             }
           }
-        } catch (err) {
-          console.error('Failed to fetch embedding models', err);
+        } catch {
+          console.warn('[ChangeEmbeddingModelModal] request failed', {
+            operation: 'fetchEmbeddingModels',
+          });
         } finally {
           setIsFetchingModels(false);
         }
@@ -96,8 +98,8 @@ export default function ChangeEmbeddingModelModal({
       setIsLoading(true);
       await onConfirm(selectedModel);
       onClose();
-    } catch (error) {
-      console.error('Failed to change model:', error);
+    } catch {
+      // Parent handler owns the user-facing failure toast.
     } finally {
       setIsLoading(false);
     }

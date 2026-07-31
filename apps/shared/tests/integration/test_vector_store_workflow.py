@@ -45,14 +45,17 @@ class FakeSession:
         items = self.all()
         return items[0] if items else None
 
-    def delete(self):
+    def delete(self, synchronize_session="auto", delete_args=None):
+        # SQLAlchemy Query.delete의 호출 계약을 유지하되 fake에서는 동기화하지 않는다.
+        _ = synchronize_session, delete_args
         if self.current_model == DocumentChunk:
             # DocumentChunk 전체 삭제 시뮬레이션 (특정 문서 ID에 대한 필터가 걸려있다고 가정)
             # 여기서는 테스트 데이터가 1개 문서뿐이므로 전체 삭제로 처리해도 무방
             count = len(self.store[DocumentChunk])
             self.store[DocumentChunk] = []
             self.deleted_items.append(f"Deleted {count} chunks")
-        return
+            return count
+        return 0
 
     def bulk_save_objects(self, objects):
         if not objects:
@@ -73,6 +76,15 @@ class FakeSession:
 
     def close(self):
         pass
+
+    def get_bind(self):
+        class _Dialect:
+            name = "sqlite"
+
+        class _Bind:
+            dialect = _Dialect()
+
+        return _Bind()
 
 
 # ------------------------------------------------------------------
@@ -116,17 +128,27 @@ def mock_db_processor():
 
 
 def test_full_sync_workflow_integration(
-    fake_db, mock_encryption, mock_embedding_service, mock_db_processor
+    fake_db,
+    mock_encryption,
+    mock_embedding_service,
+    mock_db_processor,
+    monkeypatch,
 ):
     """
     [Integration] SyncService -> VectorStoreService -> DB(Fake) 전체 파이프라인 검증
     """
     user_id = uuid.uuid4()
+    organization_id = uuid.uuid4()
     kb_id = uuid.uuid4()
     doc_id = uuid.uuid4()
 
     # 1. Setup Data in FakeDB
-    kb = KnowledgeBase(id=kb_id, name="TestKB", embedding_model="model-v3")
+    kb = KnowledgeBase(
+        id=kb_id,
+        organization_id=organization_id,
+        name="TestKB",
+        embedding_model="model-v3",
+    )
     fake_db.add(kb)
 
     doc = Document(
@@ -136,13 +158,21 @@ def test_full_sync_workflow_integration(
         meta_info={"connection_id": "conn1"},
     )
     fake_db.add(doc)
+    monkeypatch.setattr(
+        "apps.workflow_engine.services.sync_service.has_knowledge_base_permission",
+        lambda *_args, **_kwargs: True,
+    )
 
     # 2. Init Services
     # Real VectorStoreService + Real SyncService
     vector_store_service = VectorStoreService(db=fake_db, user_id=user_id)
     # Inject Mock EmbeddingService (created by fixture patch)
 
-    sync_service = SyncService(db=fake_db, user_id=user_id)
+    sync_service = SyncService(
+        db=fake_db,
+        user_id=user_id,
+        organization_id=organization_id,
+    )
     sync_service.vector_store_service = vector_store_service  # Use REAL service
     sync_service.db_processor = (
         mock_db_processor  # Use MOCK processor (external interaction)

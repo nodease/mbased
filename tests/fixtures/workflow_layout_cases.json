@@ -1,0 +1,84 @@
+{
+  "cases": [
+    {
+      "name": "linear workflow",
+      "nodes": [
+        {"id": "start", "type": "startNode", "position": {"x": 40, "y": 80}, "data": {}},
+        {"id": "llm", "type": "llmNode", "position": {"x": 40, "y": 80}, "data": {}},
+        {"id": "answer", "type": "answerNode", "position": {"x": 40, "y": 80}, "data": {}}
+      ],
+      "edges": [
+        {"id": "start-llm", "source": "start", "target": "llm"},
+        {"id": "llm-answer", "source": "llm", "target": "answer"}
+      ],
+      "expected_positions": {
+        "start": {"x": 0, "y": 0},
+        "llm": {"x": 580, "y": 0},
+        "answer": {"x": 1160, "y": 0}
+      }
+    },
+    {
+      "name": "branching workflow with orphan and note",
+      "nodes": [
+        {"id": "start", "type": "startNode", "position": {"x": 0, "y": 0}, "data": {}},
+        {"id": "branch-a", "type": "llmNode", "position": {"x": 0, "y": 0}, "data": {}},
+        {"id": "branch-b", "type": "llmNode", "position": {"x": 0, "y": 0}, "data": {}},
+        {"id": "answer", "type": "answerNode", "position": {"x": 0, "y": 0}, "data": {}},
+        {"id": "orphan", "type": "llmNode", "position": {"x": 900, "y": 300}, "data": {}},
+        {"id": "note", "type": "note", "position": {"x": 900, "y": 900}, "data": {}}
+      ],
+      "edges": [
+        {"id": "start-a", "source": "start", "target": "branch-a"},
+        {"id": "start-b", "source": "start", "target": "branch-b"},
+        {"id": "a-answer", "source": "branch-a", "target": "answer"},
+        {"id": "b-answer", "source": "branch-b", "target": "answer"}
+      ],
+      "expected_positions": {
+        "start": {"x": 0, "y": 0},
+        "branch-a": {"x": 580, "y": 0},
+        "branch-b": {"x": 580, "y": 300},
+        "answer": {"x": 1160, "y": 0},
+        "orphan": {"x": 0, "y": 660},
+        "note": {"x": 900, "y": 900}
+      }
+    },
+    {
+      "name": "cycle fallback remains deterministic",
+      "nodes": [
+        {"id": "cycle-a", "type": "llmNode", "position": {"x": 0, "y": 0}, "data": {}},
+        {"id": "cycle-b", "type": "llmNode", "position": {"x": 0, "y": 0}, "data": {}},
+        {"id": "after-cycle", "type": "answerNode", "position": {"x": 0, "y": 0}, "data": {}}
+      ],
+      "edges": [
+        {"id": "a-b", "source": "cycle-a", "target": "cycle-b"},
+        {"id": "b-a", "source": "cycle-b", "target": "cycle-a"},
+        {"id": "b-answer", "source": "cycle-b", "target": "after-cycle"}
+      ],
+      "expected_positions": {
+        "cycle-a": {"x": 0, "y": 0},
+        "cycle-b": {"x": 580, "y": 0},
+        "after-cycle": {"x": 1160, "y": 0}
+      }
+    },
+    {
+      "name": "condition default precedes explicit branches",
+      "nodes": [
+        {"id": "condition", "type": "conditionNode", "position": {"x": 0, "y": 0}, "data": {"cases": [{"id": "case-a"}, {"id": "case-b"}]}},
+        {"id": "case-b-target", "type": "llmNode", "position": {"x": 0, "y": 0}, "data": {}},
+        {"id": "default-target", "type": "llmNode", "position": {"x": 0, "y": 0}, "data": {}},
+        {"id": "case-a-target", "type": "llmNode", "position": {"x": 0, "y": 0}, "data": {}}
+      ],
+      "edges": [
+        {"id": "case-b-edge", "source": "condition", "sourceHandle": "case-b", "target": "case-b-target"},
+        {"id": "default-edge", "source": "condition", "sourceHandle": "default", "target": "default-target"},
+        {"id": "case-a-edge", "source": "condition", "sourceHandle": "case-a", "target": "case-a-target"}
+      ],
+      "expected_positions": {
+        "condition": {"x": 0, "y": 0},
+        "default-target": {"x": 580, "y": 0},
+        "case-a-target": {"x": 580, "y": 300},
+        "case-b-target": {"x": 580, "y": 600}
+      }
+    }
+  ]
+}

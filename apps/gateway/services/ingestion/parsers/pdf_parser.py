@@ -6,6 +6,9 @@ import fitz  # PyMuPDF
 import pymupdf4llm
 
 from apps.gateway.services.ingestion.parsers.base import BaseParser
+from apps.shared.domain.knowledge_document_ingestion import (
+    RAW_PARSER_EGRESS_UNAVAILABLE_REASON,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +19,13 @@ class ParsingStrategy(str, Enum):
     IMAGE = "image"
 
 
+class ExternalParserEgressUnavailable(RuntimeError):
+    reason_code = RAW_PARSER_EGRESS_UNAVAILABLE_REASON
+
+    def __init__(self) -> None:
+        super().__init__("External parser is unavailable.")
+
+
 class PdfParser(BaseParser):
     """
     [PdfParser]
@@ -23,8 +33,8 @@ class PdfParser(BaseParser):
 
     기능:
     1. PyMuPDF(pymupdf4llm)를 사용한 빠른 마크다운 변환
-    2. LlamaParse를 사용한 고품질 변환 (OCR 포함)
-    3. 파일 성격(이미지 비중 등)에 따른 분석 및 전략 제안 기능
+    2. 승인된 external parser transport가 준비되지 않은 전략의 fail-closed 차단
+    3. 파일 성격(이미지 비중 등)에 따른 분석 기능
     """
 
     def parse(self, source_path: str, **kwargs) -> List[Dict[str, Any]]:
@@ -34,23 +44,15 @@ class PdfParser(BaseParser):
         Args:
             source_path: PDF 파일의 절대 경로
             kwargs:
-                - strategy (str): 'general' (기본값) 또는 'llamaparse'
-                - api_key (str): LlamaParse API Key (llamaparse 전략 사용 시 필수)
-                - target_pages (str): 파싱할 페이지 범위 (예: "0-4", llamaparse 전용)
+                - strategy (str): 'general' (기본값). 'llamaparse'는 현재 차단된다.
 
         Returns:
             [{"text": "...", "page": 1}, ...]
         """
         strategy = kwargs.get("strategy", "general")
-        target_pages = kwargs.get("target_pages")
-
         if strategy == "llamaparse":
-            api_key = kwargs.get("api_key")
-            if not api_key:
-                raise ValueError("LlamaParse strategy requires 'api_key'")
-            return self._parse_with_llamaparse(source_path, api_key, target_pages)
-        else:
-            return self._parse_with_pymupdf(source_path)
+            raise ExternalParserEgressUnavailable()
+        return self._parse_with_pymupdf(source_path)
 
     def analyze(self, file_path: str) -> Dict[str, Any]:
         """
@@ -115,14 +117,29 @@ class PdfParser(BaseParser):
                 return self._parse_with_fitz_fallback(file_path)
 
             results = []
-            for chunk in md_text_chunks:
+            for index, chunk in enumerate(md_text_chunks):
                 text_content = chunk["text"]
+                metadata = chunk.get("metadata") or {}
+
+                # pymupdf4llm uses page_number (1-based) in recent releases,
+                # while older releases returned page (0-based).
+                if metadata.get("page_number") is not None:
+                    page_number = int(metadata["page_number"])
+                elif metadata.get("page") is not None:
+                    page_number = int(metadata["page"]) + 1
+                else:
+                    # page_chunks preserves document order, so this remains a
+                    # useful fallback for metadata-light parser responses.
+                    page_number = index + 1
                 results.append(
-                    {"text": text_content, "page": chunk["metadata"]["page"] + 1}
+                    {"text": text_content, "page": page_number}
                 )
             return results
-        except Exception as e:
-            logger.error(f"[PdfParser] PyMuPDF failed: {e}")
+        except Exception as exc:
+            logger.error(
+                "[PdfParser] PyMuPDF failed: error_type=%s",
+                type(exc).__name__,
+            )
             return self._parse_with_fitz_fallback(file_path)
 
     def _parse_with_fitz_fallback(self, file_path: str) -> List[Dict[str, Any]]:
@@ -136,56 +153,9 @@ class PdfParser(BaseParser):
                 if len(text.strip()) > 5:
                     results.append({"text": text, "page": i + 1})
             return results
-        except Exception as e:
-            logger.error(f"[PdfParser] Basic fitz extraction failed: {e}")
-            return []
-
-    def _parse_with_llamaparse(
-        self, file_path: str, api_key: str, target_pages: str = None
-    ) -> List[Dict[str, Any]]:
-        """LlamaParse API를 사용하여 고품질 파싱 (OCR 수행)"""
-        try:
-            import nest_asyncio
-
-            nest_asyncio.apply()
-        except ImportError:
-            pass
-
-        try:
-            from llama_parse import LlamaParse
-        except ImportError:
-            logger.error("[PdfParser] llama-parse not installed.")
-            return []
-
-        try:
-            # fast_mode=True uses text extraction mostly, False uses OCR (required for scanned docs)
-            # result_type="markdown" caused 'markdown' error in some versions, relying on default for now
-            parser = LlamaParse(
-                api_key=api_key,
-                # result_type="markdown",
-                language="ko",
-                fast_mode=False,
-                target_pages=target_pages,
-                verbose=True,
+        except Exception as exc:
+            logger.error(
+                "[PdfParser] Basic fitz extraction failed: error_type=%s",
+                type(exc).__name__,
             )
-
-            # load_data returns List[Document]
-            documents = parser.load_data(file_path)
-
-            results = []
-            for doc in documents:
-                # LlamaParse Document has 'text' field (markdown) and metadata
-                page_num = 1
-                if "page_label" in doc.metadata:
-                    try:
-                        page_num = int(doc.metadata["page_label"])
-                    except Exception:
-                        pass
-
-                results.append({"text": doc.text, "page": page_num})
-
-            return results
-
-        except Exception:
-            logger.exception("LlamaParse failed")
-            return self._parse_with_pymupdf(file_path)
+            return []

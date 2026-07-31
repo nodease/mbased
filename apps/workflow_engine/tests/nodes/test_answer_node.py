@@ -1,3 +1,6 @@
+import pytest
+from pydantic import ValidationError
+
 from apps.workflow_engine.workflow.nodes.answer.answer_node import AnswerNode
 from apps.workflow_engine.workflow.nodes.answer.entities import (
     AnswerNodeData,
@@ -55,3 +58,20 @@ def test_answer_node_missing_input():
 
     # 데이터가 없으면 None으로 처리 (또는 에러 정책에 따라 다름)
     assert result["missing_var"] is None
+
+
+@pytest.mark.parametrize(
+    "variable",
+    [
+        "분석결과",
+        "AnalysisResult",
+        "result-key",
+        "result key",
+        "123_result",
+        "",
+        "a" * 33,
+    ],
+)
+def test_answer_node_output_variable_must_be_safe_key(variable):
+    with pytest.raises(ValidationError):
+        AnswerNodeOutput(variable=variable, value_selector=["llm_node", "text"])

@@ -60,19 +60,21 @@ export default function AppCard({
   return (
     <div
       onClick={() => onClick(app)}
-      className="group cursor-pointer rounded-xl border border-gray-200/60 bg-white py-8 px-6 shadow-sm transition-all hover:shadow-md hover:border-gray-300"
+      className="group cursor-pointer rounded-lg border border-slate-200 bg-white px-6 py-6 shadow-sm transition-all hover:border-slate-300 hover:shadow-md"
     >
       {/* 카드 헤더 */}
       <div className="flex items-start justify-between mb-3">
         <div className="flex-1">
-          <h3 className="text-base font-semibold text-gray-900 mb-1">
+          <h3 className="mb-1 text-base font-black text-slate-950">
             {app.name}
           </h3>
-          <p className="text-xs text-gray-500">{app.description}</p>
+          <p className="text-xs font-semibold leading-relaxed text-slate-500">
+            {app.description}
+          </p>
         </div>
         {/* 아이콘 */}
         <div
-          className="w-12 h-12 rounded-lg flex items-center justify-center text-2xl flex-shrink-0 ml-3"
+          className="ml-3 flex h-11 w-11 flex-shrink-0 items-center justify-center rounded-lg text-2xl shadow-sm"
           style={{ backgroundColor: app.icon?.background_color }}
         >
           {app.icon?.content}
@@ -86,7 +88,7 @@ export default function AppCard({
         ))}
       </div>
 
-      <div className="flex items-center justify-between text-xs text-gray-400 mt-2">
+      <div className="mt-2 flex items-center justify-between text-xs font-semibold text-slate-400">
         <div className="flex items-center gap-1">
           {app.owner_name ? (
             <>
@@ -95,7 +97,7 @@ export default function AppCard({
                   {app.owner_name.charAt(0).toUpperCase()}
                 </span>
               </div>
-              <span className="text-gray-500">{app.owner_name}</span>
+              <span className="text-slate-500">{app.owner_name}</span>
             </>
           ) : (
             <div className="w-4 h-4 bg-blue-100 rounded-full flex items-center justify-center">
@@ -116,7 +118,7 @@ export default function AppCard({
         <div className="relative" ref={menuRef}>
           <button
             onClick={toggleMenu}
-            className="p-1 text-gray-400 hover:text-blue-600 transition-colors rounded-md hover:bg-gray-50"
+            className="rounded-md p-1 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-900"
             title="더보기"
           >
             <MoreHorizontal className="w-4 h-4" />
@@ -124,7 +126,7 @@ export default function AppCard({
 
           {isMenuOpen && (
             <div
-              className="absolute right-0 bottom-full mb-2 w-56 bg-white rounded-lg shadow-lg border border-gray-200 py-1 z-10 animate-in fade-in zoom-in-95 duration-100"
+              className="absolute right-0 bottom-full z-10 mb-2 w-56 animate-in rounded-lg border border-slate-200 bg-white py-1 shadow-lg fade-in zoom-in-95 duration-100"
               onClick={(e) => e.stopPropagation()}
             >
               {/* 앱 이름/설명 수정하기 */}
@@ -133,7 +135,7 @@ export default function AppCard({
                   setIsMenuOpen(false);
                   onEdit(e, app);
                 }}
-                className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                className="w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2"
               >
                 <Pencil className="w-3.5 h-3.5" />
                 <span>앱 정보 수정</span>
@@ -146,7 +148,7 @@ export default function AppCard({
                     setIsMenuOpen(false);
                     onToggleMarketplace(app);
                   }}
-                  className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                  className="w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2"
                 >
                   <Lock className="w-3.5 h-3.5" />
                   <span>마켓플레이스 비공개로 전환</span>
@@ -161,8 +163,8 @@ export default function AppCard({
                   }}
                   className={`w-full px-3 py-2 text-left text-sm flex items-center gap-2 ${
                     app.forked_from
-                      ? 'text-gray-400 cursor-not-allowed'
-                      : 'text-gray-700 hover:bg-gray-50'
+                      ? 'text-slate-400 cursor-not-allowed'
+                      : 'text-slate-700 hover:bg-slate-50'
                   }`}
                   title={
                     app.forked_from
@@ -180,14 +182,14 @@ export default function AppCard({
                 </button>
               )}
 
-              <div className="my-1 border-t border-gray-100" />
+              <div className="my-1 border-t border-slate-100" />
 
               {/* 배포 토글 */}
               <button
                 className={`w-full px-3 py-2 text-left text-sm flex items-center gap-2 ${
                   app.active_deployment_id
-                    ? 'text-gray-700 hover:bg-gray-50'
-                    : 'text-gray-400 cursor-not-allowed'
+                    ? 'text-slate-700 hover:bg-slate-50'
+                    : 'text-slate-400 cursor-not-allowed'
                 }`}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -216,9 +218,9 @@ export default function AppCard({
                     </>
                   ) : (
                     <>
-                      <ToggleLeft className="w-3.5 h-3.5 text-gray-400" />
+                      <ToggleLeft className="w-3.5 h-3.5 text-slate-400" />
                       <span>배포 켜기</span>
-                      <span className="ml-auto text-xs font-medium text-gray-400">
+                      <span className="ml-auto text-xs font-medium text-slate-400">
                         OFF
                       </span>
                     </>
@@ -233,7 +235,7 @@ export default function AppCard({
 
               {/* 서브 모듈 배포 목록 */}
               <button
-                className="w-full px-3 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 flex items-center gap-2"
+                className="w-full px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2"
                 onClick={(e) => {
                   e.stopPropagation();
                   setIsMenuOpen(false);

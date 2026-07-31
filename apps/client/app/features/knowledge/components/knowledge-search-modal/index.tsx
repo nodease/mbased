@@ -1,24 +1,29 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Search, Send, Bot, X, Loader2, Settings } from 'lucide-react';
-import axios from 'axios';
+import {
+  ACTIVE_ORGANIZATION_CHANGED_EVENT,
+  activeOrganizationHeaders,
+  getStoredActiveOrganizationId,
+} from '@/lib/activeOrganization';
+import { apiClient } from '@/lib/apiClient';
 
-const BASE_URL = '';
+interface RAGReference {
+  content: string;
+  filename: string;
+  similarity_score: number;
+  page_number?: number;
+  metadata?: {
+    rrf_score?: number;
+    rerank_score?: number;
+    search_method?: string;
+  };
+}
 
 interface RAGResponse {
   answer: string;
-  references: {
-    content: string;
-    filename: string;
-    similarity_score: number;
-    page_number?: number;
-    metadata?: {
-      rrf_score?: number;
-      rerank_score?: number;
-      search_method?: string;
-    };
-  }[];
+  references: RAGReference[];
 }
 
 interface KnowledgeSearchModalProps {
@@ -33,6 +38,19 @@ type ModelOption = {
   name: string;
   type: string;
   provider_name?: string;
+};
+
+const isModelOption = (value: unknown): value is ModelOption => {
+  if (typeof value !== 'object' || value === null) return false;
+  const model = value as Partial<ModelOption>;
+  return (
+    typeof model.id === 'string' &&
+    typeof model.model_id_for_api_call === 'string' &&
+    typeof model.name === 'string' &&
+    typeof model.type === 'string' &&
+    (model.provider_name === undefined ||
+      typeof model.provider_name === 'string')
+  );
 };
 
 export default function KnowledgeSearchModal({
@@ -57,88 +75,177 @@ export default function KnowledgeSearchModal({
   const [modelOptions, setModelOptions] = useState<ModelOption[]>([]);
   const [selectedModelId, setSelectedModelId] = useState<string>('');
   const [loadingModels, setLoadingModels] = useState(false);
+  const [activeOrganizationId, setActiveOrganizationId] = useState<
+    string | null
+  >(null);
+  const searchRequestGeneration = useRef(0);
+  const searchRequestScope = useRef({
+    isOpen,
+    knowledgeBaseId,
+    organizationId: activeOrganizationId,
+  });
+
+  useEffect(() => {
+    searchRequestScope.current = {
+      isOpen,
+      knowledgeBaseId,
+      organizationId: activeOrganizationId,
+    };
+  }, [activeOrganizationId, isOpen, knowledgeBaseId]);
+
+  useEffect(() => {
+    const syncActiveOrganization = () => {
+      searchRequestGeneration.current += 1;
+      setIsLoading(false);
+      setSearchResult(null);
+      setChatResult(null);
+      setModelOptions([]);
+      setSelectedModelId('');
+      setActiveOrganizationId(getStoredActiveOrganizationId());
+    };
+
+    syncActiveOrganization();
+    window.addEventListener(
+      ACTIVE_ORGANIZATION_CHANGED_EVENT,
+      syncActiveOrganization,
+    );
+    return () => {
+      window.removeEventListener(
+        ACTIVE_ORGANIZATION_CHANGED_EVENT,
+        syncActiveOrganization,
+      );
+    };
+  }, []);
+
+  useEffect(() => {
+    searchRequestGeneration.current += 1;
+    setIsLoading(false);
+    setSearchResult(null);
+    setChatResult(null);
+  }, [isOpen, knowledgeBaseId]);
 
   // Fetch Models (Only needed for Chat tab, but we fetch on mount anyway for simplicity)
   useEffect(() => {
-    if (isOpen) {
-      const fetchMyModels = async () => {
-        try {
-          setLoadingModels(true);
-          const res = await fetch(`/api/v1/llm/my-models`, {
-            method: 'GET',
-            headers: { 'Content-Type': 'application/json' },
-            credentials: 'include',
-          });
-          if (res.ok) {
-            const json = await res.json();
-            // Chat 모델만 필터링
-            const chatModels = json.filter((m: any) => m.type === 'chat');
-            setModelOptions(chatModels);
-
-            // 기본값 선택
-            if (chatModels.length > 0) {
-              const defaultModel =
-                chatModels.find((m: any) =>
-                  m.model_id_for_api_call.includes('gpt-4o'),
-                ) || chatModels[0];
-              setSelectedModelId(defaultModel.model_id_for_api_call);
-            }
-          }
-        } catch (err) {
-          console.error('Error fetching models', err);
-        } finally {
-          setLoadingModels(false);
-        }
-      };
-      fetchMyModels();
+    if (!isOpen || !activeOrganizationId) {
+      setLoadingModels(false);
+      return;
     }
-  }, [isOpen]);
+    let cancelled = false;
+
+    const fetchMyModels = async () => {
+      try {
+        setLoadingModels(true);
+        const res = await fetch(`/api/v1/llm/my-models`, {
+          method: 'GET',
+          headers: {
+            'Content-Type': 'application/json',
+            ...activeOrganizationHeaders(activeOrganizationId),
+          },
+          credentials: 'include',
+        });
+        if (!res.ok) return;
+
+        const json: unknown = await res.json();
+        if (cancelled || !Array.isArray(json)) return;
+        const chatModels = json
+          .filter(isModelOption)
+          .filter((model) => model.type === 'chat');
+        setModelOptions(chatModels);
+
+        const defaultModel =
+          chatModels.find((model) =>
+            model.model_id_for_api_call.includes('gpt-4o'),
+          ) || chatModels[0];
+        setSelectedModelId(defaultModel?.model_id_for_api_call ?? '');
+      } catch {
+        // 모델 목록은 선택 UI에서 안전한 빈 상태로 처리한다.
+      } finally {
+        if (!cancelled) setLoadingModels(false);
+      }
+    };
+    fetchMyModels();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeOrganizationId, isOpen]);
 
   const handleSearch = async () => {
     if (!query.trim()) return;
+    if (!activeOrganizationId) {
+      alert('활성 조직을 선택해 주세요.');
+      return;
+    }
+    if (getStoredActiveOrganizationId() !== activeOrganizationId) return;
+    if (activeTab === 'chat' && !selectedModelId) {
+      alert('AI 답변에 사용할 모델을 먼저 설정해 주세요.');
+      return;
+    }
 
+    const requestGeneration = ++searchRequestGeneration.current;
+    const requestTab = activeTab;
+    const requestOrganizationId = activeOrganizationId;
+    const requestKnowledgeBaseId = knowledgeBaseId;
+    const isCurrentRequest = () => {
+      const currentScope = searchRequestScope.current;
+      return (
+        searchRequestGeneration.current === requestGeneration &&
+        currentScope.isOpen &&
+        currentScope.knowledgeBaseId === requestKnowledgeBaseId &&
+        currentScope.organizationId === requestOrganizationId &&
+        getStoredActiveOrganizationId() === requestOrganizationId
+      );
+    };
     setIsLoading(true);
-    setIsLoading(true);
-    if (activeTab === 'chat') setChatResult(null);
+    if (requestTab === 'chat') setChatResult(null);
     else setSearchResult(null);
 
     try {
       const endpoint =
-        activeTab === 'chat'
-          ? '/api/v1/rag/search-test/chat'
-          : '/api/v1/rag/search-test/pure';
-      const payload: any = {
-        query: query,
-        knowledge_base_id: knowledgeBaseId,
+        requestTab === 'chat'
+          ? '/rag/search-test/chat'
+          : '/rag/search-test/pure';
+      const payload: {
+        query: string;
+        knowledge_base_id: string;
+        generation_model?: string;
+      } = {
+        query,
+        knowledge_base_id: requestKnowledgeBaseId,
       };
 
       // Chat 모드일 때만 generation_model 추가
-      if (activeTab === 'chat') {
+      if (requestTab === 'chat') {
         payload.generation_model = selectedModelId;
       }
 
       // Call Backend API
-      const res = await axios.post<RAGResponse>(
-        `${BASE_URL}${endpoint}`,
+      const res = await apiClient.post<RAGResponse | RAGReference[]>(
+        endpoint,
         payload,
-        { withCredentials: true },
+        {
+          headers: activeOrganizationHeaders(requestOrganizationId),
+        },
       );
+      if (!isCurrentRequest()) return;
 
       // Response Handling
-      if (activeTab === 'chat') {
-        setChatResult(res.data as RAGResponse);
+      if (requestTab === 'chat') {
+        if (!Array.isArray(res.data)) setChatResult(res.data);
       } else {
         // Search 모드는 List[ChunkPreview]가 옴 -> RAGResponse 형태로 래핑해서 표시
         setSearchResult({
           answer: '', // 답변 없음
-          references: res.data as any, // 문서 목록만 있음 (Type Casting)
+          references: Array.isArray(res.data) ? res.data : [],
         });
       }
-    } catch (error) {
-      console.error('Search failed:', error);
-      alert('오류가 발생했습니다.');
+    } catch {
+      if (isCurrentRequest()) {
+        alert('오류가 발생했습니다.');
+      }
     } finally {
-      setIsLoading(false);
+      if (isCurrentRequest()) {
+        setIsLoading(false);
+      }
     }
   };
 
@@ -334,12 +441,11 @@ export default function KnowledgeSearchModal({
             />
             <button
               onClick={handleSearch}
+              aria-label="검색 실행"
               disabled={
                 isLoading ||
                 !query.trim() ||
-                (activeTab === 'chat' &&
-                  !selectedModelId &&
-                  modelOptions.length > 0)
+                (activeTab === 'chat' && !selectedModelId)
               }
               className="absolute bottom-3 right-3 h-10 w-10 flex items-center justify-center rounded-lg bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 dark:disabled:bg-gray-700 text-white transition-all shadow-md hover:shadow-lg disabled:shadow-none"
             >

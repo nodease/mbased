@@ -20,10 +20,45 @@ echo "프로젝트 루트: $PROJECT_ROOT"
 echo ""
 
 # Python 버전 체크
-if ! command -v python3 &> /dev/null; then
+if ! command -v python3 &> /dev/null && ! command -v py &> /dev/null; then
     echo -e "${RED}❌ Python3가 설치되어 있지 않습니다.${NC}"
     exit 1
 fi
+
+PYTHON_311=()
+
+resolve_python_311() {
+    local candidate
+    local version
+
+    # Windows에서는 App Execution Alias인 python3 대신 Python Launcher를 사용한다.
+    if [[ "$OSTYPE" == "msys" ]] || [[ "$OSTYPE" == "win32" ]] || [[ "$OSTYPE" == "cygwin" ]]; then
+        if command -v py &> /dev/null && py -3.11 --version &> /dev/null; then
+            PYTHON_311=(py -3.11)
+            return 0
+        fi
+    fi
+
+    for candidate in python3.11 python3 python; do
+        if ! command -v "$candidate" &> /dev/null; then
+            continue
+        fi
+        version=$("$candidate" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2> /dev/null || true)
+        if [ "$version" = "3.11" ]; then
+            PYTHON_311=("$candidate")
+            return 0
+        fi
+    done
+
+    echo -e "${RED}Python 3.11 interpreter is required. On Windows, install it with the Python Launcher entry 'py -3.11'.${NC}"
+    return 1
+}
+
+if ! resolve_python_311; then
+    exit 1
+fi
+
+echo "Python interpreter: ${PYTHON_311[*]}"
 
 # Node.js 버전 체크
 if ! command -v npm &> /dev/null; then
@@ -42,7 +77,7 @@ setup_python_app() {
 
     if [ ! -d ".venv" ]; then
         echo -e "   - 가상환경(.venv) 생성 중..."
-        python3 -m venv .venv 2>/dev/null || python -m venv .venv
+        "${PYTHON_311[@]}" -m venv .venv
     fi
 
     # OS별 가상환경 경로 설정
@@ -54,6 +89,14 @@ setup_python_app() {
         # Mac/Linux
         VENV_PYTHON=".venv/bin/python"
         VENV_PIP=".venv/bin/pip"
+    fi
+
+    local venv_version
+    venv_version=$("$VENV_PYTHON" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2> /dev/null || true)
+    if [ "$venv_version" != "3.11" ]; then
+        echo -e "${RED}❌ [$app_name] .venv uses Python ${venv_version:-unknown}; Python 3.11 is required.${NC}"
+        echo "   Remove $PROJECT_ROOT/$app_path/.venv and run ./scripts/setup.sh again."
+        exit 1
     fi
 
     # pip 업그레이드

@@ -1,11 +1,10 @@
 import { useMemo, useCallback } from 'react';
-import { Plus, Trash2 } from 'lucide-react';
 import { useWorkflowStore } from '@/app/features/workflow/store/useWorkflowStore';
 import { VariableExtractionNodeData } from '../../../../types/Nodes';
 import { getUpstreamNodes } from '../../../../utils/getUpstreamNodes';
-import { getNodeOutputs } from '../../../../utils/getNodeOutputs';
+import { getNodeOutputVariables } from '../../../../utils/nodeVariablePorts';
 import { CollapsibleSection } from '../../ui/CollapsibleSection';
-import { RoundedSelect } from '../../../ui/RoundedSelect';
+import { VariableSelectorSlot } from '../../ui/VariableSelectorSlot';
 import { JsonExtractionMappingControl } from './JsonExtractionMappingControl';
 
 interface VariableExtractionNodePanelProps {
@@ -26,27 +25,21 @@ export function VariableExtractionNodePanel({
 
   const sourceSelector = data.source_selector || [];
   const selectedNodeId = sourceSelector[0] || '';
-  const selectedOutputKey = sourceSelector[1] || '';
 
   const selectedNode = upstreamNodes.find((n) => n.id === selectedNodeId);
-  const availableOutputs = selectedNode ? getNodeOutputs(selectedNode) : [];
+  const selectedOutput = selectedNode
+    ? getNodeOutputVariables(selectedNode).find(
+        (output) =>
+          output.key === sourceSelector[1] ||
+          output.outputId === sourceSelector[1],
+      )
+    : undefined;
 
   const handleSourceChange = useCallback(
-    (position: 0 | 1, value: string) => {
-      const nextSelector = [...(data.source_selector || [])];
-      if (nextSelector.length < 2) {
-        nextSelector[0] = nextSelector[0] || '';
-        nextSelector[1] = nextSelector[1] || '';
-      }
-
-      nextSelector[position] = value;
-      if (position === 0) {
-        nextSelector[1] = '';
-      }
-
-      updateNodeData(nodeId, { source_selector: nextSelector });
+    (selector: string[]) => {
+      updateNodeData(nodeId, { source_selector: selector });
     },
-    [data.source_selector, nodeId, updateNodeData],
+    [nodeId, updateNodeData],
   );
 
   const handleAddMapping = useCallback(() => {
@@ -80,45 +73,18 @@ export function VariableExtractionNodePanel({
           <p className="text-xs text-gray-500">
             추출할 JSON 출력을 선택하세요.
           </p>
-          <div className="flex flex-col gap-2 sm:flex-row">
-            <RoundedSelect
-              value={selectedNodeId}
-              onChange={(val) => handleSourceChange(0, String(val))}
-              options={[
-                { label: '노드 선택', value: '' },
-                ...upstreamNodes.map((n) => ({
-                  label: (n.data as { title?: string })?.title || n.type,
-                  value: n.id,
-                })),
-              ]}
-              placeholder="노드 선택"
-              className="py-1.5 text-xs"
-            />
-            <RoundedSelect
-              value={selectedOutputKey}
-              onChange={(val) => handleSourceChange(1, String(val))}
-              options={[
-                {
-                  label: !selectedNodeId ? '출력 선택' : '출력값 선택',
-                  value: '',
-                },
-                ...availableOutputs.map((outKey) => ({
-                  label: outKey,
-                  value: outKey,
-                })),
-              ]}
-              disabled={!selectedNodeId}
-              placeholder={!selectedNodeId ? '출력 선택' : '출력값 선택'}
-              className="py-1.5 text-xs"
-            />
-          </div>
+          <VariableSelectorSlot
+            value={sourceSelector}
+            selectedOutput={selectedOutput}
+            label="추출할 입력 데이터"
+            placeholder="입력 변수 클릭"
+            kind="selector"
+            onChange={handleSourceChange}
+          />
         </div>
       </CollapsibleSection>
 
-      <CollapsibleSection
-        title="데이터 필터 설정"
-        showDivider
-      >
+      <CollapsibleSection title="데이터 필터 설정" showDivider>
         <JsonExtractionMappingControl
           mappings={data.mappings || []}
           onUpdate={handleUpdateMapping}

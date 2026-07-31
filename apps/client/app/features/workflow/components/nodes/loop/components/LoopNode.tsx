@@ -119,6 +119,8 @@ export const LoopNode = memo(
         icon={<Repeat className="w-5 h-5 text-white" />}
         iconColor="#8b5cf6"
         className="transition-all duration-300"
+        showBodyContent
+        sizeMode="auto"
       >
         <div
           className="relative bg-gray-50 rounded-lg border border-dashed border-gray-300 overflow-visible transition-all duration-300"

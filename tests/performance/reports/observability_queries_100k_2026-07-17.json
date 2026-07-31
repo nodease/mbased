@@ -1,0 +1,52 @@
+{
+  "method": {
+    "database": "local PostgreSQL 15 development container",
+    "iterations": 20,
+    "statistic": "median",
+    "tables": "temporary synthetic tables",
+    "application_data_modified": false,
+    "audit_scope": "audit_metadata organization_id filter, 100 organizations, 90 percent deep page",
+    "audit_request": "first page uses filtered COUNT plus page; follow-up cursor pages skip COUNT"
+  },
+  "baseline": {
+    "rows": 100000,
+    "audit_organization_rows": 1000,
+    "audit_organization_offset": 900,
+    "audit_typed_fk_vs_jsonb": {
+      "before_ms": 5.7,
+      "after_ms": 0.021,
+      "speedup": 278.05
+    },
+    "audit_filtered_total_count": {
+      "median_ms": 5.772
+    },
+    "audit_cursor_vs_deep_offset": {
+      "before_ms": 5.883,
+      "after_ms": 0.122,
+      "speedup": 48.22
+    },
+    "audit_list_count_plus_page": {
+      "before_ms": 12.348,
+      "after_ms": 6.682,
+      "speedup": 1.85
+    },
+    "audit_first_page_count_plus_page": {
+      "median_ms": 6.669
+    },
+    "audit_followup_cursor_count_skip": {
+      "before_ms": 6.682,
+      "after_ms": 0.347,
+      "speedup": 19.28
+    },
+    "audit_original_offset_vs_optimized_followup": {
+      "before_ms": 12.348,
+      "after_ms": 0.347,
+      "speedup": 35.63
+    },
+    "trace_sql_filter_vs_fetch_5000": {
+      "before_ms": 1.816,
+      "after_ms": 0.185,
+      "speedup": 9.81
+    }
+  }
+}

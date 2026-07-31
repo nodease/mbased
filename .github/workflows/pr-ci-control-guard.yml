@@ -1,0 +1,232 @@
+name: Trusted CI Control
+
+on:
+  pull_request_target:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+  issue_comment:
+    types:
+      - created
+
+permissions:
+  contents: read
+  pull-requests: read
+  statuses: write
+
+jobs:
+  ci_control_review:
+    name: ci-control-review
+    if: >-
+      github.event_name == 'pull_request_target' ||
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.pull_request &&
+       github.event.comment.body == '/recheck-ci-control')
+    concurrency:
+      group: trusted-ci-control-${{ github.event.pull_request.number || github.event.issue.number || github.run_id }}
+      cancel-in-progress: true
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Enforce trusted CI control policy
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        with:
+          github-token: ${{ github.token }}
+          retries: 3
+          retry-exempt-status-codes: 400,401,403,404,422
+          script: |
+            const { owner, repo } = context.repo;
+            const pullNumber =
+              context.payload.pull_request?.number ?? context.payload.issue?.number;
+            let headSha = context.payload.pull_request?.head?.sha;
+            const targetUrl =
+              `${process.env.GITHUB_SERVER_URL}/${owner}/${repo}/actions/runs/` +
+              process.env.GITHUB_RUN_ID;
+            const statusContext = "trusted-ci-control/base-policy";
+
+            const callApi = async (operation, request) => {
+              try {
+                return await request();
+              } catch (error) {
+                error.ciOperation = operation;
+                throw error;
+              }
+            };
+            const describeApiFailure = (error) => {
+              const operation = error?.ciOperation ?? "GitHub API request";
+              const status = error?.status
+                ? `HTTP ${error.status}`
+                : "unknown status";
+              const requestId =
+                error?.response?.headers?.["x-github-request-id"] ?? "unavailable";
+              return (
+                `${operation} failed after retries (${status}, ` +
+                `request ${requestId}).`
+              );
+            };
+            const setStatus = (state, description) =>
+              callApi("repos.createCommitStatus", () =>
+                github.rest.repos.createCommitStatus({
+                  owner,
+                  repo,
+                  sha: headSha,
+                  state,
+                  context: statusContext,
+                  description,
+                  target_url: targetUrl,
+                }),
+              );
+            const reportOperationalError = async (error) => {
+              const failure = describeApiFailure(error);
+              if (!headSha) {
+                core.setFailed(
+                  `${failure} PR head is unavailable; ` +
+                    "authoritative status was not recorded.",
+                );
+                return;
+              }
+
+              try {
+                await setStatus(
+                  "error",
+                  "GitHub API unavailable; retry CI control evaluation.",
+                );
+                core.warning(
+                  `${failure} Authoritative status was set to error.`,
+                );
+              } catch (statusError) {
+                core.setFailed(
+                  `${failure} ${describeApiFailure(statusError)} ` +
+                    "Authoritative status could not be recorded.",
+                );
+              }
+            };
+
+            if (!pullNumber) {
+              core.setFailed("Pull request number is unavailable.");
+              return;
+            }
+
+            try {
+              const { data: pull } = await callApi("pulls.get", () =>
+                github.rest.pulls.get({
+                  owner,
+                  repo,
+                  pull_number: pullNumber,
+                }),
+              );
+              headSha = pull.head?.sha;
+              if (!headSha) {
+                core.setFailed("Pull request head SHA is unavailable.");
+                return;
+              }
+              const denyPolicy = async (description, warningMessage) => {
+                await setStatus("failure", description);
+                core.warning(warningMessage);
+              };
+
+              await setStatus("pending", "Evaluating base-trusted CI control policy.");
+
+              const files = await callApi("pulls.listFiles", () =>
+                github.paginate(github.rest.pulls.listFiles, {
+                  owner,
+                  repo,
+                  pull_number: pullNumber,
+                  per_page: 100,
+                }),
+              );
+              if (files.length !== pull.changed_files) {
+                await denyPolicy(
+                  "Could not enumerate every changed file; review is required.",
+                  `Expected ${pull.changed_files} changed files but received ${files.length}.`,
+                );
+                return;
+              }
+              const isCiControlPath = (path) =>
+                Boolean(path) &&
+                (path.startsWith(".github/workflows/") ||
+                  path.startsWith(".github/actions/") ||
+                  path.startsWith("scripts/ci/") ||
+                  path.startsWith("tests/ci/"));
+              const changesCiControl = files.some(
+                (file) =>
+                  isCiControlPath(file.filename) ||
+                  isCiControlPath(file.previous_filename),
+              );
+
+              if (!changesCiControl) {
+                await setStatus("success", "No CI control paths changed.");
+                return;
+              }
+
+              const reviews = await callApi("pulls.listReviews", () =>
+                github.paginate(github.rest.pulls.listReviews, {
+                  owner,
+                  repo,
+                  pull_number: pullNumber,
+                  per_page: 100,
+                }),
+              );
+              const latestDecisionByReviewer = new Map();
+              for (const review of reviews) {
+                if (
+                  !review.user ||
+                  review.user.id === pull.user.id ||
+                  review.state === "COMMENTED"
+                ) {
+                  continue;
+                }
+                latestDecisionByReviewer.set(review.user.id, review);
+              }
+
+              let approvedByWriter = false;
+              for (const review of latestDecisionByReviewer.values()) {
+                if (
+                  review.state !== "APPROVED" ||
+                  review.commit_id !== headSha
+                ) {
+                  continue;
+                }
+                try {
+                  const { data: permission } = await callApi(
+                    "repos.getCollaboratorPermissionLevel",
+                    () =>
+                      github.rest.repos.getCollaboratorPermissionLevel({
+                        owner,
+                        repo,
+                        username: review.user.login,
+                      }),
+                  );
+                  if (["admin", "maintain", "write"].includes(permission.permission)) {
+                    approvedByWriter = true;
+                    break;
+                  }
+                } catch (error) {
+                  if (error?.status === 404) {
+                    core.info(
+                      `Reviewer ${review.user.login} has no collaborator permission.`,
+                    );
+                    continue;
+                  }
+                  throw error;
+                }
+              }
+
+              if (!approvedByWriter) {
+                await denyPolicy(
+                  "Fresh approval from a write maintainer is required.",
+                  "CI control changes require an independent approval on the current head. " +
+                    "After approval, comment /recheck-ci-control on the pull request.",
+                );
+                return;
+              }
+
+              await setStatus(
+                "success",
+                "CI control change approved on the current head.",
+              );
+            } catch (error) {
+              await reportOperationalError(error);
+            }

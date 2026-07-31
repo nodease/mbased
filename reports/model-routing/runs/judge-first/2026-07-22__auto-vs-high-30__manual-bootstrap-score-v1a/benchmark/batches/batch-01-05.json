@@ -1,0 +1,792 @@
+{
+  "executed_at": "2026-07-22T00:15:28.679592+00:00",
+  "phase": "benchmark",
+  "quality_evaluation_enabled": true,
+  "workflow_id": "98000000-0000-0000-0000-000000000002",
+  "node_id": "llm-triage",
+  "case_count": 5,
+  "latest_batch": {
+    "offset": 0,
+    "count": 5,
+    "completed_case_count": 5
+  },
+  "available_models": [
+    "gpt-4o-mini",
+    "gpt-4.1-mini",
+    "gpt-4.1",
+    "gpt-4o",
+    "gpt-5-mini",
+    "gpt-5.4-mini",
+    "gpt-5.4",
+    "gpt-5.6-sol",
+    "gpt-5.6-luna",
+    "gpt-5.6-terra",
+    "o3"
+  ],
+  "routing_judge_model": "gpt-5.4-mini",
+  "quality_judge_model": "gpt-5.4",
+  "runs": [
+    {
+      "case_id": "benchmark-holdout-001",
+      "category": "holdout_product_help",
+      "expected_difficulty": "economy",
+      "customer_tier": "business",
+      "input": {
+        "request": "실행 비교 화면에서 기준 실행을 바꾸는 방법을 알려 주세요.",
+        "context": "지식 베이스 검색이나 외부 문서 조회 없이, 요청에 포함된 정보만 사용합니다.",
+        "constraints": [
+          "근거 없는 사실을 확정하지 않습니다.",
+          "누락된 정보는 assumptions에 분리합니다.",
+          "필수 JSON 필드를 모두 반환합니다."
+        ],
+        "output_mode": "checklist"
+      },
+      "execution_order": [
+        "high_fixed",
+        "automatic"
+      ],
+      "arms": {
+        "high_fixed": {
+          "arm": "high_fixed",
+          "selected_model": "None",
+          "task_cost_usd": 0.0,
+          "task_latency_ms": 73,
+          "workflow_latency_ms": 312,
+          "prompt_tokens": 0,
+          "completion_tokens": 0,
+          "total_tokens": 0,
+          "output_text": "",
+          "schema_pass": false,
+          "workflow_success": false,
+          "error": "ValueError: OpenAI 호출 실패: [WinError 10013] 액세스 권한에 의해 숨겨진 소켓에 액세스를 시도했습니다",
+          "routing": {},
+          "routing_judge_cost_usd": 0.0,
+          "routing_judge_tokens": 0,
+          "routing_judge_latency_ms": null
+        },
+        "automatic": {
+          "arm": "automatic",
+          "selected_model": "None",
+          "task_cost_usd": 0.0,
+          "task_latency_ms": 189,
+          "workflow_latency_ms": 269,
+          "prompt_tokens": 0,
+          "completion_tokens": 0,
+          "total_tokens": 0,
+          "output_text": "",
+          "schema_pass": false,
+          "workflow_success": false,
+          "error": "ValueError: OpenAI 호출 실패: [WinError 10013] 액세스 권한에 의해 숨겨진 소켓에 액세스를 시도했습니다",
+          "routing": {},
+          "routing_judge_cost_usd": 0.0,
+          "routing_judge_tokens": 0,
+          "routing_judge_latency_ms": null
+        }
+      },
+      "routing_accuracy": {
+        "classification": "unclassified",
+        "selected_model": "None",
+        "canonical_model_id": "none",
+        "capability_source": null,
+        "capability_tier": null,
+        "complexity_ceiling": null,
+        "acceptable_model_ids": [
+          "gpt-4o-mini",
+          "gpt-4.1-mini",
+          "gpt-5-mini",
+          "gpt-5.6-luna"
+        ],
+        "underpowered_model_ids": [],
+        "overprovisioned_model_ids": [
+          "gpt-5.4",
+          "gpt-5.6-sol",
+          "o3"
+        ]
+      },
+      "quality": {
+        "automatic": {
+          "quality_score": null,
+          "contract_pass": null,
+          "reason": "품질 평가 시스템 오류",
+          "evaluation_status": "failed"
+        },
+        "high_fixed": {
+          "quality_score": null,
+          "contract_pass": null,
+          "reason": "품질 평가 시스템 오류",
+          "evaluation_status": "failed"
+        }
+      },
+      "quality_evaluation": {
+        "error": "ValueError:OpenAI 호출 실패: [WinError 10013] 액세스 권한에 의해 숨겨진 소켓에 액세스를 시도했습니다",
+        "attempt_count": 3,
+        "evaluation_status": "failed"
+      }
+    },
+    {
+      "case_id": "benchmark-holdout-005",
+      "category": "holdout_access",
+      "expected_difficulty": "balanced",
+      "customer_tier": "enterprise",
+      "input": {
+        "request": "감사 담당자에게 이번 달 실행 로그만 읽을 수 있는 임시 권한을 부여하려 합니다.",
+        "context": "지식 베이스 검색이나 외부 문서 조회 없이, 요청에 포함된 정보만 사용합니다.",
+        "constraints": [
+          "근거 없는 사실을 확정하지 않습니다.",
+          "누락된 정보는 assumptions에 분리합니다.",
+          "필수 JSON 필드를 모두 반환합니다."
+        ],
+        "output_mode": "checklist"
+      },
+      "execution_order": [
+        "automatic",
+        "high_fixed"
+      ],
+      "arms": {
+        "automatic": {
+          "arm": "automatic",
+          "selected_model": "None",
+          "task_cost_usd": 0.0,
+          "task_latency_ms": 205,
+          "workflow_latency_ms": 253,
+          "prompt_tokens": 0,
+          "completion_tokens": 0,
+          "total_tokens": 0,
+          "output_text": "",
+          "schema_pass": false,
+          "workflow_success": false,
+          "error": "ValueError: OpenAI 호출 실패: [WinError 10013] 액세스 권한에 의해 숨겨진 소켓에 액세스를 시도했습니다",
+          "routing": {},
+          "routing_judge_cost_usd": 0.0,
+          "routing_judge_tokens": 0,
+          "routing_judge_latency_ms": null
+        },
+        "high_fixed": {
+          "arm": "high_fixed",
+          "selected_model": "None",
+          "task_cost_usd": 0.0,
+          "task_latency_ms": 72,
+          "workflow_latency_ms": 133,
+          "prompt_tokens": 0,
+          "completion_tokens": 0,
+          "total_tokens": 0,
+          "output_text": "",
+          "schema_pass": false,
+          "workflow_success": false,
+          "error": "ValueError: OpenAI 호출 실패: [WinError 10013] 액세스 권한에 의해 숨겨진 소켓에 액세스를 시도했습니다",
+          "routing": {},
+          "routing_judge_cost_usd": 0.0,
+          "routing_judge_tokens": 0,
+          "routing_judge_latency_ms": null
+        }
+      },
+      "routing_accuracy": {
+        "classification": "unclassified",
+        "selected_model": "None",
+        "canonical_model_id": "none",
+        "capability_source": null,
+        "capability_tier": null,
+        "complexity_ceiling": null,
+        "acceptable_model_ids": [
+          "gpt-4.1-mini",
+          "gpt-4o",
+          "gpt-5-mini",
+          "gpt-5.4-mini",
+          "gpt-5.6-terra"
+        ],
+        "underpowered_model_ids": [
+          "gpt-4o-mini",
+          "gpt-5.6-luna"
+        ],
+        "overprovisioned_model_ids": [
+          "gpt-5.6-sol",
+          "o3"
+        ]
+      },
+      "quality": {
+        "automatic": {
+          "quality_score": null,
+          "contract_pass": null,
+          "reason": "품질 평가 시스템 오류",
+          "evaluation_status": "failed"
+        },
+        "high_fixed": {
+          "quality_score": null,
+          "contract_pass": null,
+          "reason": "품질 평가 시스템 오류",
+          "evaluation_status": "failed"
+        }
+      },
+      "quality_evaluation": {
+        "error": "ValueError:OpenAI 호출 실패: [WinError 10013] 액세스 권한에 의해 숨겨진 소켓에 액세스를 시도했습니다",
+        "attempt_count": 3,
+        "evaluation_status": "failed"
+      }
+    },
+    {
+      "case_id": "benchmark-holdout-009",
+      "category": "holdout_finance",
+      "expected_difficulty": "balanced",
+      "customer_tier": "business",
+      "input": {
+        "request": "사용량 보고서와 청구서의 토큰 합계가 다릅니다. 고객에게 답하기 전 확인할 자료를 정리해 주세요.",
+        "context": "지식 베이스 검색이나 외부 문서 조회 없이, 요청에 포함된 정보만 사용합니다.",
+        "constraints": [
+          "근거 없는 사실을 확정하지 않습니다.",
+          "누락된 정보는 assumptions에 분리합니다.",
+          "필수 JSON 필드를 모두 반환합니다."
+        ],
+        "output_mode": "checklist"
+      },
+      "execution_order": [
+        "automatic",
+        "high_fixed"
+      ],
+      "arms": {
+        "automatic": {
+          "arm": "automatic",
+          "selected_model": "None",
+          "task_cost_usd": 0.0,
+          "task_latency_ms": 202,
+          "workflow_latency_ms": 271,
+          "prompt_tokens": 0,
+          "completion_tokens": 0,
+          "total_tokens": 0,
+          "output_text": "",
+          "schema_pass": false,
+          "workflow_success": false,
+          "error": "ValueError: OpenAI 호출 실패: [WinError 10013] 액세스 권한에 의해 숨겨진 소켓에 액세스를 시도했습니다",
+          "routing": {},
+          "routing_judge_cost_usd": 0.0,
+          "routing_judge_tokens": 0,
+          "routing_judge_latency_ms": null
+        },
+        "high_fixed": {
+          "arm": "high_fixed",
+          "selected_model": "None",
+          "task_cost_usd": 0.0,
+          "task_latency_ms": 48,
+          "workflow_latency_ms": 98,
+          "prompt_tokens": 0,
+          "completion_tokens": 0,
+          "total_tokens": 0,
+          "output_text": "",
+          "schema_pass": false,
+          "workflow_success": false,
+          "error": "ValueError: OpenAI 호출 실패: [WinError 10013] 액세스 권한에 의해 숨겨진 소켓에 액세스를 시도했습니다",
+          "routing": {},
+          "routing_judge_cost_usd": 0.0,
+          "routing_judge_tokens": 0,
+          "routing_judge_latency_ms": null
+        }
+      },
+      "routing_accuracy": {
+        "classification": "unclassified",
+        "selected_model": "None",
+        "canonical_model_id": "none",
+        "capability_source": null,
+        "capability_tier": null,
+        "complexity_ceiling": null,
+        "acceptable_model_ids": [
+          "gpt-4.1-mini",
+          "gpt-4o",
+          "gpt-5-mini",
+          "gpt-5.4-mini",
+          "gpt-5.6-terra"
+        ],
+        "underpowered_model_ids": [
+          "gpt-4o-mini",
+          "gpt-5.6-luna"
+        ],
+        "overprovisioned_model_ids": [
+          "gpt-5.6-sol",
+          "o3"
+        ]
+      },
+      "quality": {
+        "automatic": {
+          "quality_score": null,
+          "contract_pass": null,
+          "reason": "품질 평가 시스템 오류",
+          "evaluation_status": "failed"
+        },
+        "high_fixed": {
+          "quality_score": null,
+          "contract_pass": null,
+          "reason": "품질 평가 시스템 오류",
+          "evaluation_status": "failed"
+        }
+      },
+      "quality_evaluation": {
+        "error": "ValueError:OpenAI 호출 실패: [WinError 10013] 액세스 권한에 의해 숨겨진 소켓에 액세스를 시도했습니다",
+        "attempt_count": 3,
+        "evaluation_status": "failed"
+      }
+    },
+    {
+      "case_id": "benchmark-holdout-008",
+      "category": "holdout_access",
+      "expected_difficulty": "advanced",
+      "customer_tier": "enterprise",
+      "input": {
+        "request": "권한 회수 후에도 이전 토큰으로 관리자 API 호출이 성공했습니다. 차단과 조사 순서를 제시해 주세요.",
+        "context": "지식 베이스 검색이나 외부 문서 조회 없이, 요청에 포함된 정보만 사용합니다.",
+        "constraints": [
+          "근거 없는 사실을 확정하지 않습니다.",
+          "누락된 정보는 assumptions에 분리합니다.",
+          "필수 JSON 필드를 모두 반환합니다.",
+          "위험하거나 되돌리기 어려운 조치는 승인 전제로 보수적으로 제안합니다."
+        ],
+        "output_mode": "analysis"
+      },
+      "execution_order": [
+        "automatic",
+        "high_fixed"
+      ],
+      "arms": {
+        "automatic": {
+          "arm": "automatic",
+          "selected_model": "None",
+          "task_cost_usd": 0.0,
+          "task_latency_ms": 188,
+          "workflow_latency_ms": 256,
+          "prompt_tokens": 0,
+          "completion_tokens": 0,
+          "total_tokens": 0,
+          "output_text": "",
+          "schema_pass": false,
+          "workflow_success": false,
+          "error": "ValueError: OpenAI 호출 실패: [WinError 10013] 액세스 권한에 의해 숨겨진 소켓에 액세스를 시도했습니다",
+          "routing": {},
+          "routing_judge_cost_usd": 0.0,
+          "routing_judge_tokens": 0,
+          "routing_judge_latency_ms": null
+        },
+        "high_fixed": {
+          "arm": "high_fixed",
+          "selected_model": "None",
+          "task_cost_usd": 0.0,
+          "task_latency_ms": 63,
+          "workflow_latency_ms": 121,
+          "prompt_tokens": 0,
+          "completion_tokens": 0,
+          "total_tokens": 0,
+          "output_text": "",
+          "schema_pass": false,
+          "workflow_success": false,
+          "error": "ValueError: OpenAI 호출 실패: [WinError 10013] 액세스 권한에 의해 숨겨진 소켓에 액세스를 시도했습니다",
+          "routing": {},
+          "routing_judge_cost_usd": 0.0,
+          "routing_judge_tokens": 0,
+          "routing_judge_latency_ms": null
+        }
+      },
+      "routing_accuracy": {
+        "classification": "unclassified",
+        "selected_model": "None",
+        "canonical_model_id": "none",
+        "capability_source": null,
+        "capability_tier": null,
+        "complexity_ceiling": null,
+        "acceptable_model_ids": [
+          "gpt-5.4",
+          "gpt-5.6-sol",
+          "o3"
+        ],
+        "underpowered_model_ids": [
+          "gpt-4o-mini",
+          "gpt-4.1-mini",
+          "gpt-5.6-luna"
+        ],
+        "overprovisioned_model_ids": []
+      },
+      "quality": {
+        "automatic": {
+          "quality_score": null,
+          "contract_pass": null,
+          "reason": "품질 평가 시스템 오류",
+          "evaluation_status": "failed"
+        },
+        "high_fixed": {
+          "quality_score": null,
+          "contract_pass": null,
+          "reason": "품질 평가 시스템 오류",
+          "evaluation_status": "failed"
+        }
+      },
+      "quality_evaluation": {
+        "error": "ValueError:OpenAI 호출 실패: [WinError 10013] 액세스 권한에 의해 숨겨진 소켓에 액세스를 시도했습니다",
+        "attempt_count": 3,
+        "evaluation_status": "failed"
+      }
+    },
+    {
+      "case_id": "benchmark-holdout-017",
+      "category": "holdout_reliability",
+      "expected_difficulty": "advanced",
+      "customer_tier": "enterprise",
+      "input": {
+        "request": "장애 복구 중 동일 주문이 두 번 처리될 가능성이 있습니다. 데이터 손상을 막는 복구 순서를 정리해 주세요.",
+        "context": "지식 베이스 검색이나 외부 문서 조회 없이, 요청에 포함된 정보만 사용합니다.",
+        "constraints": [
+          "근거 없는 사실을 확정하지 않습니다.",
+          "누락된 정보는 assumptions에 분리합니다.",
+          "필수 JSON 필드를 모두 반환합니다.",
+          "위험하거나 되돌리기 어려운 조치는 승인 전제로 보수적으로 제안합니다."
+        ],
+        "output_mode": "analysis"
+      },
+      "execution_order": [
+        "automatic",
+        "high_fixed"
+      ],
+      "arms": {
+        "automatic": {
+          "arm": "automatic",
+          "selected_model": "None",
+          "task_cost_usd": 0.0,
+          "task_latency_ms": 181,
+          "workflow_latency_ms": 231,
+          "prompt_tokens": 0,
+          "completion_tokens": 0,
+          "total_tokens": 0,
+          "output_text": "",
+          "schema_pass": false,
+          "workflow_success": false,
+          "error": "ValueError: OpenAI 호출 실패: [WinError 10013] 액세스 권한에 의해 숨겨진 소켓에 액세스를 시도했습니다",
+          "routing": {},
+          "routing_judge_cost_usd": 0.0,
+          "routing_judge_tokens": 0,
+          "routing_judge_latency_ms": null
+        },
+        "high_fixed": {
+          "arm": "high_fixed",
+          "selected_model": "None",
+          "task_cost_usd": 0.0,
+          "task_latency_ms": 58,
+          "workflow_latency_ms": 120,
+          "prompt_tokens": 0,
+          "completion_tokens": 0,
+          "total_tokens": 0,
+          "output_text": "",
+          "schema_pass": false,
+          "workflow_success": false,
+          "error": "ValueError: OpenAI 호출 실패: [WinError 10013] 액세스 권한에 의해 숨겨진 소켓에 액세스를 시도했습니다",
+          "routing": {},
+          "routing_judge_cost_usd": 0.0,
+          "routing_judge_tokens": 0,
+          "routing_judge_latency_ms": null
+        }
+      },
+      "routing_accuracy": {
+        "classification": "unclassified",
+        "selected_model": "None",
+        "canonical_model_id": "none",
+        "capability_source": null,
+        "capability_tier": null,
+        "complexity_ceiling": null,
+        "acceptable_model_ids": [
+          "gpt-5.4",
+          "gpt-5.6-sol",
+          "o3"
+        ],
+        "underpowered_model_ids": [
+          "gpt-4o-mini",
+          "gpt-4.1-mini",
+          "gpt-5.6-luna"
+        ],
+        "overprovisioned_model_ids": []
+      },
+      "quality": {
+        "automatic": {
+          "quality_score": null,
+          "contract_pass": null,
+          "reason": "품질 평가 시스템 오류",
+          "evaluation_status": "failed"
+        },
+        "high_fixed": {
+          "quality_score": null,
+          "contract_pass": null,
+          "reason": "품질 평가 시스템 오류",
+          "evaluation_status": "failed"
+        }
+      },
+      "quality_evaluation": {
+        "error": "ValueError:OpenAI 호출 실패: [WinError 10013] 액세스 권한에 의해 숨겨진 소켓에 액세스를 시도했습니다",
+        "attempt_count": 3,
+        "evaluation_status": "failed"
+      }
+    }
+  ],
+  "arm_summary": {
+    "automatic": {
+      "run_count": 5,
+      "task_cost_usd": 0.0,
+      "routing_judge_cost_usd": 0.0,
+      "total_product_cost_usd": 0.0,
+      "average_task_latency_ms": 193.0,
+      "average_end_to_end_latency_ms": 256.0,
+      "p95_task_latency_ms": 205.0,
+      "total_tokens": 0,
+      "schema_pass_rate": 0.0,
+      "workflow_success_rate": 0.0,
+      "quality_score_average": null,
+      "quality_pass_rate": null,
+      "quality_evaluation_failure_count": 5,
+      "model_distribution": {
+        "None": 5
+      },
+      "runtime_judge_call_count": 0
+    },
+    "high_fixed": {
+      "run_count": 5,
+      "task_cost_usd": 0.0,
+      "routing_judge_cost_usd": 0.0,
+      "total_product_cost_usd": 0.0,
+      "average_task_latency_ms": 62.8,
+      "average_end_to_end_latency_ms": 156.8,
+      "p95_task_latency_ms": 73.0,
+      "total_tokens": 0,
+      "schema_pass_rate": 0.0,
+      "workflow_success_rate": 0.0,
+      "quality_score_average": null,
+      "quality_pass_rate": null,
+      "quality_evaluation_failure_count": 5,
+      "model_distribution": {
+        "None": 5
+      },
+      "runtime_judge_call_count": 0
+    }
+  },
+  "learning_summary": {
+    "judge_label_count": 0,
+    "distinct_selected_model_count": 1,
+    "selected_models": {
+      "None": 5
+    },
+    "decision_source_distribution": {
+      "unknown": 5
+    },
+    "local_router_takeover_count": 0,
+    "local_router_uncertain_count": 0,
+    "local_confidence_threshold": 0.78,
+    "judge_confidence_average": null,
+    "judge_confidence_p95": null,
+    "interpretation": "local_router_takeover_count가 0이면, 현재 학습 표본 또는 confidence가 임계값에 도달하지 않아 모든 요청이 Runtime Judge로 처리된 것입니다.",
+    "persisted": {
+      "policy_status": "active",
+      "policy_version": "judge-first-economics-v1",
+      "learner_id": "766934dd-a437-45eb-9d45-743631a62d7f",
+      "learner_status": "collecting",
+      "task_fingerprint": "9d9489b146e80a39b2c7c81d294374ed9c85511045a58ce9235e8a0864ea013b",
+      "learning_mode": "judge_first",
+      "judged_request_count": 24,
+      "operational_run_count": 24,
+      "selected_model_ids": [
+        "gpt-4.1-mini",
+        "gpt-4o-mini",
+        "gpt-5-mini",
+        "gpt-5.4-mini"
+      ],
+      "selected_model_counts": {
+        "gpt-5-mini": 9,
+        "gpt-4o-mini": 10,
+        "gpt-4.1-mini": 2,
+        "gpt-5.4-mini": 3
+      },
+      "active_version": null,
+      "pending_count": 0,
+      "accepted_count": 24,
+      "rejected_count": 0,
+      "artifact_kind": "multilingual_e5_task_requirements_ordinal_v3",
+      "artifact_encoder": "intfloat/multilingual-e5-base",
+      "artifact_label_models": [
+        "gpt-4.1-mini",
+        "gpt-4o-mini",
+        "gpt-5-mini",
+        "gpt-5.4-mini"
+      ],
+      "artifact_trained_example_count": 24,
+      "recent_evaluation": {
+        "sample_count": 0,
+        "axis_accuracies": {
+          "decision_impact": 0.0,
+          "task_complexity": 0.0,
+          "evidence_synthesis": 0.0
+        },
+        "axis_mean_errors": {
+          "decision_impact": 0.0,
+          "task_complexity": 0.0,
+          "evidence_synthesis": 0.0
+        },
+        "judge_match_rate": 0.0,
+        "contract_pass_rate": 0.0,
+        "judge_label_diversity": 0,
+        "local_prediction_diversity": 0,
+        "high_risk_underestimation_count": 0
+      },
+      "last_learning_error": null
+    }
+  },
+  "policy_checkpoint": {
+    "policy": {
+      "status": "active",
+      "policy_version": "judge-first-economics-v1",
+      "active_policy": {
+        "strategy_id": "judge_bootstrap_incremental_v1",
+        "judge_model_id": "gpt-5.4-mini",
+        "default_model_id": "gpt-5.4-mini",
+        "fallback_model_id": "gpt-4.1",
+        "global_profile_catalog": {
+          "candidates": [
+            {
+              "model_id": "gpt-4o-mini"
+            },
+            {
+              "model_id": "gpt-4.1-mini"
+            },
+            {
+              "model_id": "gpt-4.1"
+            },
+            {
+              "model_id": "gpt-4o"
+            },
+            {
+              "model_id": "gpt-5-mini"
+            },
+            {
+              "model_id": "gpt-5.4-mini"
+            },
+            {
+              "model_id": "gpt-5.4"
+            },
+            {
+              "model_id": "gpt-5.6-sol"
+            },
+            {
+              "model_id": "gpt-5.6-luna"
+            },
+            {
+              "model_id": "gpt-5.6-terra"
+            },
+            {
+              "model_id": "o3"
+            }
+          ]
+        }
+      },
+      "performance_checkpoint": {},
+      "pending_policy": null,
+      "refresh_every_runs": 100,
+      "eligible_runs_since_last_refresh": 30,
+      "refresh_requested_at": null,
+      "last_refresh_result": "experiment_refresh_suppressed"
+    },
+    "performances": [
+      {
+        "model_id": "gpt-5.4-mini",
+        "input_profile": "unknown",
+        "run_count": 3,
+        "success_count": 3,
+        "schema_pass_count": 3,
+        "schema_eval_count": 3,
+        "downstream_success_count": 3,
+        "downstream_eval_count": 3,
+        "fallback_count": 0,
+        "retry_count": 0,
+        "total_cost": 0.008087,
+        "total_tokens": 3067,
+        "total_latency_ms": 0
+      },
+      {
+        "model_id": "gpt-4.1-mini",
+        "input_profile": "unknown",
+        "run_count": 2,
+        "success_count": 2,
+        "schema_pass_count": 2,
+        "schema_eval_count": 2,
+        "downstream_success_count": 2,
+        "downstream_eval_count": 2,
+        "fallback_count": 0,
+        "retry_count": 0,
+        "total_cost": 0.001299,
+        "total_tokens": 1585,
+        "total_latency_ms": 0
+      },
+      {
+        "model_id": "gpt-5-mini",
+        "input_profile": "unknown",
+        "run_count": 9,
+        "success_count": 9,
+        "schema_pass_count": 9,
+        "schema_eval_count": 9,
+        "downstream_success_count": 9,
+        "downstream_eval_count": 9,
+        "fallback_count": 0,
+        "retry_count": 0,
+        "total_cost": 0.016134,
+        "total_tokens": 12035,
+        "total_latency_ms": 0
+      },
+      {
+        "model_id": "gpt-4.1",
+        "input_profile": "unknown",
+        "run_count": 6,
+        "success_count": 6,
+        "schema_pass_count": 6,
+        "schema_eval_count": 6,
+        "downstream_success_count": 6,
+        "downstream_eval_count": 6,
+        "fallback_count": 0,
+        "retry_count": 0,
+        "total_cost": 0.021796,
+        "total_tokens": 4952,
+        "total_latency_ms": 0
+      },
+      {
+        "model_id": "gpt-4o-mini",
+        "input_profile": "unknown",
+        "run_count": 10,
+        "success_count": 10,
+        "schema_pass_count": 10,
+        "schema_eval_count": 10,
+        "downstream_success_count": 10,
+        "downstream_eval_count": 10,
+        "fallback_count": 0,
+        "retry_count": 0,
+        "total_cost": 0.001484,
+        "total_tokens": 6069,
+        "total_latency_ms": 0
+      }
+    ]
+  },
+  "quality_judge_total_cost_usd": 0.0,
+  "quality_judge_call_count": 0,
+  "quality_judge_errors": [
+    {
+      "error": "ValueError:OpenAI 호출 실패: [WinError 10013] 액세스 권한에 의해 숨겨진 소켓에 액세스를 시도했습니다",
+      "attempt_count": 3,
+      "evaluation_status": "failed"
+    },
+    {
+      "error": "ValueError:OpenAI 호출 실패: [WinError 10013] 액세스 권한에 의해 숨겨진 소켓에 액세스를 시도했습니다",
+      "attempt_count": 3,
+      "evaluation_status": "failed"
+    },
+    {
+      "error": "ValueError:OpenAI 호출 실패: [WinError 10013] 액세스 권한에 의해 숨겨진 소켓에 액세스를 시도했습니다",
+      "attempt_count": 3,
+      "evaluation_status": "failed"
+    },
+    {
+      "error": "ValueError:OpenAI 호출 실패: [WinError 10013] 액세스 권한에 의해 숨겨진 소켓에 액세스를 시도했습니다",
+      "attempt_count": 3,
+      "evaluation_status": "failed"
+    },
+    {
+      "error": "ValueError:OpenAI 호출 실패: [WinError 10013] 액세스 권한에 의해 숨겨진 소켓에 액세스를 시도했습니다",
+      "attempt_count": 3,
+      "evaluation_status": "failed"
+    }
+  ]
+}

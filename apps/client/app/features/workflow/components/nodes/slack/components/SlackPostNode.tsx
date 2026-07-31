@@ -6,11 +6,20 @@ import { SlackPostNodeData } from '../../../../types/Nodes';
 import { BaseNode } from '../../BaseNode';
 import { ValidationBadge } from '../../../ui/ValidationBadge';
 import { hasIncompleteVariables } from '../../../../utils/validationUtils';
+import {
+  collectSlackTemplateVariables,
+  isNonEmptySlackJsonArrayTemplate,
+  isValidSlackJsonArrayTemplate,
+  isValidCommercialSlackWebhookUrl,
+} from '../../../../utils/slackDelivery';
 
 export const SlackPostNode = memo(
-  ({ data, selected }: NodeProps<Node<SlackPostNodeData>>) => {
+  ({ id, data, selected }: NodeProps<Node<SlackPostNodeData>>) => {
     const mode = data.slackMode || 'api';
-    const urlPreview = data.url || 'https://hooks.slack.com/services/...';
+    const urlPreview =
+      mode === 'api'
+        ? 'slack.com / chat.postMessage'
+        : data.url || 'https://hooks.slack.com/services/...';
     const modeClass =
       mode === 'api'
         ? 'bg-blue-100 text-blue-700 border-blue-200'
@@ -18,74 +27,73 @@ export const SlackPostNode = memo(
     const modeLabel = mode === 'api' ? 'API' : 'Web Hook';
     const trimmedUrl = (data.url || '').trim();
     const blocksText = (data.blocks || '').trim();
+    const attachmentsText = (data.attachments || '').trim();
 
     const missingVariables = useMemo(() => {
-      const regex = /{{\s*([^}]+?)\s*}}/g;
-      const combined = (data.message || '') + (data.blocks || '');
       const registered = new Set(
         (data.referenced_variables || [])
           .map((v) => v.name?.trim())
           .filter(Boolean),
       );
-      const missing = new Set<string>();
-      let match;
-      while ((match = regex.exec(combined)) !== null) {
-        const varName = match[1].trim();
-        if (varName && !registered.has(varName)) {
-          missing.add(varName);
-        }
-      }
-      return Array.from(missing);
-    }, [data.message, data.blocks, data.referenced_variables]);
+      return collectSlackTemplateVariables(
+        data.message,
+        data.blocks,
+        data.attachments,
+        mode === 'api' ? data.channel : undefined,
+        data.thread_ts,
+        data.username,
+        data.icon_emoji,
+      ).filter((name) => !registered.has(name));
+    }, [
+      data.attachments,
+      data.blocks,
+      data.channel,
+      data.icon_emoji,
+      data.message,
+      mode,
+      data.referenced_variables,
+      data.thread_ts,
+      data.username,
+    ]);
 
     const blocksJsonError = useMemo(() => {
       if (!blocksText) return false;
-      try {
-        JSON.parse(blocksText);
-        return false;
-      } catch {
-        return true;
-      }
+      return !isValidSlackJsonArrayTemplate(blocksText);
     }, [blocksText]);
 
+    const attachmentsJsonError = useMemo(() => {
+      if (!attachmentsText) return false;
+      return !isValidSlackJsonArrayTemplate(attachmentsText);
+    }, [attachmentsText]);
+
     const isWebhookUrlValid =
-      mode !== 'webhook'
-        ? true
-        : trimmedUrl.startsWith('https://hooks.slack.com/') &&
-          trimmedUrl.includes('/services/');
+      mode !== 'webhook' || isValidCommercialSlackWebhookUrl(data.url);
 
-    const hasValidationIssue = useMemo(() => {
-      const hasMessage = !!data.message?.trim();
-      const hasValidBlocks = !!blocksText && !blocksJsonError;
+    const hasMessage = !!data.message?.trim();
+    const hasValidBlocks = isNonEmptySlackJsonArrayTemplate(blocksText);
+    const hasValidAttachments =
+      isNonEmptySlackJsonArrayTemplate(attachmentsText);
 
-      if (mode === 'webhook') {
-        if (!trimmedUrl || !isWebhookUrlValid) return true;
-      } else {
-        if (!trimmedUrl) return true;
-        if (!data.authConfig?.token?.trim()) return true;
-        if (!data.channel?.trim()) return true;
-      }
-
-      if (!hasMessage && !hasValidBlocks) return true;
-      if (blocksJsonError) return true;
-      if (missingVariables.length > 0) return true;
-      if (hasIncompleteVariables(data.referenced_variables)) return true;
-
-      return false;
-    }, [
-      mode,
-      trimmedUrl,
-      isWebhookUrlValid,
-      data.message,
-      data.authConfig?.token,
-      data.channel,
-      blocksText,
-      blocksJsonError,
-      missingVariables.length,
-    ]);
+    const hasValidationIssue =
+      mode === 'webhook'
+        ? !trimmedUrl ||
+          !isWebhookUrlValid ||
+          (!hasMessage && !hasValidBlocks && !hasValidAttachments) ||
+          blocksJsonError ||
+          attachmentsJsonError ||
+          missingVariables.length > 0 ||
+          hasIncompleteVariables(data.referenced_variables)
+        : !data.authConfig?.token?.trim() ||
+          !data.channel?.trim() ||
+          (!hasMessage && !hasValidBlocks && !hasValidAttachments) ||
+          blocksJsonError ||
+          attachmentsJsonError ||
+          missingVariables.length > 0 ||
+          hasIncompleteVariables(data.referenced_variables);
 
     return (
       <BaseNode
+        id={id}
         data={data}
         selected={selected}
         showSourceHandle={true}

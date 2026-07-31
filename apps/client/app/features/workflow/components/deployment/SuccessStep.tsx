@@ -2,26 +2,40 @@
 
 import { useState } from 'react';
 import { toast } from 'sonner';
-import { Copy, Eye, EyeOff, Clock, Globe } from 'lucide-react';
-import { DeploymentResult } from './types';
-import { DeploymentType } from '../../types/Deployment';
+import { CheckCircle2, Copy, Clock, Globe } from 'lucide-react';
+import type { DeploymentResult } from './types';
+import type { DeploymentType } from '../../types/Deployment';
 import { formatCronExpression } from './utils';
+import {
+  AppAuthSecretControl,
+  type AppAuthSecretReadiness,
+  type IssuedAppAuthSecret,
+} from '@/app/features/app/components/AppAuthSecretControl';
 
 interface SuccessStepProps {
   result: DeploymentResult;
   deploymentType: DeploymentType;
+  issuedSecret: IssuedAppAuthSecret | null;
+  onSecretAvailable: (secret: IssuedAppAuthSecret | null) => void;
   onClose: () => void;
 }
 
 export function SuccessStep({
   result,
   deploymentType,
+  issuedSecret,
+  onSecretAvailable,
   onClose,
 }: SuccessStepProps) {
-  const [inputValues, setInputValues] = useState<Record<string, any>>({});
+  const [inputValues, setInputValues] = useState<Record<string, string>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [testResponse, setTestResponse] = useState<string | null>(null);
-  const [showSecret, setShowSecret] = useState(false);
+  const [sessionTestSecret, setSessionTestSecret] = useState('');
+  const [appAuthSecretReadiness, setAppAuthSecretReadiness] =
+    useState<AppAuthSecretReadiness>('checking');
+  const issuedSecretValue =
+    appAuthSecretReadiness === 'ready' ? issuedSecret?.value : null;
+  const testAuthSecret = issuedSecretValue ?? sessionTestSecret;
 
   const handleCopy = (text: string) => {
     navigator.clipboard.writeText(text);
@@ -33,10 +47,13 @@ export function SuccessStep({
     typeof window !== 'undefined'
       ? window.location.origin
       : 'https://moduly-ai.cloud';
-  const frontendUrl =
-    typeof window !== 'undefined'
-      ? window.location.origin
-      : 'https://moduly-ai.cloud';
+  const embeddingPolicy = result.browser_access_policy?.embedding;
+  const parentOrigins = embeddingPolicy?.enabled
+    ? embeddingPolicy.parent_origins
+    : [];
+  const iframeCode = result.embedUrl
+    ? `<iframe src="${result.embedUrl}" width="100%" height="600" title="Nodease chatbot" frameborder="0"></iframe>`
+    : null;
   const API_URL = `${baseUrl}/api/v1/run/${result.url_slug}`;
 
   // Generate curl example
@@ -62,9 +79,7 @@ export function SuccessStep({
       .map((line, i) => (i === 0 ? line : `    ${line}`))
       .join('\n');
 
-    const authHeader = result.auth_secret
-      ? `  -H "Authorization: Bearer ${result.auth_secret.slice(0, 7)}${'\u2022'.repeat(result.auth_secret.length - 7)}" \\\n`
-      : '';
+    const authHeader = `  -H "Authorization: Bearer <APP_SECRET>" \\\n`;
 
     return `curl -X POST "${API_URL}" \\
   -H "Content-Type: application/json" \\
@@ -75,6 +90,7 @@ ${authHeader}  -d '{
 
   // Handle test execution
   const handleTestExecute = async () => {
+    if (!testAuthSecret) return;
     setIsLoading(true);
     setTestResponse(null);
 
@@ -82,9 +98,7 @@ ${authHeader}  -d '{
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
       };
-      if (result.auth_secret) {
-        headers['Authorization'] = `Bearer ${result.auth_secret}`;
-      }
+      headers['Authorization'] = `Bearer ${testAuthSecret}`;
 
       const response = await fetch(`/api/v1/run/${result.url_slug}`, {
         method: 'POST',
@@ -101,8 +115,9 @@ ${authHeader}  -d '{
       } else {
         toast.error('API 호출 오류', { duration: 1500 });
       }
-    } catch (error: any) {
-      setTestResponse(JSON.stringify({ error: error.message }, null, 2));
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      setTestResponse(JSON.stringify({ error: message }, null, 2));
       toast.error('테스트 실행 실패', { duration: 1500 });
     } finally {
       setIsLoading(false);
@@ -116,19 +131,7 @@ ${authHeader}  -d '{
     <>
       <div className="px-6 py-4 border-b border-gray-200 bg-green-50">
         <div className="flex items-center gap-2 text-green-700">
-          <svg
-            className="w-6 h-6"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M5 13l4 4L19 7"
-            />
-          </svg>
+          <CheckCircle2 className="h-6 w-6" />
           <h2 className="text-xl font-bold">배포 성공 (v{result.version})</h2>
         </div>
         <p className="text-sm text-green-600 mt-1 ml-8">
@@ -137,14 +140,29 @@ ${authHeader}  -d '{
       </div>
 
       <div className="p-6 space-y-6 max-h-[60vh] overflow-y-auto">
-        {/* Web App Share Link */}
-        {result.webAppUrl && (
+        {result.message && (
+          <div
+            role="status"
+            className="whitespace-pre-line rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900"
+          >
+            {result.message}
+          </div>
+        )}
+
+        {/* Web App / Chatbot Share Link */}
+        {result.webAppUrl && deploymentType !== 'internal_chatbot' && (
           <div className="border-2 border-blue-200 rounded-lg p-4 bg-blue-50">
             <label className="block text-sm font-semibold text-blue-900 mb-2">
-              웹 앱 공유 링크
+              {deploymentType === 'chatbot'
+                ? '공개 챗봇 공유 링크'
+                : deploymentType === 'widget'
+                  ? '위젯 직접 링크'
+                  : '웹 앱 공유 링크'}
             </label>
             <p className="text-xs text-blue-700 mb-3">
-              이 링크를 공유하면 누구나 워크플로우를 사용할 수 있습니다!
+              {deploymentType === 'chatbot' || deploymentType === 'widget'
+                ? '인증 없이 접근하며 공개 Collection에 연결된 지식만 검색됩니다.'
+                : '이 링크를 공유하면 누구나 워크플로우를 사용할 수 있습니다!'}
             </p>
             <div className="flex gap-2">
               <code className="flex-1 p-3 bg-white border border-blue-300 rounded text-sm text-blue-800 font-mono break-all leading-relaxed">
@@ -160,57 +178,68 @@ ${authHeader}  -d '{
           </div>
         )}
 
-        {/* Widget Embedding Code */}
-        {result.embedUrl && (
+        {deploymentType === 'internal_chatbot' && result.internalRunUrl && (
+          <div className="border-2 border-emerald-200 rounded-lg p-4 bg-emerald-50">
+            <label className="block text-sm font-semibold text-emerald-900 mb-2">
+              사내 인증 실행 링크
+            </label>
+            <p className="text-xs text-emerald-700 mb-3">
+              로그인한 사용자 권한으로 실행됩니다. 사내 private Knowledge/RAG는
+              이 링크에서 검증하세요.
+            </p>
+            <div className="flex gap-2">
+              <code className="flex-1 p-3 bg-white border border-emerald-300 rounded text-sm text-emerald-800 font-mono break-all leading-relaxed">
+                {result.internalRunUrl}
+              </code>
+              <a
+                href={result.internalRunUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-3 py-2 text-sm font-medium text-emerald-700 bg-white border border-emerald-300 hover:bg-emerald-100 rounded transition-colors whitespace-nowrap h-fit"
+              >
+                열기
+              </a>
+              <button
+                onClick={() => handleCopy(result.internalRunUrl!)}
+                className="px-3 py-2 text-sm font-medium text-white bg-emerald-600 hover:bg-emerald-700 rounded transition-colors whitespace-nowrap h-fit"
+              >
+                복사
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Public Chatbot / Widget Embedding Code */}
+        {iframeCode && embeddingPolicy?.enabled && (
           <div className="border-2 border-purple-200 rounded-lg p-4 bg-purple-50">
             <label className="block text-sm font-semibold text-purple-900 mb-2">
               웹사이트 임베딩 코드
             </label>
-            <p className="text-xs text-purple-700 mb-3">
-              아래 코드를 복사하여 웹사이트의{' '}
-              <code className="bg-purple-200 px-1 rounded">&lt;/body&gt;</code>{' '}
-              태그 직전에 붙여넣으세요!
+            <p className="mb-3 text-xs font-medium text-amber-700">
+              브라우저 제한 집행 중
             </p>
             <div className="relative">
               <pre className="p-4 bg-gray-900 rounded-lg text-xs text-gray-300 font-mono overflow-x-auto whitespace-pre leading-relaxed border border-gray-700">
-                {`<script>
-  window.ModulyConfig = {
-    appId: '${result.url_slug}',
-    frontendUrl: '${frontendUrl}'
-  };
-</script>
-<script src="${baseUrl}/static/widget.js"></script>`}
+                {iframeCode}
               </pre>
               <button
-                onClick={() =>
-                  handleCopy(
-                    `<script>
-  window.ModulyConfig = {
-    appId: '${result.url_slug}',
-    frontendUrl: '${frontendUrl}'
-  };
-</script>
-<script src="${baseUrl}/static/widget.js"></script>`,
-                  )
-                }
+                onClick={() => handleCopy(iframeCode)}
                 className="absolute top-2 right-2 px-2 py-1 text-xs font-medium text-gray-300 bg-gray-700 hover:bg-gray-600 rounded transition-colors"
               >
                 복사
               </button>
             </div>
-            <div className="mt-3 p-3 bg-purple-100 rounded border border-purple-200">
-              <p className="text-xs text-purple-800">
-                <strong>💡 미리보기:</strong> 우하단에 채팅 버튼이 나타나며,
-                클릭하면 채팅창이 열립니다.{' '}
-                <a
-                  href={result.embedUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="underline font-semibold"
-                >
-                  테스트 페이지 열기 →
-                </a>
-              </p>
+            <div className="mt-3 rounded-md border border-purple-200 bg-purple-100 p-3">
+              <div className="text-xs font-semibold text-purple-900">
+                허용 부모 origin
+              </div>
+              <ul className="mt-2 space-y-1 font-mono text-xs text-purple-800">
+                {parentOrigins.map((origin) => (
+                  <li className="break-all" key={origin}>
+                    {origin}
+                  </li>
+                ))}
+              </ul>
             </div>
           </div>
         )}
@@ -292,159 +321,57 @@ ${authHeader}  -d '{
 
         {/* Webhook Trigger Deployment */}
         {isWebhookTrigger && (
-          <div className="grid grid-cols-2 gap-6">
-            {/* Left Column - URL Information */}
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
             <div className="space-y-4">
               <h3 className="text-lg font-semibold text-gray-900">웹훅 URL</h3>
 
-              {/* Method 1: Integrated URL */}
-              <div className="border border-purple-200 rounded-lg p-4 bg-purple-50">
-                <label className="block text-sm font-semibold text-purple-900 mb-2">
-                  방법 1: 통합 URL
+              <div className="rounded-lg border border-purple-200 bg-purple-50 p-4">
+                <label className="mb-2 block text-sm font-semibold text-purple-900">
+                  Endpoint
                 </label>
                 <div className="flex gap-2">
-                  <code className="flex-1 p-3 bg-white border border-purple-300 rounded text-xs font-mono break-all">
-                    {baseUrl}/api/v1/hooks/{result.url_slug}?token=
-                    {result.auth_secret}
+                  <code className="flex-1 break-all rounded border border-purple-300 bg-white p-3 font-mono text-xs">
+                    {baseUrl}/api/v1/hooks/{result.url_slug}
                   </code>
                   <button
                     onClick={() =>
-                      handleCopy(
-                        `${baseUrl}/api/v1/hooks/${result.url_slug}?token=${result.auth_secret}`,
-                      )
+                      handleCopy(`${baseUrl}/api/v1/hooks/${result.url_slug}`)
                     }
-                    className="p-3 hover:bg-purple-100 rounded transition-colors text-purple-700 border border-purple-200 h-full flex items-center justify-center"
-                    title="Copy URL"
+                    className="flex h-full items-center justify-center rounded border border-purple-200 p-3 text-purple-700 transition-colors hover:bg-purple-100"
+                    title="Webhook URL 복사"
                   >
                     <Copy className="w-4 h-4" />
                   </button>
                 </div>
               </div>
 
-              {/* Method 2: Standard API */}
-              <div className="border border-purple-200 rounded-lg p-4 bg-purple-50">
-                <label className="block text-sm font-semibold text-purple-900 mb-2">
-                  방법 2: 표준 API
-                </label>
-
-                {/* URL */}
-                <div className="mb-3">
-                  <span className="text-xs font-semibold text-gray-700 block mb-1">
-                    URL:
-                  </span>
-                  <div className="flex gap-2">
-                    <code className="flex-1 p-2 bg-white border border-purple-300 rounded text-xs font-mono break-all">
-                      {baseUrl}/api/v1/hooks/{result.url_slug}
-                    </code>
-                    <button
-                      onClick={() =>
-                        handleCopy(`${baseUrl}/api/v1/hooks/${result.url_slug}`)
-                      }
-                      className="p-2 hover:bg-gray-100 rounded transition-colors text-gray-600 border border-gray-200"
-                      title="Copy URL"
-                    >
-                      <Copy className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
+              {result.appId && (
+                <div className="border-l-2 border-gray-200 pl-4">
+                  <AppAuthSecretControl
+                    appId={result.appId}
+                    issuedSecret={issuedSecret}
+                    onSecretAvailable={onSecretAvailable}
+                    onReadinessChange={setAppAuthSecretReadiness}
+                  />
                 </div>
-
-                {/* Auth Headers */}
-                <div>
-                  <label className="text-xs font-semibold text-gray-700 block mb-1">
-                    인증 (Secret Key):
-                  </label>
-                  <div className="flex items-center gap-2">
-                    <input
-                      type={showSecret ? 'text' : 'password'}
-                      value={result.auth_secret || ''}
-                      readOnly
-                      className="flex-1 px-2 py-1.5 text-xs border rounded bg-white font-mono"
-                    />
-                    <button
-                      onClick={() => setShowSecret(!showSecret)}
-                      className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600 border border-gray-200"
-                      title={showSecret ? 'Hide' : 'Show'}
-                    >
-                      {showSecret ? (
-                        <EyeOff className="w-3.5 h-3.5" />
-                      ) : (
-                        <Eye className="w-3.5 h-3.5" />
-                      )}
-                    </button>
-                    <button
-                      onClick={() => handleCopy(result.auth_secret || '')}
-                      className="p-1.5 hover:bg-gray-100 rounded transition-colors text-gray-600 border border-gray-200"
-                      title="Copy Secret"
-                    >
-                      <Copy className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-              </div>
+              )}
             </div>
 
-            {/* Right Column - Integration Guide */}
             <div className="border-l border-gray-200 pl-6">
-              <h3 className="text-lg font-semibold text-gray-900 mb-2">
-                📖 웹훅 연동 방식 상세 안내
+              <h3 className="mb-2 text-lg font-semibold text-gray-900">
+                연동 조건
               </h3>
-              <p className="text-xs text-gray-600 mb-6 leading-relaxed">
-                사용하시는 외부 서비스의 보안 정책과 설정 환경에 맞춰 적절한
-                방식을 선택하세요.
-              </p>
-
-              <div className="space-y-6">
-                {/* Method 1 Guide */}
-                <div>
-                  <h4 className="font-bold text-gray-800 text-sm mb-2 flex items-center gap-2">
-                    <span className="w-1.5 h-1.5 rounded-full bg-purple-500"></span>
-                    방식 1. 통합 URL (토큰 포함)
-                  </h4>
-                  <ul className="space-y-2 text-xs text-gray-600 pl-3 border-l-2 border-gray-100 ml-1">
-                    <li>
-                      <span className="font-semibold text-gray-700">특징:</span>{' '}
-                      URL 경로 끝에 인증 토큰(<code>?token=...</code>)이 미리
-                      포함되어 있는 형태입니다.
-                    </li>
-                    <li>
-                      <span className="font-semibold text-gray-700">용도:</span>{' '}
-                      별도의 HTTP 헤더(Header)를 설정할 수 없고 URL 하나만 입력
-                      가능한 환경 (예: 단순 알림 봇, 노코드 툴 등)에 최적화되어
-                      있습니다.
-                    </li>
-                    <li className="text-orange-600 bg-orange-50 p-2 rounded">
-                      <span className="font-bold">⚠️ 주의:</span> URL 자체가
-                      인증 키 역할을 하므로, 외부에 노출되지 않도록 주의가
-                      필요합니다.
-                    </li>
-                  </ul>
-                </div>
-
-                {/* Method 2 Guide */}
-                <div>
-                  <h4 className="font-bold text-gray-800 text-sm mb-2 flex items-center gap-2">
-                    <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
-                    방식 2. 표준 API (보안 권장)
-                  </h4>
-                  <ul className="space-y-2 text-xs text-gray-600 pl-3 border-l-2 border-gray-100 ml-1">
-                    <li>
-                      <span className="font-semibold text-gray-700">특징:</span>{' '}
-                      접속 URL과 인증용 Secret Key가 엄격히 분리된 엔터프라이즈
-                      표준 방식입니다.
-                    </li>
-                    <li>
-                      <span className="font-semibold text-gray-700">용도:</span>{' '}
-                      GitHub, Jira 등 보안과 운영 안정성이 중요한 서비스 연동 시
-                      권장합니다.
-                    </li>
-                    <li className="text-blue-600 bg-blue-50 p-2 rounded">
-                      <span className="font-semibold">👍 장점:</span> HTTP
-                      Header를 통해 인증을 수행하므로 통신 로그에 토큰이 남지
-                      않아 보안성이 훨씬 높습니다.
-                    </li>
-                  </ul>
-                </div>
-              </div>
+              <ul className="space-y-3 border-l-2 border-gray-100 pl-4 text-xs leading-relaxed text-gray-600">
+                <li>POST 요청 본문은 최상위 JSON object여야 합니다.</li>
+                <li>
+                  Secret Key는 URL이나 query parameter가 아니라 Authorization
+                  헤더로 전달합니다.
+                </li>
+                <li>
+                  헤더를 설정할 수 없는 외부 서비스는 직접 연결하지 말고 별도
+                  adapter를 사용해야 합니다.
+                </li>
+              </ul>
             </div>
           </div>
         )}
@@ -453,6 +380,7 @@ ${authHeader}  -d '{
         {!result.webAppUrl &&
           !result.embedUrl &&
           !result.isWorkflowNode &&
+          deploymentType !== 'internal_chatbot' &&
           deploymentType !== 'schedule' &&
           !isWebhookTrigger && (
             <div className="grid grid-cols-2 gap-6">
@@ -476,27 +404,16 @@ ${authHeader}  -d '{
                   </div>
                 </div>
 
-                {/* API Secret Key */}
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-1">
-                    API Secret Key
-                  </label>
-                  <div className="flex gap-2">
-                    <code className="flex-1 p-3 bg-gray-50 border border-gray-200 rounded text-xs text-gray-600 font-mono break-all leading-relaxed">
-                      {result.auth_secret
-                        ? `${result.auth_secret.slice(0, 7)}${'•'.repeat(result.auth_secret.length - 7)}`
-                        : 'N/A (Public)'}
-                    </code>
-                    {result.auth_secret && (
-                      <button
-                        onClick={() => handleCopy(result.auth_secret!)}
-                        className="px-3 py-2 text-sm font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded transition-colors whitespace-nowrap h-fit"
-                      >
-                        복사
-                      </button>
-                    )}
+                {result.appId && (
+                  <div className="border-l-2 border-gray-200 pl-4">
+                    <AppAuthSecretControl
+                      appId={result.appId}
+                      issuedSecret={issuedSecret}
+                      onSecretAvailable={onSecretAvailable}
+                      onReadinessChange={setAppAuthSecretReadiness}
+                    />
                   </div>
-                </div>
+                )}
 
                 {/* Input Variables Section */}
                 {result.input_schema &&
@@ -589,17 +506,43 @@ ${authHeader}  -d '{
                   </div>
                 </div>
 
+                {!issuedSecret && (
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-1">
+                      테스트용 기존 App secret
+                    </label>
+                    <input
+                      type="password"
+                      value={sessionTestSecret}
+                      onChange={(event) =>
+                        setSessionTestSecret(event.target.value)
+                      }
+                      autoComplete="off"
+                      aria-label="테스트용 기존 App secret"
+                      placeholder="이 화면에서만 사용"
+                      className="w-full rounded-lg border border-gray-300 px-3 py-2 font-mono text-sm text-gray-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    />
+                    <p className="mt-1 text-xs text-gray-500">
+                      입력값은 브라우저 저장소에 저장하지 않습니다.
+                    </p>
+                  </div>
+                )}
+
                 {/* Test Execution Button */}
                 <button
                   onClick={handleTestExecute}
-                  disabled={isLoading}
+                  disabled={isLoading || !testAuthSecret}
                   className={`w-full py-3 rounded-lg font-semibold text-white transition-colors ${
-                    isLoading
+                    isLoading || !testAuthSecret
                       ? 'bg-gray-400 cursor-not-allowed'
                       : 'bg-blue-600 hover:bg-blue-700'
                   }`}
                 >
-                  {isLoading ? '실행 중...' : '테스트 실행'}
+                  {isLoading
+                    ? '실행 중...'
+                    : testAuthSecret
+                      ? '테스트 실행'
+                      : 'Secret 입력 후 테스트'}
                 </button>
 
                 {/* Response Result */}

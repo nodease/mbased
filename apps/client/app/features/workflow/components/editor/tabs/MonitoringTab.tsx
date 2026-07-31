@@ -15,11 +15,13 @@ import { getNodeDisplayInfo } from '@/app/features/workflow/utils/nodeDisplayUti
 interface MonitoringTabProps {
   workflowId: string;
   onNavigateToLog: (runId: string) => void;
+  withTopSpacer?: boolean;
 }
 
 export const MonitoringTab = ({
   workflowId,
   onNavigateToLog,
+  withTopSpacer = false,
 }: MonitoringTabProps) => {
   const [stats, setStats] = useState<DashboardStatsResponse | null>(null);
   const [monitoringLoading, setMonitoringLoading] = useState(false);
@@ -70,7 +72,9 @@ export const MonitoringTab = ({
   return (
     <div
       ref={scrollRef}
-      className="h-full w-full overflow-y-auto bg-transparent p-6 pt-16 scroll-smooth animate-in fade-in slide-in-from-bottom-2 duration-300"
+      className={`h-full w-full overflow-y-auto bg-transparent p-6 scroll-smooth animate-in fade-in slide-in-from-bottom-2 duration-300 ${
+        withTopSpacer ? 'pt-16' : ''
+      }`}
     >
       <div className="max-w-7xl mx-auto space-y-6 pb-20">
         {monitoringLoading || !stats ? (

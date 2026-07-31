@@ -1,4 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  createElement,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import { createPortal } from 'react-dom';
 import { ChevronDown, Search, X } from 'lucide-react';
 
 // Provider 로고 SVG 컴포넌트들
@@ -95,6 +103,11 @@ const getProviderColor = (providerName: string) => {
   return ProviderColors[normalizedName] || ProviderColors.unknown;
 };
 
+const renderProviderLogo = (providerName: string, className: string) => {
+  const Logo = getProviderLogo(providerName);
+  return createElement(Logo, { className });
+};
+
 export function ModelSelectDropdown({
   value,
   onChange,
@@ -105,7 +118,9 @@ export function ModelSelectDropdown({
 }: ModelSelectDropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [menuRect, setMenuRect] = useState<DOMRect | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   // 선택된 모델 찾기
@@ -133,16 +148,36 @@ export function ModelSelectDropdown({
       .filter((group) => group.models.length > 0);
   }, [groupedModels, searchQuery]);
 
+  const updateMenuRect = useCallback(() => {
+    const rect = dropdownRef.current?.getBoundingClientRect();
+    if (rect) setMenuRect(rect);
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const frameId = window.requestAnimationFrame(updateMenuRect);
+
+    window.addEventListener('scroll', updateMenuRect, true);
+    window.addEventListener('resize', updateMenuRect);
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      window.removeEventListener('scroll', updateMenuRect, true);
+      window.removeEventListener('resize', updateMenuRect);
+    };
+  }, [isOpen, updateMenuRect]);
+
   // 바깥 클릭 시 닫기
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Node;
       if (
-        dropdownRef.current &&
-        !dropdownRef.current.contains(event.target as Node)
+        dropdownRef.current?.contains(target) ||
+        menuRef.current?.contains(target)
       ) {
-        setIsOpen(false);
-        setSearchQuery('');
+        return;
       }
+      setIsOpen(false);
+      setSearchQuery('');
     };
 
     document.addEventListener('mousedown', handleClickOutside);
@@ -162,10 +197,6 @@ export function ModelSelectDropdown({
     setSearchQuery('');
   };
 
-  const ProviderLogo = selectedModel
-    ? getProviderLogo(selectedModel.provider_name || '')
-    : null;
-
   return (
     <div ref={dropdownRef} className="relative">
       {/* 트리거 버튼 */}
@@ -180,10 +211,11 @@ export function ModelSelectDropdown({
         } ${isOpen ? 'border-blue-500 ring-1 ring-blue-500' : ''}`}
       >
         <div className="flex items-center gap-2 min-w-0">
-          {selectedModel && ProviderLogo && (
-            <ProviderLogo
-              className={`w-4 h-4 flex-shrink-0 ${getProviderColor(selectedModel.provider_name || '')}`}
-            />
+          {selectedModel && (
+            renderProviderLogo(
+              selectedModel.provider_name || '',
+              `w-4 h-4 flex-shrink-0 ${getProviderColor(selectedModel.provider_name || '')}`,
+            )
           )}
           <span className={`truncate ${!selectedModel ? 'text-gray-400' : ''}`}>
             {selectedModel?.name || placeholder}
@@ -197,8 +229,16 @@ export function ModelSelectDropdown({
       </button>
 
       {/* 드롭다운 팝오버 */}
-      {isOpen && !disabled && (
-        <div className="absolute z-50 mt-1 w-full bg-white rounded-lg border border-gray-200 shadow-lg overflow-hidden">
+      {isOpen && !disabled && menuRect && createPortal(
+        <div
+          ref={menuRef}
+          className="fixed z-[1000] overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg"
+          style={{
+            left: menuRect.left,
+            top: menuRect.bottom + 4,
+            width: menuRect.width,
+          }}
+        >
           {/* 검색창 */}
           <div className="p-2 border-b border-gray-100">
             <div className="relative">
@@ -227,7 +267,6 @@ export function ModelSelectDropdown({
           <div className="max-h-64 overflow-y-auto">
             {filteredGroupedModels.length > 0 ? (
               filteredGroupedModels.map((group, groupIdx) => {
-                const GroupLogo = getProviderLogo(group.provider);
                 const groupColor = getProviderColor(group.provider);
 
                 return (
@@ -238,7 +277,10 @@ export function ModelSelectDropdown({
                         groupIdx > 0 ? 'border-t' : ''
                       }`}
                     >
-                      <GroupLogo className={`w-3.5 h-3.5 ${groupColor}`} />
+                      {renderProviderLogo(
+                        group.provider,
+                        `w-3.5 h-3.5 ${groupColor}`,
+                      )}
                       <span className="text-xs font-semibold text-gray-600 uppercase tracking-wide">
                         {group.provider}
                       </span>
@@ -251,9 +293,6 @@ export function ModelSelectDropdown({
                     {group.models.map((model) => {
                       const isSelected =
                         model.model_id_for_api_call === value;
-                      const ModelLogo = getProviderLogo(
-                        model.provider_name || group.provider,
-                      );
                       const modelColor = getProviderColor(
                         model.provider_name || group.provider,
                       );
@@ -271,9 +310,10 @@ export function ModelSelectDropdown({
                               : 'hover:bg-gray-50 text-gray-700'
                           }`}
                         >
-                          <ModelLogo
-                            className={`w-4 h-4 flex-shrink-0 ${modelColor}`}
-                          />
+                          {renderProviderLogo(
+                            model.provider_name || group.provider,
+                            `w-4 h-4 flex-shrink-0 ${modelColor}`,
+                          )}
                           <span className="truncate">{model.name}</span>
                           {isSelected && (
                             <span className="ml-auto text-blue-600 text-xs">
@@ -294,7 +334,8 @@ export function ModelSelectDropdown({
               </div>
             )}
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

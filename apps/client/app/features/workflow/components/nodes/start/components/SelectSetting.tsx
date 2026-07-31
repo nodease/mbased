@@ -64,14 +64,14 @@ export const SelectSetting = ({
               value={opt.label}
               onChange={(e) => updateOption(i, 'label', e.target.value)}
               placeholder="라벨"
-              className="h-6 flex-1 min-w-0 rounded border border-border bg-background px-2 text-xs focus:border-primary focus:outline-none"
+              className="h-6 flex-1 min-w-0 rounded border border-border bg-background px-2 text-xs text-gray-700 placeholder:text-gray-500 focus:border-primary focus:outline-none"
             />
             <input
               type="text"
               value={opt.value}
               onChange={(e) => updateOption(i, 'value', e.target.value)}
               placeholder="값"
-              className="h-6 flex-1 min-w-0 rounded border border-border bg-background px-2 text-xs focus:border-primary focus:outline-none"
+              className="h-6 flex-1 min-w-0 rounded border border-border bg-background px-2 text-xs text-gray-700 placeholder:text-gray-500 focus:border-primary focus:outline-none"
             />
             <button
               onClick={() => removeOption(i)}

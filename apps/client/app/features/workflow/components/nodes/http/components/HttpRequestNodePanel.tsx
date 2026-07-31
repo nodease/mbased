@@ -1,70 +1,27 @@
-import { useCallback, useMemo, useState, useRef } from 'react';
+import { useCallback, useMemo } from 'react';
 import { useWorkflowStore } from '@/app/features/workflow/store/useWorkflowStore';
 import { HelpCircle, Plus, Trash2 } from 'lucide-react';
 import {
   HttpRequestNodeData,
   HttpMethod,
   AuthType,
-  HttpVariable,
 } from '../../../../types/Nodes';
 import { getUpstreamNodes } from '../../../../utils/getUpstreamNodes';
-import { getIncompleteVariables } from '../../../../utils/validationUtils';
 import { CollapsibleSection } from '../../ui/CollapsibleSection';
-import { ReferencedVariablesControl } from '../../ui/ReferencedVariablesControl';
 import { RoundedSelect } from '../../../ui/RoundedSelect';
-import { AlertTriangle } from 'lucide-react';
 import { ValidationAlert } from '../../../ui/ValidationAlert';
-import { IncompleteVariablesAlert } from '../../../ui/IncompleteVariablesAlert';
 import { UnregisteredVariablesAlert } from '../../../ui/UnregisteredVariablesAlert';
+import {
+  DraggedOutputVariable,
+  getDroppedOutputReferenceName,
+  getTokenLabelMap,
+  upsertNamedSelector,
+} from '@/app/features/workflow/utils/nodeVariablePorts';
+import { VariableTokenEditor } from '../../ui/VariableTokenEditor';
 
 // 노드 실행 필수 요건 체크
 // 1. URL이 입력되어 있어야 함
 // 2. GET, DELETE 제외 메서드는 Body가 있어야 함
-
-const getCaretCoordinates = (
-  element: HTMLTextAreaElement | HTMLInputElement,
-  position: number,
-) => {
-  const div = document.createElement('div');
-  const style = window.getComputedStyle(element);
-
-  // 스타일 복사
-  Array.from(style).forEach((prop) => {
-    div.style.setProperty(prop, style.getPropertyValue(prop));
-  });
-
-  div.style.position = 'absolute';
-  div.style.visibility = 'hidden';
-  div.style.whiteSpace = 'pre-wrap';
-  div.style.top = '0';
-  div.style.left = '0';
-
-  // input 태그의 경우 스크롤과 줄바꿈 방지 처리 필요
-  if (element.tagName === 'INPUT') {
-    div.style.whiteSpace = 'nowrap';
-    div.style.overflow = 'hidden';
-  }
-
-  const textContent = element.value.substring(0, position);
-  div.innerHTML =
-    textContent.replace(/\n/g, '<br>') + '<span id="caret-marker">|</span>';
-
-  document.body.appendChild(div);
-
-  const marker = div.querySelector('#caret-marker');
-  const coordinates = {
-    top: marker
-      ? marker.getBoundingClientRect().top - div.getBoundingClientRect().top
-      : 0,
-    left: marker
-      ? marker.getBoundingClientRect().left - div.getBoundingClientRect().left
-      : 0,
-    height: parseInt(style.lineHeight) || 20,
-  };
-
-  document.body.removeChild(div);
-  return coordinates;
-};
 
 interface HttpRequestNodePanelProps {
   nodeId: string;
@@ -76,15 +33,6 @@ export function HttpRequestNodePanel({
   data,
 }: HttpRequestNodePanelProps) {
   const { updateNodeData, nodes, edges } = useWorkflowStore();
-
-  // 자동완성을 위한 Refs
-  const urlRef = useRef<HTMLTextAreaElement>(null);
-  const bodyRef = useRef<HTMLTextAreaElement>(null);
-
-  // 자동완성 상태
-  const [activeField, setActiveField] = useState<'url' | 'body' | null>(null);
-  const [showSuggestions, setShowSuggestions] = useState(false);
-  const [suggestionPos, setSuggestionPos] = useState({ top: 0, left: 0 });
 
   // 상위 노드 가져오기
   const upstreamNodes = useMemo(
@@ -122,11 +70,6 @@ export function HttpRequestNodePanel({
     return Array.from(new Set(errors));
   }, [data.url, data.body, data.referenced_variables]);
 
-  const incompleteVariables = useMemo(
-    () => getIncompleteVariables(data.referenced_variables),
-    [data.referenced_variables],
-  );
-
   const handleUpdateData = useCallback(
     (key: keyof HttpRequestNodeData, value: unknown) => {
       updateNodeData(nodeId, { [key]: value });
@@ -157,85 +100,29 @@ export function HttpRequestNodePanel({
     [data.headers, nodeId, updateNodeData],
   );
 
-  // 변수 핸들러
-  const handleAddVariable = useCallback(() => {
-    const newVars = [
-      ...(data.referenced_variables || []),
-      { name: '', value_selector: [] },
-    ];
-    updateNodeData(nodeId, { referenced_variables: newVars });
-  }, [data.referenced_variables, nodeId, updateNodeData]);
-
-  const handleRemoveVariable = useCallback(
-    (index: number) => {
-      const newVars = [...(data.referenced_variables || [])];
-      newVars.splice(index, 1);
-      updateNodeData(nodeId, { referenced_variables: newVars });
-    },
-    [data.referenced_variables, nodeId, updateNodeData],
-  );
-
-  const handleUpdateVariable = useCallback(
-    (index: number, key: keyof HttpVariable, value: any) => {
-      const newVars = [...(data.referenced_variables || [])];
-      newVars[index] = { ...newVars[index], [key]: value };
-      updateNodeData(nodeId, { referenced_variables: newVars });
-    },
-    [data.referenced_variables, nodeId, updateNodeData],
-  );
-
-  // 자동완성 핸들러
-  const handleKeyUp = (
-    e: React.KeyboardEvent<HTMLTextAreaElement | HTMLInputElement>,
-    field: 'url' | 'body',
-  ) => {
-    const target = e.target as HTMLTextAreaElement | HTMLInputElement;
-    const value = target.value;
-    const selectionEnd = target.selectionEnd || 0;
-
-    setActiveField(field);
-
-    if (value.substring(selectionEnd - 2, selectionEnd) === '{{') {
-      const coords = getCaretCoordinates(target, selectionEnd);
-
-      setSuggestionPos({
-        top: target.offsetTop + coords.top + coords.height,
-        left: target.offsetLeft + coords.left,
+  const handleTextDropOutput = useCallback(
+    (output: DraggedOutputVariable) => {
+      const referenceName = getDroppedOutputReferenceName(
+        data.referenced_variables,
+        output,
+        'value_selector',
+      );
+      updateNodeData(nodeId, {
+        referenced_variables: upsertNamedSelector(
+          data.referenced_variables,
+          output,
+          'value_selector',
+        ),
       });
-      setShowSuggestions(true);
-    } else {
-      setShowSuggestions(false);
-    }
-  };
+      return referenceName;
+    },
+    [data.referenced_variables, nodeId, updateNodeData],
+  );
 
-  const insertVariable = (varName: string) => {
-    if (!activeField) return;
-
-    const currentValue = (data as any)[activeField] || '';
-    const ref = activeField === 'url' ? urlRef : bodyRef;
-    const input = ref.current;
-
-    if (!input) return;
-
-    const selectionEnd = input.selectionEnd || 0;
-    const lastOpen = currentValue.lastIndexOf('{{', selectionEnd);
-
-    if (lastOpen !== -1) {
-      const prefix = currentValue.substring(0, lastOpen);
-      const suffix = currentValue.substring(selectionEnd);
-
-      const newValue = `${prefix}{{ ${varName} }}${suffix}`;
-
-      handleUpdateData(activeField, newValue);
-      setShowSuggestions(false);
-
-      setTimeout(() => {
-        const newCursorPos = prefix.length + varName.length + 5;
-        input.focus();
-        input.setSelectionRange(newCursorPos, newCursorPos);
-      }, 0);
-    }
-  };
+  const tokenLabels = useMemo(
+    () => getTokenLabelMap(data.referenced_variables, upstreamNodes),
+    [data.referenced_variables, upstreamNodes],
+  );
 
   return (
     <div className="flex flex-col gap-2 relative">
@@ -256,15 +143,14 @@ export function HttpRequestNodePanel({
           />
         </div>
 
-        <textarea
-          ref={urlRef}
-          className="flex-1 rounded-md border border-gray-300 px-3 py-[7px] text-sm shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono resize-none transition-all duration-200 h-9 focus:h-20 overflow-hidden focus:overflow-auto leading-[22px]"
+        <VariableTokenEditor
+          className="min-h-9 flex-1 font-mono text-xs"
           placeholder="https://api.example.com/v1/resource"
           value={data.url || ''}
-          onChange={(e) => handleUpdateData('url', e.target.value)}
-          onKeyUp={(e) => handleKeyUp(e, 'url')}
-          autoComplete="off"
-          rows={1}
+          onChange={(value) => handleUpdateData('url', value)}
+          onDropOutput={handleTextDropOutput}
+          tokenLabels={tokenLabels}
+          ariaLabel="HTTP URL"
         />
       </div>
 
@@ -272,39 +158,6 @@ export function HttpRequestNodePanel({
 
       <div className="border-b border-gray-200" />
 
-      {/* 2. 입력변수 */}
-      <CollapsibleSection
-        title="입력변수"
-        defaultOpen={true}
-        showDivider
-        icon={(expand) => (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              expand(); // 섹션 펼치기
-              handleAddVariable();
-            }}
-            className="p-1 hover:bg-gray-200 rounded transition-colors"
-            title="입력변수 추가"
-          >
-            <Plus className="w-3.5 h-3.5 text-gray-600" />
-          </button>
-        )}
-      >
-        <ReferencedVariablesControl
-          variables={data.referenced_variables || []}
-          upstreamNodes={upstreamNodes}
-          onUpdate={handleUpdateVariable}
-          onAdd={handleAddVariable}
-          onRemove={handleRemoveVariable}
-          title=""
-          showAddButton={false}
-        />
-
-        {incompleteVariables.length > 0 && (
-          <IncompleteVariablesAlert variables={incompleteVariables} />
-        )}
-      </CollapsibleSection>
       <CollapsibleSection title="인증" showDivider>
         <div className="flex flex-col gap-3">
           <div className="flex items-center gap-2">
@@ -445,16 +298,17 @@ export function HttpRequestNodePanel({
             <div className="flex items-center justify-between">
               <span className="text-xs text-gray-500">Content-Type: JSON</span>
             </div>
-            <textarea
-              ref={bodyRef}
-              className="w-full h-32 rounded border border-gray-300 p-2 text-xs font-mono focus:outline-none focus:border-blue-500 resize-y"
+            <VariableTokenEditor
+              className="min-h-32 font-mono text-xs"
               placeholder='{"key": "value"}'
               value={data.body || ''}
-              onChange={(e) => handleUpdateData('body', e.target.value)}
-              onKeyUp={(e) => handleKeyUp(e, 'body')}
+              onChange={(value) => handleUpdateData('body', value)}
+              onDropOutput={handleTextDropOutput}
+              tokenLabels={tokenLabels}
+              ariaLabel="HTTP Body"
             />
             <div className="text-[10px] text-gray-500">
-              💡 <code>{'{{variable}}'}</code> 문법 사용 가능
+              본문에 커서를 둔 뒤 좌측 입력 패널에서 변수를 클릭해 추가하세요.
             </div>
 
             {bodyRequiredButMissing && (
@@ -495,37 +349,10 @@ export function HttpRequestNodePanel({
         </div>
       </CollapsibleSection>
 
-      {/* 자동완성 제안 드롭다운 */}
       {/* [VALIDATION] 경고 영역 */}
 
       {validationErrors.length > 0 && (
         <UnregisteredVariablesAlert variables={validationErrors} />
-      )}
-
-      {showSuggestions && (
-        <div
-          className="absolute z-50 w-48 rounded border border-gray-200 bg-white shadow-lg"
-          style={{
-            top: suggestionPos.top,
-            left: suggestionPos.left,
-          }}
-        >
-          {(data.referenced_variables || []).length > 0 ? (
-            (data.referenced_variables || []).map((v, i) => (
-              <button
-                key={i}
-                className="block w-full px-4 py-2 text-left text-sm hover:bg-gray-100"
-                onClick={() => insertVariable(v.name)}
-              >
-                {v.name || '(이름 없음)'}
-              </button>
-            ))
-          ) : (
-            <div className="px-4 py-2 text-sm text-gray-400">
-              등록된 입력변수가 없습니다.
-            </div>
-          )}
-        </div>
       )}
     </div>
   );

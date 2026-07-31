@@ -1,0 +1,787 @@
+{
+  "evaluations": {
+    "benchmark-holdout-001": {
+      "quality": {
+        "high_fixed": {
+          "quality_score": 92.0,
+          "contract_pass": true,
+          "reason": "보수적이고 실행 가능하며, 확정 불가 사항과 추가 필요 정보를 분리해 안내했습니다.",
+          "evaluation_status": "completed"
+        },
+        "automatic": {
+          "quality_score": 28.0,
+          "contract_pass": false,
+          "reason": "근거 없이 메뉴 위치를 단정했고, 외부 문서·지원 문의 중심으로 작성되어 주어진 제약과 맞지 않습니다.",
+          "evaluation_status": "completed"
+        }
+      },
+      "metadata": {
+        "model": "gpt-5.4",
+        "prompt_tokens": 863,
+        "completion_tokens": 275,
+        "total_tokens": 1138,
+        "cost_usd": 0.0062825,
+        "latency_ms": 4461,
+        "attempt_count": 1,
+        "evaluation_status": "completed"
+      }
+    },
+    "benchmark-holdout-005": {
+      "quality": {
+        "high_fixed": {
+          "quality_score": 95.0,
+          "contract_pass": true,
+          "reason": "보수적이고 실행 가능하며 누락 정보도 assumptions로 분리해 품질이 높음",
+          "evaluation_status": "completed"
+        },
+        "automatic": {
+          "quality_score": 83.0,
+          "contract_pass": true,
+          "reason": "전반적으로 적절하지만 assumptions 분리가 없고 보안 통제가 output_1보다 덜 구체적임",
+          "evaluation_status": "completed"
+        }
+      },
+      "metadata": {
+        "model": "gpt-5.4",
+        "prompt_tokens": 981,
+        "completion_tokens": 289,
+        "total_tokens": 1270,
+        "cost_usd": 0.0067875,
+        "latency_ms": 4587,
+        "attempt_count": 1,
+        "evaluation_status": "completed"
+      }
+    },
+    "benchmark-holdout-009": {
+      "quality": {
+        "automatic": {
+          "quality_score": 48.0,
+          "contract_pass": false,
+          "reason": "필수 필드는 있으나 자료 확인 체크리스트가 너무 포괄적이고 assumptions 분리가 없으며 보수성도 부족합니다.",
+          "evaluation_status": "completed"
+        },
+        "high_fixed": {
+          "quality_score": 93.0,
+          "contract_pass": true,
+          "reason": "체크리스트가 구체적이고 실행 가능하며, 불확실성을 assumptions로 분리해 보수적으로 처리했습니다.",
+          "evaluation_status": "completed"
+        }
+      },
+      "metadata": {
+        "model": "gpt-5.4",
+        "prompt_tokens": 1047,
+        "completion_tokens": 346,
+        "total_tokens": 1393,
+        "cost_usd": 0.0078075,
+        "latency_ms": 4854,
+        "attempt_count": 1,
+        "evaluation_status": "completed"
+      }
+    },
+    "benchmark-holdout-008": {
+      "quality": {
+        "high_fixed": {
+          "quality_score": 96.0,
+          "contract_pass": true,
+          "reason": "필수 필드 충족, 보안 사고를 보수적으로 분류했고 가정을 분리했으며 차단→증거보존→검증→조사 순서가 실행 가능하고 적절합니다.",
+          "evaluation_status": "completed"
+        },
+        "automatic": {
+          "quality_score": 73.0,
+          "contract_pass": false,
+          "reason": "필수 필드는 있으나 누락 정보에 대한 assumptions 분리가 없고, 분류가 다소 포괄적이며 증거보존·검증·승인 전제의 보수성이 output_1보다 약합니다.",
+          "evaluation_status": "completed"
+        }
+      },
+      "metadata": {
+        "model": "gpt-5.4",
+        "prompt_tokens": 1851,
+        "completion_tokens": 404,
+        "total_tokens": 2255,
+        "cost_usd": 0.0106875,
+        "latency_ms": 5362,
+        "attempt_count": 1,
+        "evaluation_status": "completed"
+      }
+    },
+    "benchmark-holdout-017": {
+      "quality": {
+        "automatic": {
+          "quality_score": 84.0,
+          "contract_pass": true,
+          "reason": "필수 필드가 모두 있고 단계도 실행 가능하지만, 일부 구체 조치 예시를 근거 없이 제시해 보수성이 약간 떨어집니다.",
+          "evaluation_status": "completed"
+        },
+        "high_fixed": {
+          "quality_score": 94.0,
+          "contract_pass": true,
+          "reason": "필수 필드를 충족하고, 불확실성을 assumptions로 분리했으며 승인 전제·격리·단계적 복구 등 보수적 대응이 잘 지켜졌습니다.",
+          "evaluation_status": "completed"
+        }
+      },
+      "metadata": {
+        "model": "gpt-5.4",
+        "prompt_tokens": 2215,
+        "completion_tokens": 324,
+        "total_tokens": 2539,
+        "cost_usd": 0.0103975,
+        "latency_ms": 4359,
+        "attempt_count": 1,
+        "evaluation_status": "completed"
+      }
+    },
+    "benchmark-holdout-020": {
+      "quality": {
+        "automatic": {
+          "quality_score": 84.0,
+          "contract_pass": true,
+          "reason": "필수 필드가 모두 있고 보수적 처리와 assumptions 분리가 지켜졌습니다. 다만 차단 기준과 검토 분기 조건의 구체성이 output_2보다 부족합니다.",
+          "evaluation_status": "completed"
+        },
+        "high_fixed": {
+          "quality_score": 95.0,
+          "contract_pass": true,
+          "reason": "필수 필드를 모두 충족하고, 민감 리스크를 보수적으로 다루며 자동 차단·사람 검토 기준이 더 명확하고 실행 가능하게 제시되었습니다.",
+          "evaluation_status": "completed"
+        }
+      },
+      "metadata": {
+        "model": "gpt-5.4",
+        "prompt_tokens": 2003,
+        "completion_tokens": 176,
+        "total_tokens": 2179,
+        "cost_usd": 0.0076475,
+        "latency_ms": 3334,
+        "attempt_count": 1,
+        "evaluation_status": "completed"
+      }
+    },
+    "benchmark-holdout-006": {
+      "quality": {
+        "automatic": {
+          "quality_score": 72.0,
+          "contract_pass": false,
+          "reason": "핵심 필드는 모두 있으나 누락 정보의 assumptions 분리가 없고, 승인 여부를 근거 없이 확정했습니다.",
+          "evaluation_status": "completed"
+        },
+        "high_fixed": {
+          "quality_score": 89.0,
+          "contract_pass": false,
+          "reason": "보수적이고 실행 가능성이 높지만 assumptions가 별도 필드로 분리되지 않아 제약을 완전히 충족하지 못했습니다.",
+          "evaluation_status": "completed"
+        }
+      },
+      "metadata": {
+        "model": "gpt-5.4",
+        "prompt_tokens": 886,
+        "completion_tokens": 361,
+        "total_tokens": 1247,
+        "cost_usd": 0.00763,
+        "latency_ms": 4514,
+        "attempt_count": 1,
+        "evaluation_status": "completed"
+      }
+    },
+    "benchmark-holdout-012": {
+      "quality": {
+        "automatic": {
+          "quality_score": 34.0,
+          "contract_pass": false,
+          "reason": "필수 필드는 있으나 근거 없이 내부 DB·재무보고서 위치를 단정해 제약 위반입니다.",
+          "evaluation_status": "completed"
+        },
+        "high_fixed": {
+          "quality_score": 92.0,
+          "contract_pass": true,
+          "reason": "불확실성을 명확히 밝히고 가정을 분리했으며, 실행 가능한 체크리스트와 이해 가능한 답변초안을 제공합니다.",
+          "evaluation_status": "completed"
+        }
+      },
+      "metadata": {
+        "model": "gpt-5.4",
+        "prompt_tokens": 800,
+        "completion_tokens": 246,
+        "total_tokens": 1046,
+        "cost_usd": 0.00569,
+        "latency_ms": 3724,
+        "attempt_count": 1,
+        "evaluation_status": "completed"
+      }
+    },
+    "benchmark-holdout-015": {
+      "quality": {
+        "high_fixed": {
+          "quality_score": 92.0,
+          "contract_pass": true,
+          "reason": "필수 필드를 모두 갖췄고 보안적으로 매우 보수적이며 단계도 실행 가능함. 체크리스트 형식과 사용자 이해도도 좋음. 다만 assumptions가 별도 필드가 아니라 답변초안 내부에 있어 제약 준수는 다소 아쉬움.",
+          "evaluation_status": "completed"
+        },
+        "automatic": {
+          "quality_score": 74.0,
+          "contract_pass": false,
+          "reason": "필수 필드는 있으나 누락 정보에 대한 assumptions 분리가 없고, 보안 질문·기존 방식 코드 검증 등은 상황에 따라 취약할 수 있어 보수성이 떨어짐. 전반적 단계는 실행 가능하지만 일부 표현이 과도하게 단정적임.",
+          "evaluation_status": "completed"
+        }
+      },
+      "metadata": {
+        "model": "gpt-5.4",
+        "prompt_tokens": 1797,
+        "completion_tokens": 380,
+        "total_tokens": 2177,
+        "cost_usd": 0.0101925,
+        "latency_ms": 4747,
+        "attempt_count": 1,
+        "evaluation_status": "completed"
+      }
+    },
+    "benchmark-holdout-010": {
+      "quality": {
+        "automatic": {
+          "quality_score": 88.0,
+          "contract_pass": true,
+          "reason": "필수 필드를 모두 갖췄고 보수적 승인·회계 순서를 제시했습니다. 다만 일부 계정 예시는 일반론을 넘어 단정적으로 보일 수 있고, 답변이 다소 길어 핵심 구조가 약간 흐립니다.",
+          "evaluation_status": "completed"
+        },
+        "high_fixed": {
+          "quality_score": 94.0,
+          "contract_pass": true,
+          "reason": "필수 필드를 충족하며 다법인 환불의 승인 범위와 회계 반영 순서를 더 정확하고 실행 가능하게 정리했습니다. 가정과 승인 전제도 분리되어 있어 보수성과 명확성이 높습니다.",
+          "evaluation_status": "completed"
+        }
+      },
+      "metadata": {
+        "model": "gpt-5.4",
+        "prompt_tokens": 2449,
+        "completion_tokens": 353,
+        "total_tokens": 2802,
+        "cost_usd": 0.0114175,
+        "latency_ms": 16626,
+        "attempt_count": 1,
+        "evaluation_status": "completed"
+      }
+    },
+    "benchmark-holdout-007": {
+      "quality": {
+        "automatic": {
+          "quality_score": 68.0,
+          "contract_pass": false,
+          "reason": "핵심 방향은 맞지만 승인필요를 보수적으로 처리하지 않았고, 누락 정보를 assumptions로 분리하지 않았습니다.",
+          "evaluation_status": "completed"
+        },
+        "high_fixed": {
+          "quality_score": 89.0,
+          "contract_pass": false,
+          "reason": "요청에 잘 맞고 실행 가능성이 높지만, 누락 정보를 별도 assumptions 필드로 분리하지 않아 제약을 완전히 충족하지 못했습니다.",
+          "evaluation_status": "completed"
+        }
+      },
+      "metadata": {
+        "model": "gpt-5.4",
+        "prompt_tokens": 1196,
+        "completion_tokens": 337,
+        "total_tokens": 1533,
+        "cost_usd": 0.008045,
+        "latency_ms": 4527,
+        "attempt_count": 1,
+        "evaluation_status": "completed"
+      }
+    },
+    "benchmark-holdout-011": {
+      "quality": {
+        "automatic": {
+          "quality_score": 84.0,
+          "contract_pass": true,
+          "reason": "핵심 위험을 보수적으로 다뤘고 실행계획이 구체적입니다. 다만 예시 수준의 추정이 일부 섞여 있고 assumptions 분리가 답변초안 내부에만 있어 구조적 명확성은 다소 떨어집니다.",
+          "evaluation_status": "completed"
+        },
+        "high_fixed": {
+          "quality_score": 93.0,
+          "contract_pass": true,
+          "reason": "확인된 사실·검토항목·assumptions·권고 판단이 명확히 구분되어 있고, 과도한 확정 없이 SLA·법무·재무 위험을 가장 보수적으로 처리했습니다.",
+          "evaluation_status": "completed"
+        }
+      },
+      "metadata": {
+        "model": "gpt-5.4",
+        "prompt_tokens": 2313,
+        "completion_tokens": 459,
+        "total_tokens": 2772,
+        "cost_usd": 0.0126675,
+        "latency_ms": 5091,
+        "attempt_count": 1,
+        "evaluation_status": "completed"
+      }
+    },
+    "benchmark-holdout-014": {
+      "quality": {
+        "high_fixed": {
+          "quality_score": 96.0,
+          "contract_pass": true,
+          "reason": "요청에 매우 정확히 맞고 보수적입니다. 사실·가정 분리가 명확하고 대응계획도 실행 가능합니다.",
+          "evaluation_status": "completed"
+        },
+        "automatic": {
+          "quality_score": 78.0,
+          "contract_pass": false,
+          "reason": "전반적으로 무난하지만 분류가 다소 포괄적이고, 누락 정보의 assumptions 분리와 보수적 승인 전제 표현이 상대적으로 약합니다.",
+          "evaluation_status": "completed"
+        }
+      },
+      "metadata": {
+        "model": "gpt-5.4",
+        "prompt_tokens": 1901,
+        "completion_tokens": 313,
+        "total_tokens": 2214,
+        "cost_usd": 0.0094475,
+        "latency_ms": 4939,
+        "attempt_count": 1,
+        "evaluation_status": "completed"
+      }
+    },
+    "benchmark-holdout-016": {
+      "quality": {
+        "high_fixed": {
+          "quality_score": 95.0,
+          "contract_pass": true,
+          "reason": "체크리스트 형식과 필수 필드를 모두 충족했고, 가정을 분리해 불확실성을 보수적으로 다뤘습니다.",
+          "evaluation_status": "completed"
+        },
+        "automatic": {
+          "quality_score": 77.0,
+          "contract_pass": false,
+          "reason": "실행 단계는 좋지만 누락 정보의 assumptions 분리가 없고, 체크리스트 모드 및 우선순위 설정의 적합성이 다소 약합니다.",
+          "evaluation_status": "completed"
+        }
+      },
+      "metadata": {
+        "model": "gpt-5.4",
+        "prompt_tokens": 2868,
+        "completion_tokens": 393,
+        "total_tokens": 3261,
+        "cost_usd": 0.013065,
+        "latency_ms": 5502,
+        "attempt_count": 1,
+        "evaluation_status": "completed"
+      }
+    },
+    "benchmark-holdout-004": {
+      "quality": {
+        "high_fixed": {
+          "quality_score": 94.0,
+          "contract_pass": true,
+          "reason": "요청에 정확히 맞고 단계가 실행 가능하며 가정도 분리되어 보수적입니다.",
+          "evaluation_status": "completed"
+        },
+        "automatic": {
+          "quality_score": 52.0,
+          "contract_pass": false,
+          "reason": "답변은 이해되지만 대응계획이 메타 수준으로 모호하고 체크리스트 요구 반영이 약합니다.",
+          "evaluation_status": "completed"
+        }
+      },
+      "metadata": {
+        "model": "gpt-5.4",
+        "prompt_tokens": 965,
+        "completion_tokens": 335,
+        "total_tokens": 1300,
+        "cost_usd": 0.0074375,
+        "latency_ms": 4204,
+        "attempt_count": 1,
+        "evaluation_status": "completed"
+      }
+    },
+    "benchmark-holdout-002": {
+      "quality": {
+        "high_fixed": {
+          "quality_score": 92.0,
+          "contract_pass": true,
+          "reason": "필수 필드 충족, 체크리스트 형식 적합, 불확실성도 보수적으로 표시함",
+          "evaluation_status": "completed"
+        },
+        "automatic": {
+          "quality_score": 66.0,
+          "contract_pass": false,
+          "reason": "체크리스트 형식이 아니고 대응계획이 덜 구체적이며 우선순위도 다소 높게 잡힘",
+          "evaluation_status": "completed"
+        }
+      },
+      "metadata": {
+        "model": "gpt-5.4",
+        "prompt_tokens": 699,
+        "completion_tokens": 394,
+        "total_tokens": 1093,
+        "cost_usd": 0.0076575,
+        "latency_ms": 5295,
+        "attempt_count": 1,
+        "evaluation_status": "completed"
+      }
+    },
+    "benchmark-holdout-019": {
+      "quality": {
+        "automatic": {
+          "quality_score": 76.0,
+          "contract_pass": false,
+          "reason": "필수 필드는 갖췄지만 누락 정보를 assumptions로 분리하지 않았고 검증·대응이 다소 일반적입니다.",
+          "evaluation_status": "completed"
+        },
+        "high_fixed": {
+          "quality_score": 94.0,
+          "contract_pass": true,
+          "reason": "필수 필드를 모두 충족하고 assumptions를 명시했으며 보수적이고 실행 가능한 검증·대응 단계가 구체적입니다.",
+          "evaluation_status": "completed"
+        }
+      },
+      "metadata": {
+        "model": "gpt-5.4",
+        "prompt_tokens": 1898,
+        "completion_tokens": 254,
+        "total_tokens": 2152,
+        "cost_usd": 0.008555,
+        "latency_ms": 3401,
+        "attempt_count": 1,
+        "evaluation_status": "completed"
+      }
+    },
+    "benchmark-holdout-003": {
+      "quality": {
+        "automatic": {
+          "quality_score": 46.0,
+          "contract_pass": false,
+          "reason": "필수 필드는 있으나 제공 정보만 사용해야 하는 조건을 벗어나 내부 확인을 전제로 했고, 누락 정보와 가정을 분리하지 않았습니다.",
+          "evaluation_status": "completed"
+        },
+        "high_fixed": {
+          "quality_score": 94.0,
+          "contract_pass": true,
+          "reason": "조건에 맞게 현 정보만으로 확인 불가를 명확히 설명하고, 누락 정보를 체크리스트와 assumptions로 분리해 실행 가능한 다음 단계를 제시했습니다.",
+          "evaluation_status": "completed"
+        }
+      },
+      "metadata": {
+        "model": "gpt-5.4",
+        "prompt_tokens": 735,
+        "completion_tokens": 430,
+        "total_tokens": 1165,
+        "cost_usd": 0.0082875,
+        "latency_ms": 5868,
+        "attempt_count": 1,
+        "evaluation_status": "completed"
+      }
+    },
+    "benchmark-holdout-013": {
+      "quality": {
+        "high_fixed": {
+          "quality_score": 96.0,
+          "contract_pass": true,
+          "reason": "단계 구분이 명확하고 보수적이며 실행 가능성이 높습니다. 증거보존·승인전제·불확실성 표현이 특히 우수합니다.",
+          "evaluation_status": "completed"
+        },
+        "automatic": {
+          "quality_score": 86.0,
+          "contract_pass": true,
+          "reason": "핵심 대응은 맞고 보수적이지만 즉시조치/사후조사 구분과 세부 실행성, 영향범위 판단 기준이 output_1보다 덜 구체적입니다.",
+          "evaluation_status": "completed"
+        }
+      },
+      "metadata": {
+        "model": "gpt-5.4",
+        "prompt_tokens": 1984,
+        "completion_tokens": 431,
+        "total_tokens": 2415,
+        "cost_usd": 0.011425,
+        "latency_ms": 5511,
+        "attempt_count": 1,
+        "evaluation_status": "completed"
+      }
+    },
+    "benchmark-holdout-018": {
+      "quality": {
+        "automatic": {
+          "quality_score": 58.0,
+          "contract_pass": false,
+          "reason": "기본 필드는 있으나 대응계획이 추상적이고 assumptions 분리가 없어 제약 미준수입니다.",
+          "evaluation_status": "completed"
+        },
+        "high_fixed": {
+          "quality_score": 94.0,
+          "contract_pass": true,
+          "reason": "요청에 맞는 체크리스트와 실행 단계가 구체적이며 assumptions도 분리되어 있습니다.",
+          "evaluation_status": "completed"
+        }
+      },
+      "metadata": {
+        "model": "gpt-5.4",
+        "prompt_tokens": 1164,
+        "completion_tokens": 267,
+        "total_tokens": 1431,
+        "cost_usd": 0.006915,
+        "latency_ms": 4412,
+        "attempt_count": 1,
+        "evaluation_status": "completed"
+      }
+    },
+    "auto-high-holdout-001": {
+      "quality": {
+        "high_fixed": {
+          "quality_score": 94.0,
+          "contract_pass": true,
+          "reason": "필수 필드 충족, 불확실성 분리, 실행 단계와 사용자용 초안이 적절함",
+          "evaluation_status": "completed"
+        },
+        "automatic": {
+          "quality_score": 38.0,
+          "contract_pass": false,
+          "reason": "근거 없는 메뉴 위치를 일반화해 단정했고 assumptions 분리도 없으며 계획이 추상적임",
+          "evaluation_status": "completed"
+        }
+      },
+      "metadata": {
+        "model": "gpt-5.4",
+        "prompt_tokens": 757,
+        "completion_tokens": 163,
+        "total_tokens": 920,
+        "cost_usd": 0.0043375,
+        "latency_ms": 2572,
+        "attempt_count": 1,
+        "evaluation_status": "completed"
+      }
+    },
+    "auto-high-holdout-002": {
+      "quality": {
+        "high_fixed": {
+          "quality_score": 92.0,
+          "contract_pass": true,
+          "reason": "필수 필드 충족, 가정 분리, 실행 가능한 단계와 이해 쉬운 초안이 적절합니다.",
+          "evaluation_status": "completed"
+        },
+        "automatic": {
+          "quality_score": 38.0,
+          "contract_pass": false,
+          "reason": "가정 분리 없음, 외부 문서 검토 전제, 단계가 추상적이라 계약과 제약 충족이 부족합니다.",
+          "evaluation_status": "completed"
+        }
+      },
+      "metadata": {
+        "model": "gpt-5.4",
+        "prompt_tokens": 896,
+        "completion_tokens": 236,
+        "total_tokens": 1132,
+        "cost_usd": 0.00578,
+        "latency_ms": 3097,
+        "attempt_count": 1,
+        "evaluation_status": "completed"
+      }
+    },
+    "auto-high-holdout-003": {
+      "quality": {
+        "automatic": {
+          "quality_score": 46.0,
+          "contract_pass": false,
+          "reason": "필수 필드는 있으나 우선순위 표기가 계약 예시와 다르고, 대응계획이 추상적이며 누락 정보/가정을 분리하지 않았습니다.",
+          "evaluation_status": "completed"
+        },
+        "high_fixed": {
+          "quality_score": 86.0,
+          "contract_pass": true,
+          "reason": "보수적 표현을 유지했고 대응계획이 실행 가능하며 답변도 이해하기 쉽습니다. 특정 화면을 확정하지 않은 점도 적절합니다.",
+          "evaluation_status": "completed"
+        }
+      },
+      "metadata": {
+        "model": "gpt-5.4",
+        "prompt_tokens": 727,
+        "completion_tokens": 243,
+        "total_tokens": 970,
+        "cost_usd": 0.0054625,
+        "latency_ms": 3255,
+        "attempt_count": 1,
+        "evaluation_status": "completed"
+      }
+    },
+    "auto-high-holdout-004": {
+      "quality": {
+        "high_fixed": {
+          "quality_score": 93.0,
+          "contract_pass": true,
+          "reason": "요청에 직접 맞고 단계가 실행 가능하며 기록 보존·단일 창구·승계 점검이 충실합니다. 가정도 분리해 제시해 품질이 높습니다.",
+          "evaluation_status": "completed"
+        },
+        "automatic": {
+          "quality_score": 61.0,
+          "contract_pass": false,
+          "reason": "핵심 방향은 맞지만 분류가 다소 일반적이고 기록 보존·단일 담당 정리·승계 기준이 부족합니다. 가정 분리와 체크리스트 형식도 미흡합니다.",
+          "evaluation_status": "completed"
+        }
+      },
+      "metadata": {
+        "model": "gpt-5.4",
+        "prompt_tokens": 1350,
+        "completion_tokens": 296,
+        "total_tokens": 1646,
+        "cost_usd": 0.007815,
+        "latency_ms": 3745,
+        "attempt_count": 1,
+        "evaluation_status": "completed"
+      }
+    },
+    "auto-high-holdout-005": {
+      "quality": {
+        "automatic": {
+          "quality_score": 88.0,
+          "contract_pass": true,
+          "reason": "필수 필드가 모두 있고 실행 단계가 구체적입니다. 다만 체크리스트 형식이 약하고 assumptions 분리가 답변초안 내부에만 있어 output_2보다 덜 명확합니다.",
+          "evaluation_status": "completed"
+        },
+        "high_fixed": {
+          "quality_score": 95.0,
+          "contract_pass": true,
+          "reason": "필수 필드를 모두 충족하고 요청한 점검 순서를 체크리스트로 명확히 제시했습니다. 버전·라우팅·캐시를 보수적으로 구분해 확인하며 assumptions도 분리되어 품질이 높습니다.",
+          "evaluation_status": "completed"
+        }
+      },
+      "metadata": {
+        "model": "gpt-5.4",
+        "prompt_tokens": 1895,
+        "completion_tokens": 268,
+        "total_tokens": 2163,
+        "cost_usd": 0.0087575,
+        "latency_ms": 3498,
+        "attempt_count": 1,
+        "evaluation_status": "completed"
+      }
+    },
+    "auto-high-holdout-006": {
+      "quality": {
+        "automatic": {
+          "quality_score": 82.0,
+          "contract_pass": false,
+          "reason": "핵심 필드는 모두 있으나 누락 정보를 assumptions로 분리하지 않았고 체크리스트 형식도 약합니다.",
+          "evaluation_status": "completed"
+        },
+        "high_fixed": {
+          "quality_score": 91.0,
+          "contract_pass": true,
+          "reason": "필수 필드를 갖추고 assumptions를 분리했으며 근거 없는 확정을 피한 실행 가능한 체크리스트입니다.",
+          "evaluation_status": "completed"
+        }
+      },
+      "metadata": {
+        "model": "gpt-5.4",
+        "prompt_tokens": 2255,
+        "completion_tokens": 259,
+        "total_tokens": 2514,
+        "cost_usd": 0.0095225,
+        "latency_ms": 3675,
+        "attempt_count": 1,
+        "evaluation_status": "completed"
+      }
+    },
+    "auto-high-holdout-007": {
+      "quality": {
+        "automatic": {
+          "quality_score": 88.0,
+          "contract_pass": false,
+          "reason": "핵심 대응과 복구 순서는 좋지만 누락 정보의 assumptions 분리가 없고, 외부 트래픽 차단 등 큰 조치의 승인 조건이 일부 불명확합니다.",
+          "evaluation_status": "completed"
+        },
+        "high_fixed": {
+          "quality_score": 96.0,
+          "contract_pass": true,
+          "reason": "보수적이고 실행 가능하며 승인 전제, 데이터 보존, 단계적 복구, assumptions 분리가 모두 잘 반영되었습니다.",
+          "evaluation_status": "completed"
+        }
+      },
+      "metadata": {
+        "model": "gpt-5.4",
+        "prompt_tokens": 1873,
+        "completion_tokens": 259,
+        "total_tokens": 2132,
+        "cost_usd": 0.0085675,
+        "latency_ms": 3516,
+        "attempt_count": 1,
+        "evaluation_status": "completed"
+      }
+    },
+    "auto-high-holdout-008": {
+      "quality": {
+        "high_fixed": {
+          "quality_score": 96.0,
+          "contract_pass": true,
+          "reason": "필수 필드 충족, 보수적 표현과 승인 전제 적절, 조사·차단·통지 판단 단계가 구체적입니다.",
+          "evaluation_status": "completed"
+        },
+        "automatic": {
+          "quality_score": 84.0,
+          "contract_pass": true,
+          "reason": "필수 필드 충족, 전반적으로 안전하지만 우선순위가 다소 낮고 차단·증거보존·영향조사 구체성이 상대적으로 약합니다.",
+          "evaluation_status": "completed"
+        }
+      },
+      "metadata": {
+        "model": "gpt-5.4",
+        "prompt_tokens": 1935,
+        "completion_tokens": 244,
+        "total_tokens": 2179,
+        "cost_usd": 0.0084975,
+        "latency_ms": 3312,
+        "attempt_count": 1,
+        "evaluation_status": "completed"
+      }
+    },
+    "auto-high-holdout-009": {
+      "quality": {
+        "automatic": {
+          "quality_score": 76.0,
+          "contract_pass": false,
+          "reason": "핵심 충돌과 승인 필요성은 맞췄지만 중단 범위·승인 주체가 다소 포괄적이고, 누락 정보에 대한 assumptions 분리가 없습니다.",
+          "evaluation_status": "completed"
+        },
+        "high_fixed": {
+          "quality_score": 93.0,
+          "contract_pass": true,
+          "reason": "중단 범위와 계속 가능한 범위를 보수적으로 구분했고 승인 주체도 구체적이며 실행 단계가 명확합니다. assumptions 전용 필드는 없지만 불확실성은 분리해 명시했습니다.",
+          "evaluation_status": "completed"
+        }
+      },
+      "metadata": {
+        "model": "gpt-5.4",
+        "prompt_tokens": 1624,
+        "completion_tokens": 428,
+        "total_tokens": 2052,
+        "cost_usd": 0.01048,
+        "latency_ms": 6924,
+        "attempt_count": 1,
+        "evaluation_status": "completed"
+      }
+    },
+    "auto-high-holdout-010": {
+      "quality": {
+        "automatic": {
+          "quality_score": 78.0,
+          "contract_pass": true,
+          "reason": "필수 필드는 모두 있고 과도한 확정도 없지만, 우선순위 근거와 초기 대응의 구체성이 다소 약하며 assumptions가 별도 구조가 아닌 점이 아쉽습니다.",
+          "evaluation_status": "completed"
+        },
+        "high_fixed": {
+          "quality_score": 95.0,
+          "contract_pass": true,
+          "reason": "필수 필드를 충족하고 장애·보안 트랙을 병렬로 나눈 실행 계획이 구체적이며, 미확인 사항과 승인 전제 조치를 보수적으로 잘 구분했습니다.",
+          "evaluation_status": "completed"
+        }
+      },
+      "metadata": {
+        "model": "gpt-5.4",
+        "prompt_tokens": 1854,
+        "completion_tokens": 269,
+        "total_tokens": 2123,
+        "cost_usd": 0.00867,
+        "latency_ms": 6057,
+        "attempt_count": 1,
+        "evaluation_status": "completed"
+      }
+    }
+  },
+  "judge_model": "gpt-5.4",
+  "source_report": "C:\\Dev\\Crafton-Jungle\\Nodease\\reports\\model-routing\\runs\\judge-first\\2026-07-22__auto-vs-high-30__deferred-quality-batched\\benchmark\\result.json",
+  "completed_count": 30
+}

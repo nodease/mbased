@@ -23,7 +23,6 @@ export default function NodeDetailsPanel({
   nodeId,
   onClose,
   children,
-  header,
   headerActions,
 }: NodeDetailsPanelProps) {
   const panelRef = useRef<HTMLDivElement>(null);
@@ -77,20 +76,6 @@ export default function NodeDetailsPanel({
   // [NEW] 패널 고정 상태
   const [isPinned, setIsPinned] = useState(false);
 
-  // 노드 변경 시 편집 상태 초기화
-  useEffect(() => {
-    if (selectedNode) {
-      setEditTitle(
-        (selectedNode.data.title as string) || nodeDef?.name || 'Node',
-      );
-      setEditDesc(
-        (selectedNode.data.description as string) ||
-          nodeDef?.description ||
-          '설명 없음', // 기본 설명 텍스트
-      );
-    }
-  }, [nodeId, selectedInnerNode, selectedNode, nodeDef]);
-
   // 편집 시작 시 입력창 포커스
 
   useEffect(() => {
@@ -131,6 +116,13 @@ export default function NodeDetailsPanel({
     }
   };
 
+  const startTitleEdit = () => {
+    setEditTitle(
+      (selectedNode?.data.title as string) || nodeDef?.name || 'Node',
+    );
+    setIsEditing(true);
+  };
+
   // 설명 저장 핸들러
   // [NEW] 설명 수정 사항을 노드 데이터에 반영 (updateNodeData 호출)
   const handleSaveDesc = () => {
@@ -146,6 +138,15 @@ export default function NodeDetailsPanel({
       updateNodeData(nodeId, { description: editDesc.trim() });
     }
     setIsDescEditing(false);
+  };
+
+  const startDescEdit = () => {
+    setEditDesc(
+      (selectedNode?.data.description as string) ||
+        nodeDef?.description ||
+        '설명 없음',
+    );
+    setIsDescEditing(true);
   };
 
   // 키 입력 핸들러 (Enter: 저장, Escape: 취소)
@@ -260,7 +261,7 @@ export default function NodeDetailsPanel({
             ) : (
               <div
                 className="group flex items-center gap-2 cursor-pointer mb-1"
-                onClick={() => setIsEditing(true)}
+                onClick={startTitleEdit}
               >
                 <h2
                   className="text-lg font-semibold text-gray-900 truncate max-w-[200px]"
@@ -302,7 +303,7 @@ export default function NodeDetailsPanel({
             ) : (
               <div
                 className="group flex items-center gap-2 cursor-pointer"
-                onClick={() => setIsDescEditing(true)}
+                onClick={startDescEdit}
               >
                 <p className="text-xs text-gray-500 truncate max-w-[250px]">
                   {(selectedNode.data.description as string) ||

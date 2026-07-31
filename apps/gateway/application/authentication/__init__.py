@@ -1,0 +1,1 @@
+"""Password authentication application boundary."""

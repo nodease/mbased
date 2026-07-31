@@ -18,7 +18,7 @@ export default function Breadcrumb() {
     const generateBreadcrumbs = () => {
       const pathMap: Record<string, string> = {
         '/dashboard': '홈',
-        '/dashboard/mymodule': '내 모듈',
+        '/dashboard/mymodule': '워크플로우 목록',
         '/dashboard/explore': '마켓플레이스',
         '/dashboard/statistics': '통계',
         '/dashboard/knowledge': '지식 관리',
@@ -41,7 +41,7 @@ export default function Breadcrumb() {
 
       // Handle /modules/[id] routes
       if (segments[0] === 'modules' && segments.length > 1) {
-        items.push({ label: '내 모듈', href: '/dashboard/mymodule' });
+        items.push({ label: '워크플로우 목록', href: '/dashboard/mymodule' });
         // TODO: Fetch module name from API
         items.push({ label: '편집', href: pathname });
       }

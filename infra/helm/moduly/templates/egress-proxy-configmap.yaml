@@ -1,0 +1,23 @@
+{{- include "moduly.validateEgressProxy" . }}
+{{- if .Values.egressProxy.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "moduly.fullname" . }}-egress-proxy
+  labels:
+    {{- include "moduly.componentLabels" (dict "component" "egress-proxy" "context" .) | nindent 4 }}
+data:
+  squid.conf: |
+{{ .Files.Get "files/squid.conf" | nindent 4 }}
+  authorized-sources.conf: |
+{{ range .Values.egressProxy.networkPolicy.authorizedSourceCidrs }}
+    acl authorized_source src {{ . }}
+    acl workflow_http_source src {{ . }}
+{{ end }}
+  connector-ports.conf: |
+{{ range .Values.egressProxy.connectorAllowedPorts }}
+    acl CONNECTOR_ports port {{ . }}
+    acl CONNECT_ports port {{ . }}
+    acl Safe_ports port {{ . }}
+{{ end }}
+{{- end }}

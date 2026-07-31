@@ -115,7 +115,13 @@ export function AppSearchModal({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center px-4 pt-[10vh] sm:pt-[15vh]">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="앱 검색"
+      data-canvas-shortcut-scope="blocked"
+      className="fixed inset-0 z-50 flex items-start justify-center px-4 pt-[10vh] sm:pt-[15vh]"
+    >
       {/* Backdrop */}
       <div
         className="fixed inset-0 bg-black/50 transition-opacity"

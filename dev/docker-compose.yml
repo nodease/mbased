@@ -29,6 +29,85 @@ services:
       timeout: 5s
       retries: 3
 
+  connector-test-redis:
+    profiles: ["connector-demo"]
+    image: redis:7-alpine
+    ports:
+      - "127.0.0.1:56379:6379"
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 2s
+      retries: 10
+    networks:
+      - connector-demo-network
+
+  connector-test-tls-init:
+    profiles: ["connector-demo"]
+    build:
+      context: ..
+      dockerfile: docker/connector-test-postgres/Dockerfile
+    entrypoint: ["/usr/local/bin/generate-connector-test-certificates"]
+    user: "0:0"
+    restart: "no"
+    network_mode: "none"
+    volumes:
+      - connector_test_server_tls:/tls/server
+      - connector_test_postgres_admin_credentials:/tls/admin-credentials
+      - connector_test_demo_credentials:/tls/connector-credentials
+      - ../local/connector-test-tls/dev:/tls/public
+
+  connector-test-postgres:
+    profiles: ["connector-demo"]
+    build:
+      context: ..
+      dockerfile: docker/connector-test-postgres/Dockerfile
+    environment:
+      POSTGRES_DB: connector_demo
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD_FILE: /tls/admin-credentials/postgres-password
+      CONNECTOR_DEMO_PASSWORD_FILE: /tls/connector-credentials/demo-password
+    command:
+      - postgres
+      - -c
+      - ssl=on
+      - -c
+      - ssl_cert_file=/tls/server/server.crt
+      - -c
+      - ssl_key_file=/tls/server/server.key
+      - -c
+      - ssl_min_protocol_version=TLSv1.2
+      - -c
+      - password_encryption=scram-sha-256
+      - -c
+      - hba_file=/etc/postgresql/connector-demo-pg_hba.conf
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - connector_test_demo_data_v3:/var/lib/postgresql/data
+      - connector_test_server_tls:/tls/server:ro
+      - connector_test_postgres_admin_credentials:/tls/admin-credentials:ro
+      - connector_test_demo_credentials:/tls/connector-credentials:ro
+    depends_on:
+      connector-test-tls-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          PGPASSWORD="$$(cat /tls/connector-credentials/demo-password)"
+          psql
+          "host=localhost port=5432 dbname=connector_demo user=connector_demo_user sslmode=verify-full sslrootcert=/tls/server/ca.crt"
+          -Atqc
+          "SELECT (SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()) AND current_setting('transaction_read_only')::boolean AND NOT (SELECT rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR rolbypassrls FROM pg_roles WHERE rolname = current_user)"
+          | grep -qx t
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    networks:
+      - connector-demo-network
+
   pgadmin:
     image: dpage/pgadmin4:latest
     container_name: moduly-dev-pgadmin
@@ -58,7 +137,7 @@ services:
     ports:
       - "8194:8194"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8194/health"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8194/health', timeout=3).read()"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -67,3 +146,11 @@ volumes:
   postgres_data:
   redis_data:
   pgadmin_data:
+  connector_test_server_tls:
+  connector_test_postgres_admin_credentials:
+  connector_test_demo_credentials:
+  connector_test_demo_data_v3:
+
+networks:
+  connector-demo-network:
+    driver: bridge

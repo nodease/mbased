@@ -1,15 +1,78 @@
-import logging
+import errno
 import os
 import shutil
-import uuid
+import tempfile
+import threading
 from abc import ABC, abstractmethod
+from pathlib import Path
+from urllib.parse import quote
 
 import boto3
+import botocore.session
+from botocore.config import Config
 from fastapi import UploadFile
 
 from apps.gateway.core.config import settings
+from apps.gateway.services.storage_reference import (
+    StorageDeleteError,
+    StorageReferenceError,
+    build_upload_object_key,
+    build_upload_object_name,
+    resolve_local_delete_path,
+    resolve_s3_delete_key,
+)
+from apps.shared.services.outbound_proxy_policy import (
+    OutboundTransportMode,
+    outbound_proxy_policy_from_environment,
+)
 
-logger = logging.getLogger(__name__)
+DEFAULT_LOCAL_UPLOAD_DIR = "/app/uploads"
+FALLBACK_LOCAL_UPLOAD_DIR = str(Path(__file__).resolve().parents[3] / "uploads")
+_LOCAL_STORAGE_FALLBACK_ERRNOS = {errno.EACCES, errno.EPERM, errno.EROFS}
+_local_storage_root_lock = threading.Lock()
+_resolved_default_local_upload_dir: str | None = None
+
+
+class StorageConfigurationError(RuntimeError):
+    """Safe failure for an unsupported or incomplete storage configuration."""
+
+
+class StorageOperationError(RuntimeError):
+    """Safe failure for a provider-backed storage operation."""
+
+
+def _prepare_writable_directory(directory: str) -> str:
+    os.makedirs(directory, exist_ok=True)
+    resolved_directory = str(Path(directory).resolve())
+    with tempfile.NamedTemporaryFile(
+        dir=resolved_directory,
+        prefix=".nodease-storage-probe-",
+        delete=True,
+    ) as probe:
+        probe.write(b"ready")
+        probe.flush()
+    return resolved_directory
+
+
+def _resolve_default_local_upload_dir() -> str:
+    global _resolved_default_local_upload_dir
+
+    if _resolved_default_local_upload_dir is not None:
+        return _resolved_default_local_upload_dir
+
+    with _local_storage_root_lock:
+        if _resolved_default_local_upload_dir is not None:
+            return _resolved_default_local_upload_dir
+
+        try:
+            selected_root = _prepare_writable_directory(DEFAULT_LOCAL_UPLOAD_DIR)
+        except OSError as exc:
+            if exc.errno not in _LOCAL_STORAGE_FALLBACK_ERRNOS:
+                raise
+            selected_root = _prepare_writable_directory(FALLBACK_LOCAL_UPLOAD_DIR)
+
+        _resolved_default_local_upload_dir = selected_root
+        return selected_root
 
 
 class StorageService(ABC):
@@ -29,13 +92,15 @@ class StorageService(ABC):
 
 
 class LocalStorageService(StorageService):
-    def __init__(self, upload_dir: str = "/app/uploads"):  # 컨테이너에서 쓰기 가능
-        self.upload_dir = upload_dir
-        os.makedirs(self.upload_dir, exist_ok=True)
+    def __init__(self, upload_dir: str | None = None):
+        self.upload_dir = (
+            _prepare_writable_directory(upload_dir)
+            if upload_dir is not None
+            else _resolve_default_local_upload_dir()
+        )
 
     def upload(self, file: UploadFile) -> str:
-        # 안전한 파일명 생성
-        unique_filename = f"{uuid.uuid4()}_{file.filename}"
+        unique_filename = build_upload_object_name(file.filename)
         file_path = os.path.join(self.upload_dir, unique_filename)
 
         with open(file_path, "wb") as buffer:
@@ -47,8 +112,11 @@ class LocalStorageService(StorageService):
         return file_path
 
     def delete(self, file_path: str):
-        if os.path.exists(file_path):
-            os.remove(file_path)
+        target = resolve_local_delete_path(file_path, upload_root=self.upload_dir)
+        if target.exists() or target.is_symlink():
+            if target.is_dir():
+                raise StorageReferenceError("storage_reference_invalid")
+            target.unlink()
 
     def generate_presigned_upload_url(
         self,
@@ -74,19 +142,35 @@ class S3StorageService(StorageService):
     def __init__(self):
         self.bucket_name = settings.S3_BUCKET_NAME
         self.region = settings.AWS_REGION
-        self.s3_client = boto3.client(
+        if not self.bucket_name or not self.region:
+            raise StorageConfigurationError("storage_configuration_invalid")
+
+        transport_policy = outbound_proxy_policy_from_environment()
+        proxies = (
+            {"https": transport_policy.proxy_url}
+            if transport_policy.mode is OutboundTransportMode.PROXY_GUARDED_EXTERNAL
+            else {}
+        )
+        client_config = Config(
+            proxies=proxies,
+            retries={"total_max_attempts": 1, "mode": "standard"},
+        )
+        provider_session = botocore.session.get_session()
+        provider_session.set_config_variable("region", self.region)
+        # Botocore creates nested STS clients from this same session while
+        # resolving workload-identity credentials. A session default keeps
+        # both credential exchange and S3 traffic on the explicit proxy.
+        provider_session.set_default_client_config(client_config)
+        aws_session = boto3.Session(botocore_session=provider_session)
+        self.s3_client = aws_session.client(
             "s3",
-            aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-            aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+            aws_access_key_id=settings.AWS_ACCESS_KEY_ID or None,
+            aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY or None,
             region_name=self.region,
         )
 
-        if not self.bucket_name:
-            raise ValueError("S3_BUCKET_NAME is not set. ")
-
     def upload(self, file: UploadFile) -> str:
-        unique_filename = f"{uuid.uuid4()}_{file.filename}"
-        s3_key = f"uploads/{unique_filename}"
+        s3_key = build_upload_object_key(file.filename)
 
         try:
             self.s3_client.upload_fileobj(
@@ -98,9 +182,8 @@ class S3StorageService(StorageService):
                     "ContentDisposition": "inline",
                 },
             )
-        except Exception as e:
-            logger.error(f"S3 Upload failed: {e}")
-            raise e
+        except Exception:
+            raise StorageOperationError("storage_upload_failed") from None
         finally:
             # 포인터 초기화
             try:
@@ -110,7 +193,10 @@ class S3StorageService(StorageService):
                 pass
 
         # S3 URL
-        return f"https://{self.bucket_name}.s3.{self.region}.amazonaws.com/{s3_key}"
+        encoded_key = quote(s3_key, safe="/")
+        return (
+            f"https://{self.bucket_name}.s3.{self.region}.amazonaws.com/{encoded_key}"
+        )
 
     def generate_presigned_upload_url(
         self,
@@ -135,9 +221,7 @@ class S3StorageService(StorageService):
                 "method": "PUT"
             }
         """
-        # 고유한 파일명 생성 (충돌 방지)
-        unique_filename = f"{uuid.uuid4()}_{filename}"
-        s3_key = f"uploads/{user_id}/{unique_filename}"
+        s3_key = build_upload_object_key(filename, user_id=user_id)
 
         try:
             # Presigned URL 생성 (PUT 방식)
@@ -156,48 +240,29 @@ class S3StorageService(StorageService):
                 "key": s3_key,
                 "method": "PUT",
             }
-        except Exception as e:
-            logger.error(f"Presigned URL generation failed: {e}")
-            raise e
+        except Exception:
+            raise StorageOperationError("storage_presign_failed") from None
 
     def delete(self, file_path: str):
-        key = file_path
-
-        if file_path.startswith("s3://"):
-            parts = file_path.replace("s3://", "").split("/", 1)
-            if len(parts) > 1:
-                key = parts[1]
-        elif file_path.startswith("http"):
-            # https://bucket.s3.region.amazonaws.com/folder/file.ext -> folder/file.ext
-            # URL 파싱 대신 단순히 버킷명 뒷부분을 추출하거나, 표준 S3 URL 패턴 매칭
-            # 간단하게 마지막 path 부분만 가져오는건 위험하므로(폴더 구조), 도메인 이후 path 추출
-            from urllib.parse import urlparse
-
-            parsed = urlparse(file_path)
-            # path: /key or /bucket/key (virtual hosted)
-            # 여기서는 virtual hosted style을 가정하고 key 추출
-            key = parsed.path.lstrip("/")
-
-            # 혹시 path에 bucket 이름이 중복되어 들어가 있다면 제거 (Legacy 호환)
-            # 예: /my-bucket/uploads/file.pdf -> uploads/file.pdf
-            if key.startswith(f"{self.bucket_name}/"):
-                key = key.replace(f"{self.bucket_name}/", "", 1)
+        key = resolve_s3_delete_key(
+            file_path,
+            bucket_name=self.bucket_name,
+            region=self.region,
+        )
 
         try:
             self.s3_client.delete_object(Bucket=self.bucket_name, Key=key)
-        except Exception as e:
-            logger.error(f"S3 Delete failed: {e}")
+        except Exception:
+            # Callers own the cleanup policy and safe logging boundary. Do not
+            # expose provider exception text, bucket names, or object keys here.
+            raise StorageDeleteError("storage_delete_failed") from None
 
 
 def get_storage_service() -> StorageService:
-    # 환경변수가 없거나 None일 경우 기본값 LOCAL로 처리
-    mode = (settings.STORAGE_TYPE or "LOCAL").upper()
+    mode = settings.STORAGE_TYPE
 
     if mode == "LOCAL":
         return LocalStorageService()
-    elif mode == "CLOUD":
+    if mode == "CLOUD":
         return S3StorageService()
-    else:
-        # 지원되지 않는 모드인 경우 경고 후 기본값(LOCAL) 사용
-        logger.warning(f"Unknown STORAGE_TYPE '{mode}', falling back to LOCAL")
-        return LocalStorageService()
+    raise StorageConfigurationError("storage_configuration_invalid")

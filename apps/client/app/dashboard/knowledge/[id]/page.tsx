@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import {
   Database,
@@ -12,6 +12,8 @@ import {
   Clock,
   Settings,
   Trash2,
+  Play,
+  RefreshCw,
   // RotateCw,
   Bot,
   FolderOpen,
@@ -19,6 +21,7 @@ import {
   Home,
   ChevronRight,
   Cpu,
+  Archive,
 } from 'lucide-react';
 import {
   knowledgeApi,
@@ -28,8 +31,20 @@ import {
 import CreateKnowledgeModal from '@/app/features/knowledge/components/create-knowledge-modal';
 import KnowledgeSearchModal from '@/app/features/knowledge/components/knowledge-search-modal';
 import ChangeEmbeddingModelModal from '@/app/features/knowledge/components/change-embedding-model-modal';
+import {
+  generateKnowledgeSafeLabel,
+  generateKnowledgeSafeTopics,
+  readKnowledgeSafeLabel,
+  readKnowledgeSafeTopics,
+} from '@/app/features/knowledge/utils/knowledgeSafeMetadata';
 import { toast } from 'sonner';
 import Link from 'next/link';
+
+const getHttpStatus = (error: unknown): number | undefined => {
+  if (typeof error !== 'object' || error === null) return undefined;
+  const response = (error as { response?: { status?: unknown } }).response;
+  return typeof response?.status === 'number' ? response.status : undefined;
+};
 
 export default function KnowledgeDetailPage() {
   const params = useParams();
@@ -39,13 +54,19 @@ export default function KnowledgeDetailPage() {
   const [knowledgeBase, setKnowledgeBase] =
     useState<KnowledgeBaseDetailResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [fetchErrorStatus, setFetchErrorStatus] = useState<number | null>(null);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
 
   const [isEditingName, setIsEditingName] = useState(false);
   const [isEditingDesc, setIsEditingDesc] = useState(false);
+  const [isEditingSafeMetadata, setIsEditingSafeMetadata] = useState(false);
   const [editName, setEditName] = useState('');
   const [editDesc, setEditDesc] = useState('');
+  const [safeLabelInput, setSafeLabelInput] = useState('');
+  const [safeTopicsInput, setSafeTopicsInput] = useState('');
+  const [isSavingSafeMetadata, setIsSavingSafeMetadata] = useState(false);
+  const isEditingSafeMetadataRef = useRef(false);
 
   // Delete Modal State (Knowledge Base)
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
@@ -62,6 +83,10 @@ export default function KnowledgeDetailPage() {
   // Embedding Model Change Modal State
   const [isModelModalOpen, setIsModelModalOpen] = useState(false);
 
+  useEffect(() => {
+    isEditingSafeMetadataRef.current = isEditingSafeMetadata;
+  }, [isEditingSafeMetadata]);
+
   // 데이터 조회
   const fetchKnowledgeBase = useCallback(
     async (isBackground = false) => {
@@ -69,6 +94,10 @@ export default function KnowledgeDetailPage() {
         if (!isBackground) setIsLoading(true);
         const data = await knowledgeApi.getKnowledgeBase(id);
         setKnowledgeBase(data);
+        setFetchErrorStatus(null);
+        if (data.can_register_initial_document !== true) {
+          setIsUploadModalOpen(false);
+        }
 
         // 수정 중이 아닐 때만 필드 업데이트
         if (!isEditingName) {
@@ -77,15 +106,22 @@ export default function KnowledgeDetailPage() {
         if (!isEditingDesc) {
           setEditDesc(data.description || '');
         }
+        if (!isEditingSafeMetadataRef.current) {
+          setSafeLabelInput(readKnowledgeSafeLabel(data.safe_metadata));
+          setSafeTopicsInput(
+            readKnowledgeSafeTopics(data.safe_metadata).join(', '),
+          );
+        }
       } catch (error) {
-        console.error('Failed to fetch knowledge base', error);
-        alert('자료 그룹을 불러오는데 실패했습니다.');
-        router.push('/dashboard/knowledge');
+        if (!isBackground) {
+          setKnowledgeBase(null);
+          setFetchErrorStatus(getHttpStatus(error) ?? 0);
+        }
       } finally {
         setIsLoading(false);
       }
     },
-    [id, isEditingName, isEditingDesc, router],
+    [id, isEditingName, isEditingDesc],
   );
 
   useEffect(() => {
@@ -96,9 +132,9 @@ export default function KnowledgeDetailPage() {
 
   // 문서 상태 자동 갱신 (Polling)
   useEffect(() => {
-    // 처리 중(indexing, processing, pending)인 자료가 존재하는지 확인
+    // 처리 중(indexing, processing)인 자료가 존재하는지 확인
     const hasProcessingDocs = knowledgeBase?.documents.some((doc) =>
-      ['indexing', 'processing', 'pending'].includes(doc.status),
+      ['indexing', 'processing'].includes(doc.status),
     );
 
     // 처리 중인 자료가 있다면 3초마다 상태 갱신
@@ -218,6 +254,13 @@ export default function KnowledgeDetailPage() {
             승인 대기
           </span>
         );
+      case 'pending':
+        return (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400">
+            <Clock className="w-3.5 h-3.5" />
+            처리 전
+          </span>
+        );
       default:
         return (
           <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-400">
@@ -233,6 +276,12 @@ export default function KnowledgeDetailPage() {
     setIsSourceDeleteModalOpen(true);
   };
 
+  const openDocumentSettings = (documentId: string) => {
+    router.push(
+      `/dashboard/knowledge/${knowledgeBase?.id || id}/document/${documentId}`,
+    );
+  };
+
   const confirmDeleteDocument = async () => {
     if (!deleteTargetDocId) return;
     try {
@@ -242,31 +291,12 @@ export default function KnowledgeDetailPage() {
       toast.success('소스가 삭제되었습니다.');
       setIsSourceDeleteModalOpen(false);
       setDeleteTargetDocId(null);
-    } catch (error) {
-      console.error('Failed to delete document:', error);
+    } catch {
       toast.error('소스 삭제에 실패했습니다.');
     } finally {
       setIsDeletingSource(false);
     }
   };
-
-  // const handleSyncDocument = async (
-  //   documentId: string,
-  //   sourceType: SourceType,
-  // ) => {
-  //   try {
-  //     await knowledgeApi.syncDocument(id, documentId);
-  //     fetchKnowledgeBase();
-  //     const message =
-  //       sourceType === 'DB'
-  //         ? 'DB 동기화가 시작되었습니다.'
-  //         : 'API 동기화가 시작되었습니다.';
-  //     toast.success(message);
-  //   } catch (error) {
-  //     console.error('Failed to sync document:', error);
-  //     toast.error('동기화 실패');
-  //   }
-  // };
 
   const handleNameUpdate = async () => {
     if (!editName.trim()) {
@@ -301,7 +331,7 @@ export default function KnowledgeDetailPage() {
     }
   };
 
-  // 지식 베이스 삭제 핸들러
+  // 지식 베이스 archive 핸들러
   const handleDeleteKnowledgeBase = async () => {
     if (deleteConfirmName !== knowledgeBase?.name) {
       toast.error('자료 그룹 이름이 일치하지 않습니다.');
@@ -309,12 +339,11 @@ export default function KnowledgeDetailPage() {
     }
     try {
       setIsDeleting(true);
-      await knowledgeApi.deleteKnowledgeBase(id);
-      toast.success('자료 그룹이 삭제되었습니다.');
+      await knowledgeApi.archiveKnowledgeBase(id);
+      toast.success('자료 그룹을 보관했습니다.');
       router.push('/dashboard/knowledge');
-    } catch (error) {
-      console.error('Failed to delete kb:', error);
-      toast.error('자료 그룹 삭제 실패');
+    } catch {
+      toast.error('자료 그룹 보관 실패');
       setIsDeleting(false);
     }
   };
@@ -326,19 +355,102 @@ export default function KnowledgeDetailPage() {
       toast.success('임베딩 모델이 변경되었습니다. 재인덱싱이 시작됩니다.');
       fetchKnowledgeBase();
     } catch (error) {
-      console.error('Failed to update embedding model:', error);
       toast.error('모델 변경 실패');
       throw error;
     }
   };
 
-  if (isLoading || !knowledgeBase) {
+  const handleGenerateSafeLabel = () => {
+    if (!knowledgeBase) return;
+    setSafeLabelInput(generateKnowledgeSafeLabel(knowledgeBase.name));
+    setIsEditingSafeMetadata(true);
+  };
+
+  const handleGenerateSafeTopics = () => {
+    if (!knowledgeBase) return;
+    setSafeTopicsInput(
+      generateKnowledgeSafeTopics({
+        name: knowledgeBase.name,
+        description: knowledgeBase.description,
+      }).join(', '),
+    );
+    setIsEditingSafeMetadata(true);
+  };
+
+  const handleSafeMetadataSave = async () => {
+    if (!knowledgeBase) return;
+    const safeTopics = safeTopicsInput
+      .split(/[,;\n\r]+/)
+      .map((topic) => topic.trim())
+      .filter(Boolean);
+    try {
+      setIsSavingSafeMetadata(true);
+      await knowledgeApi.updateKnowledgeSafeMetadata(id, {
+        safe_label: safeLabelInput,
+        kb_safe_topics: safeTopics,
+      });
+      setIsEditingSafeMetadata(false);
+      toast.success('KB safe metadata saved.');
+      fetchKnowledgeBase();
+    } catch {
+      toast.error('KB safe metadata save failed.');
+    } finally {
+      setIsSavingSafeMetadata(false);
+    }
+  };
+
+  if (isLoading) {
     return (
       <div className="flex justify-center items-center h-screen">
         <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
       </div>
     );
   }
+
+  if (!knowledgeBase) {
+    const isNotFoundOrHidden =
+      fetchErrorStatus === 403 || fetchErrorStatus === 404;
+    return (
+      <div className="min-h-full bg-gray-50/30 dark:bg-gray-900 p-8">
+        <div className="mx-auto flex max-w-xl flex-col items-center justify-center rounded-lg border border-gray-200 bg-white px-8 py-12 text-center shadow-sm dark:border-gray-700 dark:bg-gray-800">
+          <FolderOpen className="mb-4 h-10 w-10 text-gray-400" />
+          <h1 className="text-lg font-semibold text-gray-900 dark:text-white">
+            {isNotFoundOrHidden
+              ? '자료 그룹을 찾을 수 없습니다'
+              : '자료 그룹을 불러오지 못했습니다'}
+          </h1>
+          <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+            {isNotFoundOrHidden
+              ? '삭제되었거나 현재 계정으로 접근할 수 없는 자료 그룹입니다.'
+              : '일시적인 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.'}
+          </p>
+          <div className="mt-6 flex gap-2">
+            <button
+              onClick={() => router.push('/dashboard/knowledge')}
+              className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:text-gray-200 dark:hover:bg-gray-700"
+            >
+              목록으로 이동
+            </button>
+            {!isNotFoundOrHidden && (
+              <button
+                onClick={() => fetchKnowledgeBase()}
+                className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+              >
+                다시 시도
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const canEditSettings = knowledgeBase.can_edit_settings !== false;
+  const canManageSafeMetadata =
+    knowledgeBase.can_manage_safe_metadata ?? canEditSettings;
+  const canManageKnowledgeBase = knowledgeBase.can_manage === true;
+  const canRegisterInitialDocument =
+    knowledgeBase.can_register_initial_document === true;
 
   return (
     <div className="p-8 bg-gray-50/30 dark:bg-gray-900 min-h-full">
@@ -391,9 +503,13 @@ export default function KnowledgeDetailPage() {
                 />
               ) : (
                 <h1
-                  onClick={() => setIsEditingName(true)}
-                  className="text-base font-bold text-gray-900 dark:text-white cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800 rounded px-1 -ml-1 transition-colors truncate"
-                  title="클릭하여 이름 수정"
+                  onClick={() => canEditSettings && setIsEditingName(true)}
+                  className={`text-base font-bold text-gray-900 dark:text-white rounded px-1 -ml-1 transition-colors truncate ${
+                    canEditSettings
+                      ? 'cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800'
+                      : ''
+                  }`}
+                  title={canEditSettings ? '클릭하여 이름 수정' : undefined}
                 >
                   {knowledgeBase.name}
                 </h1>
@@ -415,13 +531,17 @@ export default function KnowledgeDetailPage() {
                 />
               ) : (
                 <p
-                  onClick={() => setIsEditingDesc(true)}
-                  className={`text-sm cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800 rounded px-1 -ml-1 transition-colors truncate ${
+                  onClick={() => canEditSettings && setIsEditingDesc(true)}
+                  className={`text-sm rounded px-1 -ml-1 transition-colors truncate ${
+                    canEditSettings
+                      ? 'cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-800'
+                      : ''
+                  } ${
                     knowledgeBase.description
                       ? 'text-gray-500 dark:text-gray-400'
                       : 'text-gray-400 dark:text-gray-500 italic'
                   }`}
-                  title="클릭하여 설명 수정"
+                  title={canEditSettings ? '클릭하여 설명 수정' : undefined}
                 >
                   {knowledgeBase.description || '설명을 입력하세요'}
                 </p>
@@ -431,9 +551,10 @@ export default function KnowledgeDetailPage() {
             {/* Model Badge - Clean Badge UI */}
             <div className="flex items-center gap-2 mt-2">
               <button
-                onClick={() => setIsModelModalOpen(true)}
+                onClick={() => canEditSettings && setIsModelModalOpen(true)}
+                disabled={!canEditSettings}
                 className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-600 dark:text-gray-300 text-xs font-medium rounded-full border border-gray-200 dark:border-gray-600 transition-colors"
-                title="클릭하여 모델 변경"
+                title={canEditSettings ? '클릭하여 모델 변경' : undefined}
               >
                 <Cpu className="w-3.5 h-3.5 text-blue-500" />
                 <span>{knowledgeBase.embedding_model}</span>
@@ -452,22 +573,124 @@ export default function KnowledgeDetailPage() {
             <Bot className="w-4 h-4 text-blue-600 dark:text-blue-400" />
             AI 답변 테스트
           </button>
-          <button
-            onClick={() => setIsUploadModalOpen(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors shadow-sm"
-          >
-            <Plus className="w-4 h-4" />
-            소스 추가
-          </button>
-          <button
-            onClick={() => setIsDeleteModalOpen(true)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-red-300 dark:border-red-700 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 text-sm rounded-lg transition-colors"
-          >
-            <Trash2 className="w-4 h-4" />
-            삭제
-          </button>
+          {canRegisterInitialDocument && (
+            <button
+              onClick={() => setIsUploadModalOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors shadow-sm"
+            >
+              <Plus className="w-4 h-4" />
+              첫 소스 등록
+            </button>
+          )}
+          {canManageKnowledgeBase && (
+              <button
+                onClick={() => setIsDeleteModalOpen(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 border border-red-300 dark:border-red-700 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 text-sm rounded-lg transition-colors"
+              >
+                <Archive className="w-4 h-4" />
+                보관
+              </button>
+          )}
         </div>
       </div>
+
+      {canManageSafeMetadata && (
+      <section className="mb-6 rounded-lg border border-gray-200 bg-white p-4 shadow-sm dark:border-gray-700 dark:bg-gray-800">
+        <div className="grid gap-3 lg:grid-cols-[1fr_1.5fr_auto] lg:items-end">
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400">
+              추천 표시명
+            </span>
+            <div className="flex gap-2">
+              <input
+                aria-label="KB safe label"
+                value={safeLabelInput}
+                onChange={(event) => {
+                  setSafeLabelInput(event.target.value);
+                  setIsEditingSafeMetadata(true);
+                }}
+                className="min-w-0 flex-1 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:border-gray-600 dark:bg-gray-900 dark:text-white"
+                placeholder="Knowledge Base"
+              />
+              <button
+                type="button"
+                aria-label="generate safe label"
+                onClick={handleGenerateSafeLabel}
+                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-300 text-gray-600 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
+                title="추천 표시명 자동 생성"
+              >
+                <RefreshCw className="h-4 w-4" />
+              </button>
+            </div>
+          </label>
+
+          <label className="block">
+            <span className="mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400">
+              추천 토픽
+            </span>
+            <div className="flex gap-2">
+              <input
+                aria-label="KB safe topics"
+                value={safeTopicsInput}
+                onChange={(event) => {
+                  setSafeTopicsInput(event.target.value);
+                  setIsEditingSafeMetadata(true);
+                }}
+                className="min-w-0 flex-1 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:border-gray-600 dark:bg-gray-900 dark:text-white"
+                placeholder="topic1, topic2"
+              />
+              <button
+                type="button"
+                aria-label="generate safe topics"
+                onClick={handleGenerateSafeTopics}
+                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-gray-300 text-gray-600 transition-colors hover:bg-gray-50 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
+                title="추천 토픽 자동 생성"
+              >
+                <RefreshCw className="h-4 w-4" />
+              </button>
+            </div>
+          </label>
+
+          <button
+            type="button"
+            aria-label="save safe metadata"
+            onClick={handleSafeMetadataSave}
+            disabled={isSavingSafeMetadata}
+            className="inline-flex h-9 items-center justify-center gap-1.5 rounded-lg bg-blue-600 px-3 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isSavingSafeMetadata ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <CheckCircle className="h-4 w-4" />
+            )}
+            저장
+          </button>
+        </div>
+      </section>
+      )}
+
+      {knowledgeBase.documents.length > 0 && canEditSettings && (
+        <div className="mb-6 flex flex-col gap-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900 dark:border-blue-800 dark:bg-blue-950/40 dark:text-blue-100 sm:flex-row sm:items-center sm:justify-between">
+          <p>
+            지식 베이스 하나는 독립 소스 하나를 관리합니다. 다른 문서는 새 지식
+            베이스로 만든 뒤 Collection에서 함께 구성하세요.
+          </p>
+          <div className="flex shrink-0 items-center gap-4">
+            <Link
+              href="/dashboard/knowledge"
+              className="font-medium text-blue-700 hover:underline dark:text-blue-300"
+            >
+              새 지식 베이스
+            </Link>
+            <Link
+              href="/dashboard/knowledge/collections"
+              className="font-medium text-blue-700 hover:underline dark:text-blue-300"
+            >
+              Collection 관리
+            </Link>
+          </div>
+        </div>
+      )}
 
       {/* Source List */}
       <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden shadow-sm">
@@ -508,13 +731,15 @@ export default function KnowledgeDetailPage() {
                       <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
                         AI가 학습할 문서를 추가해보세요.
                       </p>
-                      <button
-                        onClick={() => setIsUploadModalOpen(true)}
-                        className="inline-flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors shadow-sm"
-                      >
-                        <Plus className="w-4 h-4 mr-1.5" />
-                        첫번째 소스 추가하기
-                      </button>
+                      {canRegisterInitialDocument && (
+                        <button
+                          onClick={() => setIsUploadModalOpen(true)}
+                          className="inline-flex items-center px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors shadow-sm"
+                        >
+                          <Plus className="w-4 h-4 mr-1.5" />
+                          첫 소스 등록
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -546,6 +771,7 @@ export default function KnowledgeDetailPage() {
                       <div className="flex items-center gap-2">
                         <Link
                           href={`/dashboard/knowledge/${knowledgeBase.id}/document/${doc.id}`}
+                          prefetch={false}
                           className="hover:text-blue-600 hover:underline truncate"
                           title={doc.filename}
                         >
@@ -569,6 +795,11 @@ export default function KnowledgeDetailPage() {
                           title={doc.error_message}
                         >
                           {doc.error_message}
+                        </p>
+                      )}
+                      {doc.status === 'pending' && (
+                        <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
+                          처리 시작 전에는 RAG 검색에 사용되지 않습니다.
                         </p>
                       )}
                     </td>
@@ -603,14 +834,40 @@ export default function KnowledgeDetailPage() {
                     >
                       {formatRelativeTime(doc.updated_at || doc.created_at)}
                     </td>
-                    <td className="px-5 py-2.5 text-right">
-                      <button
-                        className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-all"
-                        onClick={() => handleDeleteDocument(doc.id)}
-                        title="삭제"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
+                    <td className="px-5 py-2.5">
+                      <div className="flex items-center justify-end gap-1.5">
+                        {canEditSettings &&
+                          (doc.status === 'pending' ||
+                            doc.status === 'failed') && (
+                          <button
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/30 rounded-lg transition-colors"
+                            onClick={() => openDocumentSettings(doc.id)}
+                            title={
+                              doc.status === 'failed'
+                                ? '재처리 설정으로 이동'
+                                : '처리 설정으로 이동'
+                            }
+                          >
+                            {doc.status === 'failed' ? (
+                              <RefreshCw className="h-3.5 w-3.5" />
+                            ) : (
+                              <Play className="h-3.5 w-3.5" />
+                            )}
+                            <span>
+                              {doc.status === 'failed' ? '재처리' : '처리 시작'}
+                            </span>
+                          </button>
+                        )}
+                        {canEditSettings && (
+                          <button
+                            className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-all"
+                            onClick={() => handleDeleteDocument(doc.id)}
+                            title="삭제"
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))
@@ -620,9 +877,9 @@ export default function KnowledgeDetailPage() {
         </div>
       </div>
 
-      {/* Upload Modal (Reuse) - TODO: KB ID 전달 필요 */}
+      {/* Initial source registration modal */}
       <CreateKnowledgeModal
-        isOpen={isUploadModalOpen}
+        isOpen={isUploadModalOpen && canRegisterInitialDocument}
         knowledgeBaseId={id}
         onClose={() => {
           setIsUploadModalOpen(false);
@@ -643,8 +900,8 @@ export default function KnowledgeDetailPage() {
           <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-md w-full p-6 space-y-4">
             <div className="flex justify-between items-start">
               <h3 className="text-lg font-bold text-red-600 dark:text-red-400 flex items-center gap-2">
-                <Trash2 className="w-5 h-5" />
-                지식 베이스 삭제
+                <Archive className="w-5 h-5" />
+                지식 베이스 보관
               </h3>
               <button
                 onClick={() => setIsDeleteModalOpen(false)}
@@ -657,9 +914,9 @@ export default function KnowledgeDetailPage() {
             <div className="space-y-4">
               <div className="p-4 bg-red-50 dark:bg-red-900/20 rounded-lg text-sm text-red-800 dark:text-red-300">
                 <p className="font-semibold mb-2">
-                  ⚠️ 경고: 복구할 수 없습니다.
+                  보관하면 일반 목록과 RAG 후보에서 제외됩니다.
                 </p>
-                <p>삭제하시려면 지식 베이스 이름을 정확히 입력해주세요:</p>
+                <p>보관하시려면 지식 베이스 이름을 정확히 입력해주세요:</p>
                 <p className="mt-2 px-3 py-2 bg-white dark:bg-gray-800 rounded border border-red-200 dark:border-red-800 font-bold text-red-700 dark:text-red-300">
                   {knowledgeBase.name}
                 </p>
@@ -690,10 +947,10 @@ export default function KnowledgeDetailPage() {
                   {isDeleting ? (
                     <>
                       <Loader2 className="w-4 h-4 animate-spin" />
-                      삭제 중...
+                      보관 중...
                     </>
                   ) : (
-                    '삭제 확인'
+                    '보관 확인'
                   )}
                 </button>
               </div>

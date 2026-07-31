@@ -1,5 +1,5 @@
 'use client';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import {
   FileText,
@@ -21,7 +21,10 @@ import {
   knowledgeApi,
   JoinConfig,
 } from '@/app/features/knowledge/api/knowledgeApi';
-import { DocumentResponse } from '@/app/features/knowledge/types/Knowledge';
+import {
+  DocumentApiEditConfigSummary,
+  DocumentResponse,
+} from '@/app/features/knowledge/types/Knowledge';
 import { useDocumentProcess } from '@/app/features/knowledge/hooks/useDocumentProcess';
 import Link from 'next/link'; // Added for Breadcrumb
 // Separated Components
@@ -33,9 +36,16 @@ import ParsingStrategySettings from '@/app/features/knowledge/components/documen
 import ChunkPreviewList from '@/app/features/knowledge/components/preview/ChunkPreviewList';
 import DBConnectionForm from '@/app/features/knowledge/components/create-knowledge-modal/DBConnectionForm';
 import { DBConfig } from '@/app/features/knowledge/types/DB';
-import { connectorApi } from '@/app/features/knowledge/api/connectorApi';
+import {
+  connectorApi,
+  type ConnectionTestResult,
+} from '@/app/features/knowledge/api/connectorApi';
 import { useGenericCredential } from '@/app/features/knowledge/hooks/useGenericCredential';
 import ColumnAutocomplete from '@/app/features/knowledge/components/document-settings/ColumnAutocomplete';
+import {
+  ACTIVE_ORGANIZATION_CHANGED_EVENT,
+  getStoredActiveOrganizationId,
+} from '@/lib/activeOrganization';
 
 // UUID prefix가 있으면 제거, API URL이면 도메인만 추출
 const getDisplayFilename = (filename: string): string => {
@@ -55,6 +65,9 @@ const getDisplayFilename = (filename: string): string => {
   // DB source 등: 그대로 반환
   return filename;
 };
+
+const isActiveProcessingStatus = (value: string) =>
+  value === 'indexing' || value === 'processing';
 
 export default function DocumentSettingsPage() {
   const params = useParams();
@@ -93,13 +106,41 @@ export default function DocumentSettingsPage() {
   const [parsingStrategy, setParsingStrategy] = useState<
     'general' | 'llamaparse'
   >('general');
-  const [apiOriginalData, setApiOriginalData] = useState<any>(null); // API 원본 데이터 (SessionStorage)
+  const [chunkingMode, setChunkingMode] = useState<
+    'flat' | 'hierarchical'
+  >('flat');
+  const [apiConfigSummary, setApiConfigSummary] =
+    useState<DocumentApiEditConfigSummary | null>(null);
   const [enableAutoChunking, setEnableAutoChunking] = useState<boolean>(true); // 자동 청킹 활성화
   const [joinConfig, setJoinConfig] = useState<JoinConfig | null>(null); // JOIN 설정 상태
+  const [canEditDocument, setCanEditDocument] = useState(false);
+  const [isEditConfigReady, setIsEditConfigReady] = useState(false);
+  const [permissionScope, setPermissionScope] = useState<string | null>(null);
+  const [editConfigScope, setEditConfigScope] = useState<string | null>(null);
+  const [activeOrganizationId, setActiveOrganizationId] = useState<
+    string | null
+  >(() => getStoredActiveOrganizationId());
+  const fetchGeneration = useRef(0);
+  const activeOrganizationRef = useRef<string | null>(activeOrganizationId);
+  const activeProcessingScope = useRef<string | null>(null);
+  const currentDocumentScope = `${activeOrganizationId ?? 'no-organization'}:${kbId}:${documentId}`;
+  const documentScopeRef = useRef(currentDocumentScope);
+
+  useEffect(() => {
+    documentScopeRef.current = currentDocumentScope;
+  }, [currentDocumentScope]);
+  const canEditCurrentDocument =
+    canEditDocument && permissionScope === currentDocumentScope;
+  const isCurrentEditConfigReady =
+    isEditConfigReady && editConfigScope === currentDocumentScope;
 
   // 작업 불가능 조건: (전략이 llamaparse인데 키가 없으면)
   const isActionDisabled =
     parsingStrategy === 'llamaparse' && !isKeyLoading && !hasLlamaParseKey;
+  const isEditActionDisabled =
+    isActionDisabled ||
+    !canEditCurrentDocument ||
+    !isCurrentEditConfigReady;
 
   // 실시간 진행 상태
   const [progress, setProgress] = useState(0);
@@ -108,7 +149,7 @@ export default function DocumentSettingsPage() {
   const [connectionId, setConnectionId] = useState<string>('');
   const [isEditingConnection, setIsEditingConnection] = useState(false);
   const [formKey, setFormKey] = useState(0); // 폼 강제 리셋용 키
-  const [connectionDetails, setConnectionDetails] = useState<any>(null);
+  const [connectionDetails, setConnectionDetails] = useState<DBConfig | null>(null);
   const [isLoadingDetails, setIsLoadingDetails] = useState(false);
 
   // 범위 선택 관련 상태
@@ -119,46 +160,124 @@ export default function DocumentSettingsPage() {
   const [rangeEnd, setRangeEnd] = useState<string>('');
   const [keywordFilter, setKeywordFilter] = useState<string>('');
 
+  useEffect(() => {
+    const syncActiveOrganization = () => {
+      const nextOrganizationId = getStoredActiveOrganizationId();
+      documentScopeRef.current = `${nextOrganizationId ?? 'no-organization'}:${kbId}:${documentId}`;
+      if (activeOrganizationRef.current === nextOrganizationId) return;
+      activeOrganizationRef.current = nextOrganizationId;
+      fetchGeneration.current += 1;
+      setActiveOrganizationId(nextOrganizationId);
+    };
+
+    syncActiveOrganization();
+    window.addEventListener(
+      ACTIVE_ORGANIZATION_CHANGED_EVENT,
+      syncActiveOrganization,
+    );
+    return () => {
+      window.removeEventListener(
+        ACTIVE_ORGANIZATION_CHANGED_EVENT,
+        syncActiveOrganization,
+      );
+    };
+  }, [kbId, documentId]);
+
   // SSE 연결 (Indexing 상태일 때)
   useEffect(() => {
-    if (status !== 'indexing' || !documentId) return;
-    const url = knowledgeApi.getProgressUrl(documentId);
+    if (!isActiveProcessingStatus(status) || !documentId) return;
+    const streamScope = currentDocumentScope;
+    let active = true;
+    let url: string;
+    try {
+      url = knowledgeApi.getProgressUrl(documentId);
+    } catch {
+      toast.error('활성 조직을 선택한 뒤 문서 상태를 확인해 주세요.');
+      return;
+    }
     const eventSource = new EventSource(url, { withCredentials: true });
     eventSource.onmessage = (event) => {
+      if (!active || documentScopeRef.current !== streamScope) return;
       try {
         const data = JSON.parse(event.data);
-        if (data.error) {
+        if (data.error && data.status !== 'completed') {
           eventSource.close();
+          setProgress(0);
           setStatus('failed');
-          toast.error(data.error);
+          toast.error('문서 처리 중 오류가 발생했습니다.');
           return;
         }
         setProgress(data.progress);
         if (data.status === 'completed' || data.progress >= 100) {
           eventSource.close();
+          setProgress(100);
           setStatus('completed');
           toast.success('문서 처리가 완료되었습니다!');
         }
         if (data.status === 'failed') {
           eventSource.close();
+          setProgress(0);
           setStatus('failed');
-          toast.error(data.message || '처리 중 오류가 발생했습니다.');
+          toast.error('문서 처리 중 오류가 발생했습니다.');
         }
-      } catch (err) {
-        console.error('SSE Parse Error:', err);
+      } catch {
+        // 잘못된 진행 응답은 현재 문서 상태에 반영하지 않는다.
       }
     };
-    eventSource.onerror = (err) => {
+    eventSource.onerror = () => {
+      if (!active || documentScopeRef.current !== streamScope) return;
       if (eventSource.readyState === EventSource.CLOSED) return;
-      console.error('SSE Error:', err);
       eventSource.close();
     };
     return () => {
+      active = false;
       eventSource.close();
     };
-  }, [status, documentId]);
+  }, [currentDocumentScope, documentId, status]);
   // 초기 데이터 로드
   useEffect(() => {
+    const generation = ++fetchGeneration.current;
+    const requestScope = currentDocumentScope;
+    let cancelled = false;
+    const isStale = () =>
+      cancelled ||
+      fetchGeneration.current !== generation ||
+      documentScopeRef.current !== requestScope;
+
+    setIsLoading(true);
+    setDocument(null);
+    setKbName('');
+    setStatus('');
+    setErrorMessage(null);
+    setProgress(0);
+    setCanEditDocument(false);
+    setPermissionScope(null);
+    setIsEditConfigReady(false);
+    setEditConfigScope(null);
+    setApiConfigSummary(null);
+    setChunkSize(1000);
+    setChunkOverlap(200);
+    setSegmentIdentifier('\\n\\n');
+    setRemoveUrlsEmails(false);
+    setRemoveWhitespace(true);
+    setParsingStrategy('general');
+    setChunkingMode('flat');
+    setEnableAutoChunking(true);
+    setSelectedDbItems({});
+    setSensitiveColumns({});
+    setAliases({});
+    setTemplate('');
+    setConnectionId('');
+    setJoinConfig(null);
+    setSelectionMode('all');
+    setRangeStart('');
+    setRangeEnd('');
+    setKeywordFilter('');
+    setIsEditingConnection(false);
+    setConnectionDetails(null);
+    setIsLoadingDetails(false);
+    activeProcessingScope.current = null;
+
     const fetchDocument = async () => {
       try {
         // KB 정보와 문서 정보를 병렬로 조회
@@ -166,89 +285,118 @@ export default function DocumentSettingsPage() {
           knowledgeApi.getKnowledgeBase(kbId),
           knowledgeApi.getDocument(kbId, documentId),
         ]);
+        if (isStale()) return;
 
-        // KB 이름 설정
-        if (kbData) {
-          setKbName(kbData.name);
-        }
+        setKbName(kbData.name);
+        const canWrite = kbData.can_write === true;
+        setCanEditDocument(canWrite);
+        setPermissionScope(requestScope);
         if (targetDoc) {
           setDocument(targetDoc);
           setStatus(targetDoc.status);
+          const savedProgress =
+            typeof targetDoc.meta_info?.progress === 'number'
+              ? targetDoc.meta_info.progress
+              : targetDoc.meta_info?.processing_progress;
+          if (targetDoc.status === 'completed') {
+            setProgress(100);
+          } else if (targetDoc.status === 'failed') {
+            setProgress(0);
+          } else if (typeof savedProgress === 'number') {
+            setProgress(savedProgress);
+          }
           setErrorMessage(targetDoc.error_message || null); // [추가] 초기 에러 메시지 로드
-          setChunkSize(targetDoc.chunk_size || 1000);
-          setChunkOverlap(targetDoc.chunk_overlap || 200);
-          if (targetDoc.meta_info) {
-            if (targetDoc.meta_info.segment_identifier) {
-              setSegmentIdentifier(targetDoc.meta_info.segment_identifier);
-            }
-            if (targetDoc.meta_info.remove_urls_emails !== undefined) {
-              setRemoveUrlsEmails(targetDoc.meta_info.remove_urls_emails);
-            }
-            if (targetDoc.meta_info.remove_whitespace !== undefined) {
-              setRemoveWhitespace(targetDoc.meta_info.remove_whitespace);
-            }
-            // DB 선택값 복원
-            if (targetDoc.meta_info.db_config) {
-              if (targetDoc.meta_info.db_config.selected_items) {
-                setSelectedDbItems(
-                  targetDoc.meta_info.db_config.selected_items,
+
+          if (canWrite) {
+            try {
+              const editConfig = await knowledgeApi.getDocumentEditConfig(
+                kbId,
+                documentId,
+              );
+              if (isStale()) return;
+              const sourceType = targetDoc.source_type || 'FILE';
+              const hasRequiredSourceConfig =
+                (sourceType !== 'DB' || Boolean(editConfig.db_config)) &&
+                (sourceType !== 'API' || Boolean(editConfig.api_config));
+              if (
+                !editConfig.editable ||
+                editConfig.source_type !== sourceType ||
+                !hasRequiredSourceConfig
+              ) {
+                toast.warning(
+                  '기존 문서 설정을 안전하게 복원할 수 없어 수정 작업을 차단했습니다.',
                 );
+                return;
               }
-              if (targetDoc.meta_info.db_config.sensitive_columns) {
-                setSensitiveColumns(
-                  targetDoc.meta_info.db_config.sensitive_columns,
-                );
+
+              setChunkSize(editConfig.chunk_size ?? 1000);
+              setChunkOverlap(editConfig.chunk_overlap ?? 200);
+              setSegmentIdentifier(editConfig.segment_identifier ?? '\\n\\n');
+              setRemoveUrlsEmails(editConfig.remove_urls_emails ?? false);
+              setRemoveWhitespace(editConfig.remove_whitespace ?? true);
+              setParsingStrategy(editConfig.strategy ?? 'general');
+              setChunkingMode(editConfig.chunking_mode ?? 'flat');
+              setSelectionMode(editConfig.selection_mode ?? 'all');
+              if (
+                editConfig.selection_mode === 'range' &&
+                editConfig.chunk_range
+              ) {
+                const [start, end] = editConfig.chunk_range.split('-', 2);
+                setRangeStart(start);
+                setRangeEnd(end);
+              } else {
+                setRangeStart('');
+                setRangeEnd('');
               }
-              if (targetDoc.meta_info.db_config.aliases) {
-                setAliases(targetDoc.meta_info.db_config.aliases);
+              setKeywordFilter(editConfig.keyword_filter ?? '');
+
+              if (editConfig.db_config) {
+                setSelectedDbItems(editConfig.db_config.selected_items);
+                setSensitiveColumns(editConfig.db_config.sensitive_columns);
+                setAliases(editConfig.db_config.aliases);
+                setTemplate(editConfig.db_config.template ?? '');
+                setConnectionId(editConfig.db_config.connection_id);
+                setJoinConfig({
+                  enabled: editConfig.db_config.join_config.enabled,
+                  ...(editConfig.db_config.join_config.base_table
+                    ? {
+                        base_table:
+                          editConfig.db_config.join_config.base_table,
+                      }
+                    : {}),
+                  joins: editConfig.db_config.join_config.joins,
+                });
               }
-              if (targetDoc.meta_info.db_config.template) {
-                setTemplate(targetDoc.meta_info.db_config.template);
-              }
-              if (targetDoc.meta_info.db_config.connection_id) {
-                setConnectionId(targetDoc.meta_info.db_config.connection_id);
-              }
-            }
-            // Fallback for flat structure
-            if (targetDoc.meta_info.connection_id) {
-              setConnectionId(targetDoc.meta_info.connection_id);
+              setApiConfigSummary(editConfig.api_config ?? null);
+              setIsEditConfigReady(true);
+              setEditConfigScope(requestScope);
+            } catch {
+              if (isStale()) return;
+              toast.warning(
+                '기존 문서 설정을 불러오지 못해 수정 작업을 차단했습니다.',
+              );
             }
           }
         } else {
           toast.error('문서를 찾을 수 없습니다.');
           router.push(`/dashboard/knowledge/${kbId}`);
         }
-      } catch (error) {
-        console.error(error);
+      } catch {
+        if (isStale()) return;
         toast.error('문서 정보를 불러오는데 실패했습니다.');
       } finally {
-        setIsLoading(false);
+        if (!isStale()) {
+          setIsLoading(false);
+        }
       }
     };
     if (kbId && documentId) {
       fetchDocument();
     }
-  }, [kbId, documentId, router]);
-  // SessionStorage에서 API 원본 데이터 불러오기
-  useEffect(() => {
-    if (
-      document?.source_type === 'API' &&
-      document.meta_info?.api_config?.url
-    ) {
-      const storageKey = 'api_preview' + document.meta_info.api_config.url;
-      const storedData = sessionStorage.getItem(storageKey);
-      if (storedData) {
-        try {
-          setApiOriginalData(JSON.parse(storedData));
-        } catch (e) {
-          console.error(
-            'Failed to parse API preview data from sessionStorage',
-            e,
-          );
-        }
-      }
-    }
-  }, [document]);
+    return () => {
+      cancelled = true;
+    };
+  }, [kbId, documentId, router, currentDocumentScope]);
   // useDocumentProcess Hook 사용
   const {
     isAnalyzing,
@@ -266,9 +414,13 @@ export default function DocumentSettingsPage() {
   } = useDocumentProcess({
     kbId,
     documentId,
+    requestScope: currentDocumentScope,
+    isRequestScopeCurrent: (scope) => documentScopeRef.current === scope,
     document,
     setStatus,
     setProgress,
+    canEditDocument: canEditCurrentDocument,
+    editConfigReady: isCurrentEditConfigReady,
     settings: {
       chunkSize,
       chunkOverlap,
@@ -276,6 +428,7 @@ export default function DocumentSettingsPage() {
       removeUrlsEmails,
       removeWhitespace,
       parsingStrategy,
+      chunkingMode,
       selectedDbItems,
       sensitiveColumns,
       aliases,
@@ -291,27 +444,38 @@ export default function DocumentSettingsPage() {
     keywordFilter,
   });
 
+  const handleStartProcessing = () => handleSaveClick();
+
   // DB 연결 저장 핸들러
-  const handleConnectionRequest = async (config: DBConfig) => {
+  const handleConnectionRequest = async (
+    config: DBConfig,
+  ): Promise<Pick<ConnectionTestResult, 'success' | 'retryAfter'>> => {
+    if (!canEditCurrentDocument || !isCurrentEditConfigReady) {
+      toast.error('기존 문서 설정을 복원한 뒤 다시 시도해 주세요.');
+      return { success: false };
+    }
     try {
       const newConn = await connectorApi.createConnector(config);
       if (newConn.success && newConn.id) {
         setConnectionId(newConn.id); // ID 업데이트 -> 스키마 새로고침 트리거됨
         toast.success('DB 연결 정보가 업데이트되었습니다.');
         setIsEditingConnection(false); // 폼 닫기
-        return true;
+        return { success: true };
       } else {
         toast.error(newConn.message || '연결 실패');
-        return false;
+        return { success: false };
       }
-    } catch (e: any) {
-      console.error(e);
-      toast.error(e.response?.data?.detail || '오류 발생');
-      return false;
+    } catch {
+      toast.error('DB 연결 정보 업데이트에 실패했습니다.');
+      return { success: false };
     }
   };
 
   const handleEditConnection = async () => {
+    if (!canEditCurrentDocument || !isCurrentEditConfigReady) {
+      toast.error('기존 문서 설정을 복원한 뒤 다시 시도해 주세요.');
+      return;
+    }
     if (!connectionId) {
       toast.error('연결 ID가 없습니다.');
       return;
@@ -323,8 +487,7 @@ export default function DocumentSettingsPage() {
       setConnectionDetails(details);
       setIsEditingConnection(true);
       setFormKey((prev) => prev + 1);
-    } catch (e: any) {
-      console.error(e);
+    } catch {
       toast.error('연결 정보를 불러오는데 실패했습니다.');
     } finally {
       setIsLoadingDetails(false);
@@ -333,14 +496,14 @@ export default function DocumentSettingsPage() {
 
   // 상태 폴링
   useEffect(() => {
-    let intervalId: NodeJS.Timeout;
-    if (status === 'indexing' || status === 'waiting_for_approval') {
+    let intervalId: NodeJS.Timeout | undefined;
+    let cancelled = false;
+    const pollingScope = currentDocumentScope;
+    if (isActiveProcessingStatus(status) || status === 'waiting_for_approval') {
       intervalId = setInterval(async () => {
         try {
-          const doc = await knowledgeApi.getDocument(
-            params.id as string,
-            params.documentId as string,
-          );
+          const doc = await knowledgeApi.getDocument(kbId, documentId);
+          if (cancelled || documentScopeRef.current !== pollingScope) return;
           setStatus(doc.status);
 
           if (doc.status === 'waiting_for_approval') {
@@ -361,6 +524,7 @@ export default function DocumentSettingsPage() {
 
           if (doc.status === 'completed' || doc.status === 'failed') {
             clearInterval(intervalId);
+            setProgress(doc.status === 'completed' ? 100 : 0);
             // completed/failed 모두 error_message 업데이트 (경고성 메시지 포함)
             setErrorMessage(doc.error_message || null);
             if (doc.status === 'failed') {
@@ -369,21 +533,27 @@ export default function DocumentSettingsPage() {
           }
 
           // SSE가 연결된 상태(indexing)에서는 Polling으로 진행률을 덮어쓰지 않음
-          if (doc.status !== 'indexing' && doc.meta_info) {
-            if (typeof doc.meta_info.processing_progress === 'number') {
+          if (!isActiveProcessingStatus(doc.status) && doc.meta_info) {
+            if (typeof doc.meta_info.progress === 'number') {
+              setProgress(doc.meta_info.progress);
+            } else if (typeof doc.meta_info.processing_progress === 'number') {
               setProgress(doc.meta_info.processing_progress);
             }
           }
-        } catch (e) {
-          console.error('Polling failed', e);
+        } catch {
+          // 다음 polling tick 또는 SSE 재연결이 상태 확인을 재시도한다.
         }
       }, 2000);
     }
-    return () => clearInterval(intervalId);
+    return () => {
+      cancelled = true;
+      if (intervalId) clearInterval(intervalId);
+    };
   }, [
     status,
-    params.id,
-    params.documentId,
+    kbId,
+    documentId,
+    currentDocumentScope,
     setAnalyzeResult,
     setPendingAction,
     setShowCostConfirm,
@@ -391,13 +561,32 @@ export default function DocumentSettingsPage() {
 
   // 완료 시 자동 이동
   useEffect(() => {
-    if (status === 'completed' && progress >= 100) {
+    if (permissionScope !== currentDocumentScope) return;
+    if (isActiveProcessingStatus(status)) {
+      activeProcessingScope.current = currentDocumentScope;
+      return;
+    }
+    if (
+      activeProcessingScope.current === currentDocumentScope &&
+      status === 'completed' &&
+      progress >= 100
+    ) {
+      const redirectScope = currentDocumentScope;
       const timer = setTimeout(() => {
-        router.push(`/dashboard/knowledge/${kbId}`);
+        if (documentScopeRef.current === redirectScope) {
+          router.push(`/dashboard/knowledge/${kbId}`);
+        }
       }, 3000);
       return () => clearTimeout(timer);
     }
-  }, [status, progress, router, kbId]);
+  }, [
+    status,
+    progress,
+    router,
+    kbId,
+    permissionScope,
+    currentDocumentScope,
+  ]);
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen">
@@ -442,6 +631,17 @@ export default function DocumentSettingsPage() {
   // 중앙 패널 렌더러
   const renderCenterPanel = () => {
     if (!document) return null;
+    if (
+      (document.source_type === 'DB' || document.source_type === 'API') &&
+      !isCurrentEditConfigReady
+    ) {
+      return (
+        <div className="flex h-full items-center justify-center p-6 text-center text-sm text-gray-600 dark:text-gray-300">
+          이 소스의 설정은 수정 권한과 안전한 설정 복원이 확인된 경우에만
+          표시됩니다.
+        </div>
+      );
+    }
     switch (document.source_type) {
       case 'DB':
         return (
@@ -467,7 +667,7 @@ export default function DocumentSettingsPage() {
                     key={formKey} // 폼 초기화
                     onChange={() => {}}
                     onTestConnection={handleConnectionRequest}
-                    initialConfig={connectionDetails}
+                    initialConfig={connectionDetails ?? undefined}
                   />
                 </div>
               </div>
@@ -496,14 +696,15 @@ export default function DocumentSettingsPage() {
           </div>
         );
       case 'API':
+        return <ApiSourceViewer apiConfig={apiConfigSummary} />;
+      default: // FILE
         return (
-          <ApiSourceViewer
-            apiOriginalData={apiOriginalData}
-            apiConfig={document.meta_info?.api_config}
+          <FileSourceViewer
+            kbId={kbId}
+            documentId={documentId}
+            filename={document?.filename}
           />
         );
-      default: // FILE
-        return <FileSourceViewer kbId={kbId} documentId={documentId} />;
     }
   };
 
@@ -623,7 +824,7 @@ export default function DocumentSettingsPage() {
             )}
 
             {/* 진행률 표시 */}
-            {status === 'indexing' && (
+            {isActiveProcessingStatus(status) && (
               <div className="flex flex-col items-end mr-4 min-w-[120px]">
                 <div className="flex items-center gap-2 mb-1">
                   <Loader2 className="w-3 h-3 animate-spin text-blue-600" />
@@ -641,21 +842,21 @@ export default function DocumentSettingsPage() {
             )}
 
             <button
-              onClick={handleSaveClick}
+              onClick={handleStartProcessing}
               disabled={
-                isActionDisabled ||
+                isEditActionDisabled ||
                 isAnalyzing ||
                 status === 'completed' ||
-                status === 'indexing'
+                isActiveProcessingStatus(status)
               }
               className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-all shadow-sm hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed font-medium"
             >
-              {analyzingAction === 'save' || status === 'indexing' ? (
+              {analyzingAction === 'save' || isActiveProcessingStatus(status) ? (
                 <Loader2 className="w-4 h-4 animate-spin" />
               ) : (
                 <Save className="w-4 h-4" />
               )}
-              {status === 'indexing'
+              {isActiveProcessingStatus(status)
                 ? '처리 중...'
                 : status === 'pending'
                   ? '처리 시작'
@@ -804,7 +1005,9 @@ export default function DocumentSettingsPage() {
             <div className="absolute bottom-0 left-0 right-0 z-10 p-4 bg-gradient-to-t from-white via-white/80 to-transparent dark:from-gray-800 dark:via-gray-800/80 dark:to-transparent">
               <button
                 onClick={handlePreviewClick}
-                disabled={isActionDisabled || isPreviewLoading || isAnalyzing}
+                disabled={
+                  isEditActionDisabled || isPreviewLoading || isAnalyzing
+                }
                 className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg transition-all shadow-sm disabled:opacity-50 disabled:cursor-not-allowed font-medium"
               >
                 {isPreviewLoading || analyzingAction === 'preview' ? (
@@ -844,7 +1047,11 @@ export default function DocumentSettingsPage() {
                     headerButton={
                       <button
                         onClick={handlePreviewClick}
-                        disabled={isPreviewLoading || isAnalyzing}
+                        disabled={
+                          isEditActionDisabled ||
+                          isPreviewLoading ||
+                          isAnalyzing
+                        }
                         className="px-3 py-1.5 text-xs font-medium bg-white border border-gray-300 dark:border-gray-600 rounded-md hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-gray-700 dark:text-gray-300 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
                       >
                         {isPreviewLoading || analyzingAction === 'preview' ? (

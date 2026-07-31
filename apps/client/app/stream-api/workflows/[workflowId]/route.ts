@@ -1,5 +1,39 @@
 import { NextRequest } from 'next/server';
 
+const CONTEXT_HEADER_ALLOWLIST = [
+  'Origin',
+  'Sec-Fetch-Site',
+  'X-CSRF-Token',
+  'X-Organization-Id',
+  'X-Request-Id',
+  'X-Correlation-Id',
+];
+const CSRF_TOKEN_PATTERN = /^[A-Za-z0-9._-]{1,256}$/;
+
+const withoutCsrfCookie = (cookieHeader: string) =>
+  cookieHeader
+    .split(';')
+    .map((cookie) => cookie.trim())
+    .filter((cookie) => !cookie.toLowerCase().startsWith('csrf_token='))
+    .filter(Boolean)
+    .join('; ');
+
+const normalizeBackendUrl = (url: string) =>
+  url.replace(/\/+$/, '').replace(/\/api\/v1$/i, '');
+
+const resolveBackendUrl = () => {
+  const apiUrl = process.env.API_URL?.trim();
+  if (apiUrl) {
+    return normalizeBackendUrl(apiUrl);
+  }
+
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('API_URL must be configured for the production server');
+  }
+
+  return normalizeBackendUrl('http://127.0.0.1:8000');
+};
+
 /**
  * 워크플로우 스트리밍 실행을 위한 프록시 API Route
  *
@@ -13,8 +47,8 @@ export async function POST(
   const resolvedParams = await params;
   const workflowId = resolvedParams.workflowId;
 
-  // 로컬: http://127.0.0.1:8000, EKS: http://api-service:8000
-  const backendUrl = process.env.API_URL || 'http://127.0.0.1:8000';
+  // 로컬 dev에서 일반 API와 stream proxy가 같은 Gateway를 보도록 fallback 순서를 맞춘다.
+  const backendUrl = resolveBackendUrl();
 
   // Content-Type 확인
   const contentType = request.headers.get('content-type') || 'application/json';
@@ -30,26 +64,50 @@ export async function POST(
     body = await request.text();
   }
 
+  const headers = new Headers();
+  const cookie = request.headers.get('cookie') || '';
+  const csrfToken = request.headers.get('X-CSRF-Token');
+  const forwardedCookie = withoutCsrfCookie(cookie);
+  if (csrfToken && CSRF_TOKEN_PATTERN.test(csrfToken)) {
+    headers.set(
+      'Cookie',
+      [forwardedCookie, `csrf_token=${csrfToken}`].filter(Boolean).join('; '),
+    );
+  } else if (forwardedCookie) {
+    headers.set('Cookie', forwardedCookie);
+  }
+  if (!isFormData) {
+    headers.set('Content-Type', 'application/json');
+  }
+
+  for (const headerName of CONTEXT_HEADER_ALLOWLIST) {
+    const value = request.headers.get(headerName);
+    if (value) {
+      headers.set(headerName, value);
+    }
+  }
+
   // FastAPI로 요청 전달
   const response = await fetch(
     `${backendUrl}/api/v1/workflows/${workflowId}/stream`,
     {
       method: 'POST',
-      headers: isFormData
-        ? {
-            Cookie: request.headers.get('cookie') || '',
-          }
-        : {
-            'Content-Type': 'application/json',
-            Cookie: request.headers.get('cookie') || '',
-          },
+      headers,
       body,
     },
   );
 
   // 에러 응답 처리
   if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
+    const errorText = await response.text().catch(() => '');
+    let errorData: unknown = {};
+    if (errorText) {
+      try {
+        errorData = JSON.parse(errorText);
+      } catch {
+        errorData = { detail: errorText };
+      }
+    }
     return new Response(JSON.stringify(errorData), {
       status: response.status,
       headers: { 'Content-Type': 'application/json' },

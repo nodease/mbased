@@ -4,7 +4,14 @@
 export type FieldConfig = {
   key: string;
   label: string;
-  type?: 'text' | 'code' | 'list' | 'json' | 'variables-table' | 'input-mapping-table';
+  type?:
+    | 'text'
+    | 'code'
+    | 'list'
+    | 'json'
+    | 'variables-table'
+    | 'input-mapping-table'
+    | 'connection-status';
 };
 
 export type NodeDisplayConfig = {
@@ -33,7 +40,13 @@ export const nodeDisplayConfigs: Record<string, NodeDisplayConfig> = {
         { key: 'model_id', label: '모델' },
         { key: 'fallback_model_id', label: '대체 모델' },
       ],
-      [{ key: 'referenced_variables', label: '입력변수', type: 'input-mapping-table' }],
+      [
+        {
+          key: 'referenced_variables',
+          label: '입력변수',
+          type: 'input-mapping-table',
+        },
+      ],
       [{ key: 'knowledgeBases', label: '지식 베이스', type: 'list' }],
       [{ key: 'system_prompt', label: '시스템 프롬프트', type: 'text' }],
       [{ key: 'user_prompt', label: '사용자 프롬프트', type: 'text' }],
@@ -66,7 +79,13 @@ export const nodeDisplayConfigs: Record<string, NodeDisplayConfig> = {
         { key: 'method', label: '메서드' },
         { key: 'url', label: 'URL' },
       ],
-      [{ key: 'referenced_variables', label: '입력변수', type: 'input-mapping-table' }],
+      [
+        {
+          key: 'referenced_variables',
+          label: '입력변수',
+          type: 'input-mapping-table',
+        },
+      ],
       [
         { key: 'authType', label: '인증 타입' },
         { key: 'authConfig', label: '인증 설정', type: 'json' },
@@ -83,9 +102,7 @@ export const nodeDisplayConfigs: Record<string, NodeDisplayConfig> = {
   // ========================
   conditionNode: {
     label: '조건 설정',
-    rows: [
-      [{ key: 'cases', label: '조건 케이스', type: 'json' }],
-    ],
+    rows: [[{ key: 'cases', label: '조건 케이스', type: 'json' }]],
   },
 
   // ========================
@@ -106,9 +123,7 @@ export const nodeDisplayConfigs: Record<string, NodeDisplayConfig> = {
   // ========================
   startNode: {
     label: '시작 노드 설정',
-    rows: [
-      [{ key: 'variables', label: '입력 변수', type: 'variables-table' }],
-    ],
+    rows: [[{ key: 'variables', label: '입력 변수', type: 'variables-table' }]],
   },
 
   // ========================
@@ -129,27 +144,37 @@ export const nodeDisplayConfigs: Record<string, NodeDisplayConfig> = {
   webhookTriggerNode: {
     label: 'Webhook 트리거 설정',
     rows: [
-      [{ key: 'variable_mappings', label: '변수 매핑', type: 'input-mapping-table' }],
+      [
+        {
+          key: 'variable_mappings',
+          label: '변수 매핑',
+          type: 'input-mapping-table',
+        },
+      ],
     ],
   },
 
   // ========================
   // Mail Node
-  // 패널 순서: 서버 설정 → 계정 → 입력변수 → 검색 옵션
+  // 패널 순서: Credential → 입력변수 → 검색 옵션
   // ========================
   mailNode: {
     label: 'Mail 노드 설정',
     rows: [
       [
-        { key: 'provider', label: '메일 서비스' },
-        { key: 'imap_server', label: 'IMAP 서버' },
+        {
+          key: 'credential_id',
+          label: 'Mail Credential',
+          type: 'connection-status',
+        },
       ],
       [
-        { key: 'imap_port', label: '포트' },
-        { key: 'use_ssl', label: 'SSL 사용' },
+        {
+          key: 'referenced_variables',
+          label: '입력변수',
+          type: 'input-mapping-table',
+        },
       ],
-      [{ key: 'email', label: '이메일' }],
-      [{ key: 'referenced_variables', label: '입력변수', type: 'input-mapping-table' }],
       [
         { key: 'keyword', label: '검색 키워드' },
         { key: 'sender', label: '발신자' },
@@ -163,7 +188,24 @@ export const nodeDisplayConfigs: Record<string, NodeDisplayConfig> = {
         { key: 'unread_only', label: '읽지 않은 메일만' },
         { key: 'mark_as_read', label: '읽음 표시' },
       ],
+      [{ key: 'processing_mode', label: '처리 모드' }],
     ],
+  },
+  gmailDraftNode: {
+    label: 'Gmail 답장 초안 설정',
+    rows: [
+      [
+        {
+          key: 'credential_id',
+          label: 'Gmail Credential',
+          type: 'connection-status',
+        },
+      ],
+    ],
+  },
+  mailAcknowledgeNode: {
+    label: '메일 처리 완료 설정',
+    rows: [],
   },
 
   // ========================
@@ -188,7 +230,13 @@ export const nodeDisplayConfigs: Record<string, NodeDisplayConfig> = {
   fileExtractionNode: {
     label: 'File Extraction 노드 설정',
     rows: [
-      [{ key: 'referenced_variables', label: '입력변수', type: 'input-mapping-table' }],
+      [
+        {
+          key: 'referenced_variables',
+          label: '입력변수',
+          type: 'input-mapping-table',
+        },
+      ],
     ],
   },
 
@@ -201,7 +249,13 @@ export const nodeDisplayConfigs: Record<string, NodeDisplayConfig> = {
     rows: [
       [{ key: 'action', label: '작업' }],
       [{ key: 'api_token', label: 'GitHub 토큰' }],
-      [{ key: 'referenced_variables', label: '입력변수', type: 'input-mapping-table' }],
+      [
+        {
+          key: 'referenced_variables',
+          label: '입력변수',
+          type: 'input-mapping-table',
+        },
+      ],
       [
         { key: 'repo_owner', label: '소유자' },
         { key: 'repo_name', label: '저장소' },
@@ -247,7 +301,13 @@ export const nodeDisplayConfigs: Record<string, NodeDisplayConfig> = {
       [{ key: 'url', label: 'URL' }],
       [{ key: 'authConfig', label: '인증', type: 'json' }],
       [{ key: 'channel', label: '채널' }],
-      [{ key: 'referenced_variables', label: '입력변수', type: 'input-mapping-table' }],
+      [
+        {
+          key: 'referenced_variables',
+          label: '입력변수',
+          type: 'input-mapping-table',
+        },
+      ],
       [{ key: 'message', label: '메시지', type: 'text' }],
       [{ key: 'blocks', label: '블록 (JSON)', type: 'json' }],
       [{ key: 'timeout', label: '타임아웃 (ms)' }],
@@ -262,7 +322,13 @@ export const nodeDisplayConfigs: Record<string, NodeDisplayConfig> = {
     label: '변수 추출 설정',
     rows: [
       [{ key: 'source_selector', label: '입력 데이터 소스', type: 'list' }],
-      [{ key: 'mappings', label: '데이터 필터 매핑', type: 'input-mapping-table' }],
+      [
+        {
+          key: 'mappings',
+          label: '데이터 필터 매핑',
+          type: 'input-mapping-table',
+        },
+      ],
     ],
   },
 };

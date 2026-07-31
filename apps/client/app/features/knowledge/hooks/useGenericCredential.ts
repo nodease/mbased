@@ -1,4 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
+import {
+  activeOrganizationHeaders,
+  getStoredActiveOrganizationId,
+} from '@/lib/activeOrganization';
 
 const API_BASE_URL = '/api/v1';
 
@@ -30,6 +34,7 @@ export function useGenericCredential(providerName: string) {
       // 2. Credential 목록 조회
       const credRes = await fetch(`${API_BASE_URL}/llm/credentials`, {
         credentials: 'include',
+        headers: activeOrganizationHeaders(getStoredActiveOrganizationId()),
       });
       if (!credRes.ok) throw new Error('Failed to fetch credentials');
       const credentials: Credential[] = await credRes.json();

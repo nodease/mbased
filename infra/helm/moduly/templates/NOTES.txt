@@ -103,9 +103,9 @@ Redis connection:
    Port: 6379
 
 Storage mode:
-   Type: {{ .Values.gateway.env.STORAGE_TYPE | default "LOCAL" }}
-{{- if eq (.Values.gateway.env.STORAGE_TYPE | default "LOCAL") "CLOUD" }}
-   S3 Bucket: {{ .Values.gateway.env.S3_BUCKET_NAME }}
+   Type: {{ include "moduly.storageType" . }}
+{{- if eq (include "moduly.storageType" .) "CLOUD" }}
+   Cloud object storage is configured.
 {{- end }}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

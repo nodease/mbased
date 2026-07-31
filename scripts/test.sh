@@ -49,6 +49,32 @@ echo -e "\n${YELLOW}📍 Workflow Engine Service 테스트 실행${NC}"
 )
 WORKFLOW_EXIT_CODE=$?
 
+echo -e "\n${YELLOW}📍 Log System Service 테스트 실행 (with Workflow Venv)${NC}"
+(
+    # OS별 Python 경로 설정
+    if [[ "$OSTYPE" == "msys" ]] || [[ "$OSTYPE" == "win32" ]] || [[ "$OSTYPE" == "cygwin" ]]; then
+        VENV_PYTHON="apps/workflow_engine/.venv/Scripts/python"
+    else
+        VENV_PYTHON="apps/workflow_engine/.venv/bin/python"
+    fi
+    export PYTHONPATH="$PROJECT_ROOT"
+    $VENV_PYTHON -m pytest apps/log_system/tests
+)
+LOG_SYSTEM_EXIT_CODE=$?
+
+echo -e "\n${YELLOW}📍 Root 공통 테스트 실행 (with Gateway Venv)${NC}"
+(
+    # OS별 Python 경로 설정
+    if [[ "$OSTYPE" == "msys" ]] || [[ "$OSTYPE" == "win32" ]] || [[ "$OSTYPE" == "cygwin" ]]; then
+        VENV_PYTHON="apps/gateway/.venv/Scripts/python"
+    else
+        VENV_PYTHON="apps/gateway/.venv/bin/python"
+    fi
+    export PYTHONPATH="$PROJECT_ROOT"
+    $VENV_PYTHON -m pytest tests/test_permission_schema.py tests/db tests/services tests/evaluation/test_rag_baseline.py
+)
+ROOT_TESTS_EXIT_CODE=$?
+
 echo -e "\n${YELLOW}📍 Shared Library & Unit 테스트 실행 (with Workflow Venv)${NC}"
 (
     # OS별 Python 경로 설정
@@ -61,6 +87,18 @@ echo -e "\n${YELLOW}📍 Shared Library & Unit 테스트 실행 (with Workflow V
     $VENV_PYTHON -m pytest apps/shared/tests
 )
 UNIT_EXIT_CODE=$?
+
+echo -e "\n${YELLOW}📍 Conversation Memory 테스트 실행 (with Workflow Venv)${NC}"
+(
+    if [[ "$OSTYPE" == "msys" ]] || [[ "$OSTYPE" == "win32" ]] || [[ "$OSTYPE" == "cygwin" ]]; then
+        VENV_PYTHON="apps/workflow_engine/.venv/Scripts/python"
+    else
+        VENV_PYTHON="apps/workflow_engine/.venv/bin/python"
+    fi
+    export PYTHONPATH="$PROJECT_ROOT"
+    $VENV_PYTHON -m pytest apps/memory/tests
+)
+MEMORY_EXIT_CODE=$?
 
 echo -e "\n${YELLOW}📍 Sandbox Service 테스트 실행 (with Workflow Venv)${NC}"
 (
@@ -103,10 +141,28 @@ else
     echo -e "${RED}❌ Workflow Engine Service: FAIL${NC}"
 fi
 
+if [ $LOG_SYSTEM_EXIT_CODE -eq 0 ]; then
+    echo -e "${GREEN}✅ Log System Service: PASS${NC}"
+else
+    echo -e "${RED}❌ Log System Service: FAIL${NC}"
+fi
+
+if [ $ROOT_TESTS_EXIT_CODE -eq 0 ]; then
+    echo -e "${GREEN}✅ Root Common Tests: PASS${NC}"
+else
+    echo -e "${RED}❌ Root Common Tests: FAIL${NC}"
+fi
+
 if [ $UNIT_EXIT_CODE -eq 0 ]; then
     echo -e "${GREEN}✅ Shared/Unit Logic: PASS${NC}"
 else
     echo -e "${RED}❌ Shared/Unit Logic: FAIL${NC}"
+fi
+
+if [ $MEMORY_EXIT_CODE -eq 0 ]; then
+    echo -e "${GREEN}✅ Conversation Memory: PASS${NC}"
+else
+    echo -e "${RED}❌ Conversation Memory: FAIL${NC}"
 fi
 
 if [ $SANDBOX_EXIT_CODE -eq 0 ]; then
@@ -123,9 +179,8 @@ if [ -d "apps/client" ]; then
     fi
 fi
 
-if [ $GATEWAY_EXIT_CODE -eq 0 ] && [ $WORKFLOW_EXIT_CODE -eq 0 ] && [ $UNIT_EXIT_CODE -eq 0 ] && [ $SANDBOX_EXIT_CODE -eq 0 ] && [ $CLIENT_EXIT_CODE -eq 0 ]; then
+if [ $GATEWAY_EXIT_CODE -eq 0 ] && [ $WORKFLOW_EXIT_CODE -eq 0 ] && [ $LOG_SYSTEM_EXIT_CODE -eq 0 ] && [ $ROOT_TESTS_EXIT_CODE -eq 0 ] && [ $UNIT_EXIT_CODE -eq 0 ] && [ $MEMORY_EXIT_CODE -eq 0 ] && [ $SANDBOX_EXIT_CODE -eq 0 ] && [ $CLIENT_EXIT_CODE -eq 0 ]; then
     exit 0
 else
     exit 1
 fi
-

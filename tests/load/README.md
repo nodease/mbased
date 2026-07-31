@@ -18,6 +18,8 @@ LOAD_TEST_DEPLOYMENT_SLUG=your-test-slug
 LOAD_TEST_AUTH_TOKEN=your-secret-token
 ```
 
+인증 토큰은 `/api/v1/run/{url_slug}` 요청의 `Authorization: Bearer` 헤더에만 사용합니다. 토큰 값이나 일부 preview를 로그와 리포트에 출력하지 않습니다.
+
 ## 사용 방법
 
 서버(`uvicorn`)를 실행해 둔 상태에서, 새 터미널을 열고 아래 명령어를 실행하세요.

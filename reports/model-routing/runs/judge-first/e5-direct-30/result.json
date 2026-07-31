@@ -1,0 +1,3107 @@
+{
+  "results": [
+    {
+      "case_id": "advanced-01",
+      "node_id": "llm-direct",
+      "category": "short_advanced_direct",
+      "expected_difficulty": "advanced",
+      "requires_rag": false,
+      "workflow_success": true,
+      "schema_pass": true,
+      "selected_model": "gpt-4.1",
+      "task_cost_usd": 0.000825,
+      "task_latency_ms": 5677,
+      "routing_judge_cost_usd": 0.001556,
+      "routing_judge_tokens": 1000,
+      "routing": {
+        "judge": {
+          "cost": 0.00155625,
+          "model": "gpt-5.4-mini",
+          "usage": {
+            "latency_ms": 3269,
+            "total_tokens": 1000,
+            "prompt_tokens": 785,
+            "completion_tokens": 215
+          },
+          "status": "selected",
+          "attempted": true,
+          "confidence": 0.93,
+          "reason_code": "requirement_judge_ambiguous",
+          "reason_short": "요구 수준 기반 선택",
+          "reason_factors": [
+            "high_decision_impact",
+            "security_or_compliance_risk",
+            "multi_step_reasoning"
+          ],
+          "rubric_version": "routing-requirements-v2",
+          "selected_model": "gpt-4.1",
+          "ambiguity_flags": [
+            "high_impact_uncertainty",
+            "insufficient_context"
+          ],
+          "learning_status": "not_queued",
+          "selection_source": "server_evidence_selection",
+          "task_requirements": {
+            "decision_impact": 3,
+            "task_complexity": 3,
+            "evidence_synthesis": 2
+          },
+          "candidate_model_count": 11,
+          "learning_not_queued_reason": "requirement_adjudication_required"
+        },
+        "enabled": true,
+        "policy_id": "c0a504ad-b20f-480e-9f8f-8a36abf791a2",
+        "rag_context": {
+          "used": false,
+          "source_count": 0,
+          "partial_result": false,
+          "source_tier_used": null,
+          "evidence_sufficient": false,
+          "insufficiency_reason": null,
+          "query_rewrite_applied": false,
+          "retrieved_chunk_count": 0,
+          "retrieved_context_chars": 0,
+          "retrieved_context_token_estimate": "[REDACTED]"
+        },
+        "reason_code": "requirement_judge_ambiguous",
+        "strategy_id": "judge_bootstrap_incremental_v1",
+        "judge_called": true,
+        "execution_mode": "deployed",
+        "fallback_model": "gpt-4.1-mini",
+        "policy_version": "judge-rag-mix-v1",
+        "selected_model": "gpt-4.1",
+        "decision_source": "runtime_judge",
+        "learning_status": "not_queued",
+        "matched_rule_id": null,
+        "runtime_context": {
+          "intent": "generate",
+          "node_task": "generate",
+          "risk_level": "medium",
+          "input_length": 158,
+          "output_format": "json",
+          "prompt_length": 251,
+          "has_file_input": false,
+          "customer_facing": false,
+          "schema_required": true,
+          "knowledge_enabled": false,
+          "input_length_bucket": "short",
+          "prompt_length_bucket": "short"
+        },
+        "decision_factors": {
+          "learning_mode": "judge_first",
+          "judged_request_count": 0,
+          "candidate_model_count": 6
+        }
+      },
+      "rag_context": {
+        "used": false,
+        "source_count": 0,
+        "partial_result": false,
+        "source_tier_used": null,
+        "evidence_sufficient": false,
+        "insufficiency_reason": null,
+        "query_rewrite_applied": false,
+        "retrieved_chunk_count": 0,
+        "retrieved_context_chars": 0,
+        "retrieved_context_token_estimate": "[REDACTED]"
+      },
+      "error": null
+    },
+    {
+      "case_id": "advanced-02",
+      "node_id": "llm-direct",
+      "category": "short_advanced_direct",
+      "expected_difficulty": "advanced",
+      "requires_rag": false,
+      "workflow_success": true,
+      "schema_pass": true,
+      "selected_model": "gpt-4.1",
+      "task_cost_usd": 0.001112,
+      "task_latency_ms": 5714,
+      "routing_judge_cost_usd": 0.001527,
+      "routing_judge_tokens": 991,
+      "routing": {
+        "judge": {
+          "cost": 0.001527,
+          "model": "gpt-5.4-mini",
+          "usage": {
+            "latency_ms": 2614,
+            "total_tokens": 991,
+            "prompt_tokens": 782,
+            "completion_tokens": 209
+          },
+          "status": "selected",
+          "attempted": true,
+          "confidence": 0.92,
+          "reason_code": "no_validated_candidate",
+          "reason_short": "요구 수준 기반 선택",
+          "learning_error": "TypeError",
+          "reason_factors": [
+            "high_decision_impact",
+            "multi_step_reasoning"
+          ],
+          "rubric_version": "routing-requirements-v2",
+          "selected_model": "gpt-4.1",
+          "ambiguity_flags": [],
+          "selection_source": "server_evidence_selection",
+          "task_requirements": {
+            "decision_impact": 2,
+            "task_complexity": 2,
+            "evidence_synthesis": 1
+          },
+          "candidate_model_count": 11
+        },
+        "enabled": true,
+        "policy_id": "c0a504ad-b20f-480e-9f8f-8a36abf791a2",
+        "rag_context": {
+          "used": false,
+          "source_count": 0,
+          "partial_result": false,
+          "source_tier_used": null,
+          "evidence_sufficient": false,
+          "insufficiency_reason": null,
+          "query_rewrite_applied": false,
+          "retrieved_chunk_count": 0,
+          "retrieved_context_chars": 0,
+          "retrieved_context_token_estimate": "[REDACTED]"
+        },
+        "reason_code": "no_validated_candidate",
+        "strategy_id": "judge_bootstrap_incremental_v1",
+        "judge_called": true,
+        "execution_mode": "deployed",
+        "fallback_model": "gpt-4.1-mini",
+        "policy_version": "judge-rag-mix-v1",
+        "selected_model": "gpt-4.1",
+        "decision_source": "runtime_judge",
+        "matched_rule_id": null,
+        "runtime_context": {
+          "intent": "generate",
+          "node_task": "generate",
+          "risk_level": "medium",
+          "input_length": 155,
+          "output_format": "json",
+          "prompt_length": 251,
+          "has_file_input": false,
+          "customer_facing": false,
+          "schema_required": true,
+          "knowledge_enabled": false,
+          "input_length_bucket": "short",
+          "prompt_length_bucket": "short"
+        },
+        "decision_factors": {
+          "learning_mode": "judge_first",
+          "judged_request_count": 0,
+          "candidate_model_count": 6
+        }
+      },
+      "rag_context": {
+        "used": false,
+        "source_count": 0,
+        "partial_result": false,
+        "source_tier_used": null,
+        "evidence_sufficient": false,
+        "insufficiency_reason": null,
+        "query_rewrite_applied": false,
+        "retrieved_chunk_count": 0,
+        "retrieved_context_chars": 0,
+        "retrieved_context_token_estimate": "[REDACTED]"
+      },
+      "error": null
+    },
+    {
+      "case_id": "routine-01",
+      "node_id": "llm-direct",
+      "category": "routine_direct",
+      "expected_difficulty": "economy",
+      "requires_rag": false,
+      "workflow_success": true,
+      "schema_pass": true,
+      "selected_model": "gpt-4.1",
+      "task_cost_usd": 0.00101,
+      "task_latency_ms": 5662,
+      "routing_judge_cost_usd": 0.001352,
+      "routing_judge_tokens": 933,
+      "routing": {
+        "judge": {
+          "cost": 0.00135225,
+          "model": "gpt-5.4-mini",
+          "usage": {
+            "latency_ms": 2506,
+            "total_tokens": 933,
+            "prompt_tokens": 759,
+            "completion_tokens": 174
+          },
+          "status": "selected",
+          "attempted": true,
+          "confidence": 0.97,
+          "reason_code": "no_validated_candidate",
+          "reason_short": "요구 수준 기반 선택",
+          "learning_error": "TypeError",
+          "rubric_version": "routing-requirements-v2",
+          "selected_model": "gpt-4.1",
+          "ambiguity_flags": [],
+          "selection_source": "server_evidence_selection",
+          "task_requirements": {
+            "decision_impact": 0,
+            "task_complexity": 1,
+            "evidence_synthesis": 0
+          },
+          "candidate_model_count": 11
+        },
+        "enabled": true,
+        "policy_id": "c0a504ad-b20f-480e-9f8f-8a36abf791a2",
+        "rag_context": {
+          "used": false,
+          "source_count": 0,
+          "partial_result": false,
+          "source_tier_used": null,
+          "evidence_sufficient": false,
+          "insufficiency_reason": null,
+          "query_rewrite_applied": false,
+          "retrieved_chunk_count": 0,
+          "retrieved_context_chars": 0,
+          "retrieved_context_token_estimate": "[REDACTED]"
+        },
+        "reason_code": "no_validated_candidate",
+        "strategy_id": "judge_bootstrap_incremental_v1",
+        "judge_called": true,
+        "execution_mode": "deployed",
+        "fallback_model": "gpt-4.1-mini",
+        "policy_version": "judge-rag-mix-v1",
+        "selected_model": "gpt-4.1",
+        "decision_source": "runtime_judge",
+        "matched_rule_id": null,
+        "runtime_context": {
+          "intent": "generate",
+          "node_task": "generate",
+          "risk_level": "medium",
+          "input_length": 143,
+          "output_format": "json",
+          "prompt_length": 251,
+          "has_file_input": false,
+          "customer_facing": false,
+          "schema_required": true,
+          "knowledge_enabled": false,
+          "input_length_bucket": "short",
+          "prompt_length_bucket": "short"
+        },
+        "decision_factors": {
+          "learning_mode": "judge_first",
+          "judged_request_count": 0,
+          "candidate_model_count": 6
+        }
+      },
+      "rag_context": {
+        "used": false,
+        "source_count": 0,
+        "partial_result": false,
+        "source_tier_used": null,
+        "evidence_sufficient": false,
+        "insufficiency_reason": null,
+        "query_rewrite_applied": false,
+        "retrieved_chunk_count": 0,
+        "retrieved_context_chars": 0,
+        "retrieved_context_token_estimate": "[REDACTED]"
+      },
+      "error": null
+    },
+    {
+      "case_id": "routine-02",
+      "node_id": "llm-direct",
+      "category": "routine_direct",
+      "expected_difficulty": "economy",
+      "requires_rag": false,
+      "workflow_success": true,
+      "schema_pass": true,
+      "selected_model": "gpt-4.1",
+      "task_cost_usd": 0.000918,
+      "task_latency_ms": 3654,
+      "routing_judge_cost_usd": 0.001164,
+      "routing_judge_tokens": 897,
+      "routing": {
+        "judge": {
+          "cost": 0.001164,
+          "model": "gpt-5.4-mini",
+          "usage": {
+            "latency_ms": 1797,
+            "total_tokens": 897,
+            "prompt_tokens": 766,
+            "completion_tokens": 131
+          },
+          "status": "selected",
+          "attempted": true,
+          "confidence": 0.96,
+          "reason_code": "requirement_judge_ambiguous",
+          "reason_short": "요구 수준 기반 선택",
+          "rubric_version": "routing-requirements-v2",
+          "selected_model": "gpt-4.1",
+          "ambiguity_flags": [
+            "insufficient_context"
+          ],
+          "learning_status": "not_queued",
+          "selection_source": "server_evidence_selection",
+          "task_requirements": {
+            "decision_impact": 0,
+            "task_complexity": 1,
+            "evidence_synthesis": 0
+          },
+          "candidate_model_count": 11,
+          "learning_not_queued_reason": "requirement_adjudication_required"
+        },
+        "enabled": true,
+        "policy_id": "c0a504ad-b20f-480e-9f8f-8a36abf791a2",
+        "rag_context": {
+          "used": false,
+          "source_count": 0,
+          "partial_result": false,
+          "source_tier_used": null,
+          "evidence_sufficient": false,
+          "insufficiency_reason": null,
+          "query_rewrite_applied": false,
+          "retrieved_chunk_count": 0,
+          "retrieved_context_chars": 0,
+          "retrieved_context_token_estimate": "[REDACTED]"
+        },
+        "reason_code": "requirement_judge_ambiguous",
+        "strategy_id": "judge_bootstrap_incremental_v1",
+        "judge_called": true,
+        "execution_mode": "deployed",
+        "fallback_model": "gpt-4.1-mini",
+        "policy_version": "judge-rag-mix-v1",
+        "selected_model": "gpt-4.1",
+        "decision_source": "runtime_judge",
+        "learning_status": "not_queued",
+        "matched_rule_id": null,
+        "runtime_context": {
+          "intent": "generate",
+          "node_task": "generate",
+          "risk_level": "medium",
+          "input_length": 143,
+          "output_format": "json",
+          "prompt_length": 251,
+          "has_file_input": false,
+          "customer_facing": false,
+          "schema_required": true,
+          "knowledge_enabled": false,
+          "input_length_bucket": "short",
+          "prompt_length_bucket": "short"
+        },
+        "decision_factors": {
+          "learning_mode": "judge_first",
+          "judged_request_count": 0,
+          "candidate_model_count": 6
+        }
+      },
+      "rag_context": {
+        "used": false,
+        "source_count": 0,
+        "partial_result": false,
+        "source_tier_used": null,
+        "evidence_sufficient": false,
+        "insufficiency_reason": null,
+        "query_rewrite_applied": false,
+        "retrieved_chunk_count": 0,
+        "retrieved_context_chars": 0,
+        "retrieved_context_token_estimate": "[REDACTED]"
+      },
+      "error": null
+    },
+    {
+      "case_id": "balanced-01",
+      "node_id": "llm-direct",
+      "category": "balanced_direct",
+      "expected_difficulty": "balanced",
+      "requires_rag": false,
+      "workflow_success": true,
+      "schema_pass": true,
+      "selected_model": "gpt-4.1",
+      "task_cost_usd": 0.001463,
+      "task_latency_ms": 5215,
+      "routing_judge_cost_usd": 0.001424,
+      "routing_judge_tokens": 983,
+      "routing": {
+        "judge": {
+          "cost": 0.0014235,
+          "model": "gpt-5.4-mini",
+          "usage": {
+            "latency_ms": 2428,
+            "total_tokens": 983,
+            "prompt_tokens": 800,
+            "completion_tokens": 183
+          },
+          "status": "selected",
+          "attempted": true,
+          "confidence": 0.95,
+          "reason_code": "no_validated_candidate",
+          "reason_short": "요구 수준 기반 선택",
+          "learning_error": "TypeError",
+          "reason_factors": [
+            "multi_step_reasoning"
+          ],
+          "rubric_version": "routing-requirements-v2",
+          "selected_model": "gpt-4.1",
+          "ambiguity_flags": [],
+          "selection_source": "server_evidence_selection",
+          "task_requirements": {
+            "decision_impact": 1,
+            "task_complexity": 2,
+            "evidence_synthesis": 0
+          },
+          "candidate_model_count": 11
+        },
+        "enabled": true,
+        "policy_id": "c0a504ad-b20f-480e-9f8f-8a36abf791a2",
+        "rag_context": {
+          "used": false,
+          "source_count": 0,
+          "partial_result": false,
+          "source_tier_used": null,
+          "evidence_sufficient": false,
+          "insufficiency_reason": null,
+          "query_rewrite_applied": false,
+          "retrieved_chunk_count": 0,
+          "retrieved_context_chars": 0,
+          "retrieved_context_token_estimate": "[REDACTED]"
+        },
+        "reason_code": "no_validated_candidate",
+        "strategy_id": "judge_bootstrap_incremental_v1",
+        "judge_called": true,
+        "execution_mode": "deployed",
+        "fallback_model": "gpt-4.1-mini",
+        "policy_version": "judge-rag-mix-v1",
+        "selected_model": "gpt-4.1",
+        "decision_source": "runtime_judge",
+        "matched_rule_id": null,
+        "runtime_context": {
+          "intent": "generate",
+          "node_task": "generate",
+          "risk_level": "medium",
+          "input_length": 174,
+          "output_format": "json",
+          "prompt_length": 251,
+          "has_file_input": false,
+          "customer_facing": false,
+          "schema_required": true,
+          "knowledge_enabled": false,
+          "input_length_bucket": "short",
+          "prompt_length_bucket": "short"
+        },
+        "decision_factors": {
+          "learning_mode": "judge_first",
+          "judged_request_count": 0,
+          "candidate_model_count": 6
+        }
+      },
+      "rag_context": {
+        "used": false,
+        "source_count": 0,
+        "partial_result": false,
+        "source_tier_used": null,
+        "evidence_sufficient": false,
+        "insufficiency_reason": null,
+        "query_rewrite_applied": false,
+        "retrieved_chunk_count": 0,
+        "retrieved_context_chars": 0,
+        "retrieved_context_token_estimate": "[REDACTED]"
+      },
+      "error": null
+    },
+    {
+      "case_id": "balanced-02",
+      "node_id": "llm-direct",
+      "category": "balanced_direct",
+      "expected_difficulty": "balanced",
+      "requires_rag": false,
+      "workflow_success": true,
+      "schema_pass": true,
+      "selected_model": "gpt-4.1",
+      "task_cost_usd": 0.001382,
+      "task_latency_ms": 5192,
+      "routing_judge_cost_usd": 0.001563,
+      "routing_judge_tokens": 1009,
+      "routing": {
+        "judge": {
+          "cost": 0.001563,
+          "model": "gpt-5.4-mini",
+          "usage": {
+            "latency_ms": 2374,
+            "total_tokens": 1009,
+            "prompt_tokens": 794,
+            "completion_tokens": 215
+          },
+          "status": "selected",
+          "attempted": true,
+          "confidence": 0.93,
+          "reason_code": "requirement_judge_ambiguous",
+          "reason_short": "요구 수준 기반 선택",
+          "reason_factors": [
+            "broad_context_synthesis"
+          ],
+          "rubric_version": "routing-requirements-v2",
+          "selected_model": "gpt-4.1",
+          "ambiguity_flags": [
+            "insufficient_context"
+          ],
+          "learning_status": "not_queued",
+          "selection_source": "server_evidence_selection",
+          "task_requirements": {
+            "decision_impact": 1,
+            "task_complexity": 1,
+            "evidence_synthesis": 1
+          },
+          "candidate_model_count": 11,
+          "learning_not_queued_reason": "requirement_adjudication_required"
+        },
+        "enabled": true,
+        "policy_id": "c0a504ad-b20f-480e-9f8f-8a36abf791a2",
+        "rag_context": {
+          "used": false,
+          "source_count": 0,
+          "partial_result": false,
+          "source_tier_used": null,
+          "evidence_sufficient": false,
+          "insufficiency_reason": null,
+          "query_rewrite_applied": false,
+          "retrieved_chunk_count": 0,
+          "retrieved_context_chars": 0,
+          "retrieved_context_token_estimate": "[REDACTED]"
+        },
+        "reason_code": "requirement_judge_ambiguous",
+        "strategy_id": "judge_bootstrap_incremental_v1",
+        "judge_called": true,
+        "execution_mode": "deployed",
+        "fallback_model": "gpt-4.1-mini",
+        "policy_version": "judge-rag-mix-v1",
+        "selected_model": "gpt-4.1",
+        "decision_source": "runtime_judge",
+        "learning_status": "not_queued",
+        "matched_rule_id": null,
+        "runtime_context": {
+          "intent": "generate",
+          "node_task": "generate",
+          "risk_level": "medium",
+          "input_length": 167,
+          "output_format": "json",
+          "prompt_length": 251,
+          "has_file_input": false,
+          "customer_facing": false,
+          "schema_required": true,
+          "knowledge_enabled": false,
+          "input_length_bucket": "short",
+          "prompt_length_bucket": "short"
+        },
+        "decision_factors": {
+          "learning_mode": "judge_first",
+          "judged_request_count": 0,
+          "candidate_model_count": 6
+        }
+      },
+      "rag_context": {
+        "used": false,
+        "source_count": 0,
+        "partial_result": false,
+        "source_tier_used": null,
+        "evidence_sufficient": false,
+        "insufficiency_reason": null,
+        "query_rewrite_applied": false,
+        "retrieved_chunk_count": 0,
+        "retrieved_context_chars": 0,
+        "retrieved_context_token_estimate": "[REDACTED]"
+      },
+      "error": null
+    },
+    {
+      "case_id": "advanced-03",
+      "node_id": "llm-direct",
+      "category": "short_advanced_direct",
+      "expected_difficulty": "advanced",
+      "requires_rag": false,
+      "workflow_success": true,
+      "schema_pass": true,
+      "selected_model": "gpt-4.1",
+      "task_cost_usd": 0.001267,
+      "task_latency_ms": 5827,
+      "routing_judge_cost_usd": 0.001707,
+      "routing_judge_tokens": 1031,
+      "routing": {
+        "judge": {
+          "cost": 0.001707,
+          "model": "gpt-5.4-mini",
+          "usage": {
+            "latency_ms": 3170,
+            "total_tokens": 1031,
+            "prompt_tokens": 782,
+            "completion_tokens": 249
+          },
+          "status": "selected",
+          "attempted": true,
+          "confidence": 0.87,
+          "reason_code": "requirement_judge_ambiguous",
+          "reason_short": "요구 수준 기반 선택",
+          "reason_factors": [
+            "security_or_compliance_risk",
+            "high_decision_impact",
+            "multi_step_reasoning"
+          ],
+          "rubric_version": "routing-requirements-v2",
+          "selected_model": "gpt-4.1",
+          "ambiguity_flags": [
+            "insufficient_context",
+            "high_impact_uncertainty"
+          ],
+          "learning_status": "not_queued",
+          "selection_source": "server_evidence_selection",
+          "task_requirements": {
+            "decision_impact": 3,
+            "task_complexity": 2,
+            "evidence_synthesis": 1
+          },
+          "candidate_model_count": 11,
+          "learning_not_queued_reason": "requirement_adjudication_required"
+        },
+        "enabled": true,
+        "policy_id": "c0a504ad-b20f-480e-9f8f-8a36abf791a2",
+        "rag_context": {
+          "used": false,
+          "source_count": 0,
+          "partial_result": false,
+          "source_tier_used": null,
+          "evidence_sufficient": false,
+          "insufficiency_reason": null,
+          "query_rewrite_applied": false,
+          "retrieved_chunk_count": 0,
+          "retrieved_context_chars": 0,
+          "retrieved_context_token_estimate": "[REDACTED]"
+        },
+        "reason_code": "requirement_judge_ambiguous",
+        "strategy_id": "judge_bootstrap_incremental_v1",
+        "judge_called": true,
+        "execution_mode": "deployed",
+        "fallback_model": "gpt-4.1-mini",
+        "policy_version": "judge-rag-mix-v1",
+        "selected_model": "gpt-4.1",
+        "decision_source": "runtime_judge",
+        "learning_status": "not_queued",
+        "matched_rule_id": null,
+        "runtime_context": {
+          "intent": "generate",
+          "node_task": "generate",
+          "risk_level": "medium",
+          "input_length": 154,
+          "output_format": "json",
+          "prompt_length": 251,
+          "has_file_input": false,
+          "customer_facing": false,
+          "schema_required": true,
+          "knowledge_enabled": false,
+          "input_length_bucket": "short",
+          "prompt_length_bucket": "short"
+        },
+        "decision_factors": {
+          "learning_mode": "judge_first",
+          "judged_request_count": 0,
+          "candidate_model_count": 6
+        }
+      },
+      "rag_context": {
+        "used": false,
+        "source_count": 0,
+        "partial_result": false,
+        "source_tier_used": null,
+        "evidence_sufficient": false,
+        "insufficiency_reason": null,
+        "query_rewrite_applied": false,
+        "retrieved_chunk_count": 0,
+        "retrieved_context_chars": 0,
+        "retrieved_context_token_estimate": "[REDACTED]"
+      },
+      "error": null
+    },
+    {
+      "case_id": "advanced-04",
+      "node_id": "llm-direct",
+      "category": "short_advanced_direct",
+      "expected_difficulty": "advanced",
+      "requires_rag": false,
+      "workflow_success": true,
+      "schema_pass": true,
+      "selected_model": "gpt-4.1",
+      "task_cost_usd": 0.000832,
+      "task_latency_ms": 4340,
+      "routing_judge_cost_usd": 0.001621,
+      "routing_judge_tokens": 1006,
+      "routing": {
+        "judge": {
+          "cost": 0.00162075,
+          "model": "gpt-5.4-mini",
+          "usage": {
+            "latency_ms": 2727,
+            "total_tokens": 1006,
+            "prompt_tokens": 775,
+            "completion_tokens": 231
+          },
+          "status": "selected",
+          "attempted": true,
+          "confidence": 0.84,
+          "reason_code": "requirement_judge_ambiguous",
+          "reason_short": "요구 수준 기반 선택",
+          "reason_factors": [
+            "high_decision_impact",
+            "multi_step_reasoning"
+          ],
+          "rubric_version": "routing-requirements-v2",
+          "selected_model": "gpt-4.1",
+          "ambiguity_flags": [
+            "insufficient_context",
+            "high_impact_uncertainty"
+          ],
+          "learning_status": "not_queued",
+          "selection_source": "server_evidence_selection",
+          "task_requirements": {
+            "decision_impact": 2,
+            "task_complexity": 2,
+            "evidence_synthesis": 2
+          },
+          "candidate_model_count": 11,
+          "learning_not_queued_reason": "requirement_adjudication_required"
+        },
+        "enabled": true,
+        "policy_id": "c0a504ad-b20f-480e-9f8f-8a36abf791a2",
+        "rag_context": {
+          "used": false,
+          "source_count": 0,
+          "partial_result": false,
+          "source_tier_used": null,
+          "evidence_sufficient": false,
+          "insufficiency_reason": null,
+          "query_rewrite_applied": false,
+          "retrieved_chunk_count": 0,
+          "retrieved_context_chars": 0,
+          "retrieved_context_token_estimate": "[REDACTED]"
+        },
+        "reason_code": "requirement_judge_ambiguous",
+        "strategy_id": "judge_bootstrap_incremental_v1",
+        "judge_called": true,
+        "execution_mode": "deployed",
+        "fallback_model": "gpt-4.1-mini",
+        "policy_version": "judge-rag-mix-v1",
+        "selected_model": "gpt-4.1",
+        "decision_source": "runtime_judge",
+        "learning_status": "not_queued",
+        "matched_rule_id": null,
+        "runtime_context": {
+          "intent": "generate",
+          "node_task": "generate",
+          "risk_level": "medium",
+          "input_length": 150,
+          "output_format": "json",
+          "prompt_length": 251,
+          "has_file_input": false,
+          "customer_facing": false,
+          "schema_required": true,
+          "knowledge_enabled": false,
+          "input_length_bucket": "short",
+          "prompt_length_bucket": "short"
+        },
+        "decision_factors": {
+          "learning_mode": "judge_first",
+          "judged_request_count": 0,
+          "candidate_model_count": 6
+        }
+      },
+      "rag_context": {
+        "used": false,
+        "source_count": 0,
+        "partial_result": false,
+        "source_tier_used": null,
+        "evidence_sufficient": false,
+        "insufficiency_reason": null,
+        "query_rewrite_applied": false,
+        "retrieved_chunk_count": 0,
+        "retrieved_context_chars": 0,
+        "retrieved_context_token_estimate": "[REDACTED]"
+      },
+      "error": null
+    },
+    {
+      "case_id": "routine-03",
+      "node_id": "llm-direct",
+      "category": "routine_direct",
+      "expected_difficulty": "economy",
+      "requires_rag": false,
+      "workflow_success": true,
+      "schema_pass": true,
+      "selected_model": "gpt-4.1",
+      "task_cost_usd": 0.001021,
+      "task_latency_ms": 4295,
+      "routing_judge_cost_usd": 0.001404,
+      "routing_judge_tokens": 952,
+      "routing": {
+        "judge": {
+          "cost": 0.001404,
+          "model": "gpt-5.4-mini",
+          "usage": {
+            "latency_ms": 2135,
+            "total_tokens": 952,
+            "prompt_tokens": 768,
+            "completion_tokens": 184
+          },
+          "status": "selected",
+          "attempted": true,
+          "confidence": 0.93,
+          "reason_code": "requirement_judge_ambiguous",
+          "reason_short": "요구 수준 기반 선택",
+          "reason_factors": [
+            "broad_context_synthesis"
+          ],
+          "rubric_version": "routing-requirements-v2",
+          "selected_model": "gpt-4.1",
+          "ambiguity_flags": [
+            "insufficient_context"
+          ],
+          "learning_status": "not_queued",
+          "selection_source": "server_evidence_selection",
+          "task_requirements": {
+            "decision_impact": 1,
+            "task_complexity": 1,
+            "evidence_synthesis": 1
+          },
+          "candidate_model_count": 11,
+          "learning_not_queued_reason": "requirement_adjudication_required"
+        },
+        "enabled": true,
+        "policy_id": "c0a504ad-b20f-480e-9f8f-8a36abf791a2",
+        "rag_context": {
+          "used": false,
+          "source_count": 0,
+          "partial_result": false,
+          "source_tier_used": null,
+          "evidence_sufficient": false,
+          "insufficiency_reason": null,
+          "query_rewrite_applied": false,
+          "retrieved_chunk_count": 0,
+          "retrieved_context_chars": 0,
+          "retrieved_context_token_estimate": "[REDACTED]"
+        },
+        "reason_code": "requirement_judge_ambiguous",
+        "strategy_id": "judge_bootstrap_incremental_v1",
+        "judge_called": true,
+        "execution_mode": "deployed",
+        "fallback_model": "gpt-4.1-mini",
+        "policy_version": "judge-rag-mix-v1",
+        "selected_model": "gpt-4.1",
+        "decision_source": "runtime_judge",
+        "learning_status": "not_queued",
+        "matched_rule_id": null,
+        "runtime_context": {
+          "intent": "generate",
+          "node_task": "generate",
+          "risk_level": "medium",
+          "input_length": 146,
+          "output_format": "json",
+          "prompt_length": 251,
+          "has_file_input": false,
+          "customer_facing": false,
+          "schema_required": true,
+          "knowledge_enabled": false,
+          "input_length_bucket": "short",
+          "prompt_length_bucket": "short"
+        },
+        "decision_factors": {
+          "learning_mode": "judge_first",
+          "judged_request_count": 0,
+          "candidate_model_count": 6
+        }
+      },
+      "rag_context": {
+        "used": false,
+        "source_count": 0,
+        "partial_result": false,
+        "source_tier_used": null,
+        "evidence_sufficient": false,
+        "insufficiency_reason": null,
+        "query_rewrite_applied": false,
+        "retrieved_chunk_count": 0,
+        "retrieved_context_chars": 0,
+        "retrieved_context_token_estimate": "[REDACTED]"
+      },
+      "error": null
+    },
+    {
+      "case_id": "routine-04",
+      "node_id": "llm-direct",
+      "category": "routine_direct",
+      "expected_difficulty": "economy",
+      "requires_rag": false,
+      "workflow_success": true,
+      "schema_pass": true,
+      "selected_model": "gpt-4.1",
+      "task_cost_usd": 0.000793,
+      "task_latency_ms": 3986,
+      "routing_judge_cost_usd": 0.001234,
+      "routing_judge_tokens": 905,
+      "routing": {
+        "judge": {
+          "cost": 0.00123375,
+          "model": "gpt-5.4-mini",
+          "usage": {
+            "latency_ms": 2322,
+            "total_tokens": 905,
+            "prompt_tokens": 757,
+            "completion_tokens": 148
+          },
+          "status": "selected",
+          "attempted": true,
+          "confidence": 0.83,
+          "reason_code": "requirement_judge_ambiguous",
+          "reason_short": "요구 수준 기반 선택",
+          "rubric_version": "routing-requirements-v2",
+          "selected_model": "gpt-4.1",
+          "ambiguity_flags": [
+            "insufficient_context"
+          ],
+          "learning_status": "not_queued",
+          "selection_source": "server_evidence_selection",
+          "task_requirements": {
+            "decision_impact": 1,
+            "task_complexity": 1,
+            "evidence_synthesis": 0
+          },
+          "candidate_model_count": 11,
+          "learning_not_queued_reason": "requirement_adjudication_required"
+        },
+        "enabled": true,
+        "policy_id": "c0a504ad-b20f-480e-9f8f-8a36abf791a2",
+        "rag_context": {
+          "used": false,
+          "source_count": 0,
+          "partial_result": false,
+          "source_tier_used": null,
+          "evidence_sufficient": false,
+          "insufficiency_reason": null,
+          "query_rewrite_applied": false,
+          "retrieved_chunk_count": 0,
+          "retrieved_context_chars": 0,
+          "retrieved_context_token_estimate": "[REDACTED]"
+        },
+        "reason_code": "requirement_judge_ambiguous",
+        "strategy_id": "judge_bootstrap_incremental_v1",
+        "judge_called": true,
+        "execution_mode": "deployed",
+        "fallback_model": "gpt-4.1-mini",
+        "policy_version": "judge-rag-mix-v1",
+        "selected_model": "gpt-4.1",
+        "decision_source": "runtime_judge",
+        "learning_status": "not_queued",
+        "matched_rule_id": null,
+        "runtime_context": {
+          "intent": "generate",
+          "node_task": "generate",
+          "risk_level": "medium",
+          "input_length": 139,
+          "output_format": "json",
+          "prompt_length": 251,
+          "has_file_input": false,
+          "customer_facing": false,
+          "schema_required": true,
+          "knowledge_enabled": false,
+          "input_length_bucket": "short",
+          "prompt_length_bucket": "short"
+        },
+        "decision_factors": {
+          "learning_mode": "judge_first",
+          "judged_request_count": 0,
+          "candidate_model_count": 6
+        }
+      },
+      "rag_context": {
+        "used": false,
+        "source_count": 0,
+        "partial_result": false,
+        "source_tier_used": null,
+        "evidence_sufficient": false,
+        "insufficiency_reason": null,
+        "query_rewrite_applied": false,
+        "retrieved_chunk_count": 0,
+        "retrieved_context_chars": 0,
+        "retrieved_context_token_estimate": "[REDACTED]"
+      },
+      "error": null
+    },
+    {
+      "case_id": "balanced-03",
+      "node_id": "llm-direct",
+      "category": "balanced_direct",
+      "expected_difficulty": "balanced",
+      "requires_rag": false,
+      "workflow_success": true,
+      "schema_pass": true,
+      "selected_model": "gpt-4.1",
+      "task_cost_usd": 0.001265,
+      "task_latency_ms": 5854,
+      "routing_judge_cost_usd": 0.001518,
+      "routing_judge_tokens": 994,
+      "routing": {
+        "judge": {
+          "cost": 0.001518,
+          "model": "gpt-5.4-mini",
+          "usage": {
+            "latency_ms": 2240,
+            "total_tokens": 994,
+            "prompt_tokens": 788,
+            "completion_tokens": 206
+          },
+          "status": "selected",
+          "attempted": true,
+          "confidence": 0.9,
+          "reason_code": "requirement_judge_ambiguous",
+          "reason_short": "요구 수준 기반 선택",
+          "reason_factors": [
+            "multi_step_reasoning"
+          ],
+          "rubric_version": "routing-requirements-v2",
+          "selected_model": "gpt-4.1",
+          "ambiguity_flags": [
+            "insufficient_context"
+          ],
+          "learning_status": "not_queued",
+          "selection_source": "server_evidence_selection",
+          "task_requirements": {
+            "decision_impact": 1,
+            "task_complexity": 2,
+            "evidence_synthesis": 1
+          },
+          "candidate_model_count": 11,
+          "learning_not_queued_reason": "requirement_adjudication_required"
+        },
+        "enabled": true,
+        "policy_id": "c0a504ad-b20f-480e-9f8f-8a36abf791a2",
+        "rag_context": {
+          "used": false,
+          "source_count": 0,
+          "partial_result": false,
+          "source_tier_used": null,
+          "evidence_sufficient": false,
+          "insufficiency_reason": null,
+          "query_rewrite_applied": false,
+          "retrieved_chunk_count": 0,
+          "retrieved_context_chars": 0,
+          "retrieved_context_token_estimate": "[REDACTED]"
+        },
+        "reason_code": "requirement_judge_ambiguous",
+        "strategy_id": "judge_bootstrap_incremental_v1",
+        "judge_called": true,
+        "execution_mode": "deployed",
+        "fallback_model": "gpt-4.1-mini",
+        "policy_version": "judge-rag-mix-v1",
+        "selected_model": "gpt-4.1",
+        "decision_source": "runtime_judge",
+        "learning_status": "not_queued",
+        "matched_rule_id": null,
+        "runtime_context": {
+          "intent": "generate",
+          "node_task": "generate",
+          "risk_level": "medium",
+          "input_length": 167,
+          "output_format": "json",
+          "prompt_length": 251,
+          "has_file_input": false,
+          "customer_facing": false,
+          "schema_required": true,
+          "knowledge_enabled": false,
+          "input_length_bucket": "short",
+          "prompt_length_bucket": "short"
+        },
+        "decision_factors": {
+          "learning_mode": "judge_first",
+          "judged_request_count": 0,
+          "candidate_model_count": 6
+        }
+      },
+      "rag_context": {
+        "used": false,
+        "source_count": 0,
+        "partial_result": false,
+        "source_tier_used": null,
+        "evidence_sufficient": false,
+        "insufficiency_reason": null,
+        "query_rewrite_applied": false,
+        "retrieved_chunk_count": 0,
+        "retrieved_context_chars": 0,
+        "retrieved_context_token_estimate": "[REDACTED]"
+      },
+      "error": null
+    },
+    {
+      "case_id": "balanced-04",
+      "node_id": "llm-direct",
+      "category": "balanced_direct",
+      "expected_difficulty": "balanced",
+      "requires_rag": false,
+      "workflow_success": true,
+      "schema_pass": true,
+      "selected_model": "gpt-4.1",
+      "task_cost_usd": 0.001523,
+      "task_latency_ms": 5423,
+      "routing_judge_cost_usd": 0.001262,
+      "routing_judge_tokens": 937,
+      "routing": {
+        "judge": {
+          "cost": 0.0012615,
+          "model": "gpt-5.4-mini",
+          "usage": {
+            "latency_ms": 2919,
+            "total_tokens": 937,
+            "prompt_tokens": 788,
+            "completion_tokens": 149
+          },
+          "status": "selected",
+          "attempted": true,
+          "confidence": 0.92,
+          "reason_code": "no_validated_candidate",
+          "reason_short": "요구 수준 기반 선택",
+          "learning_error": "TypeError",
+          "rubric_version": "routing-requirements-v2",
+          "selected_model": "gpt-4.1",
+          "ambiguity_flags": [],
+          "selection_source": "server_evidence_selection",
+          "task_requirements": {
+            "decision_impact": 1,
+            "task_complexity": 1,
+            "evidence_synthesis": 0
+          },
+          "candidate_model_count": 11
+        },
+        "enabled": true,
+        "policy_id": "c0a504ad-b20f-480e-9f8f-8a36abf791a2",
+        "rag_context": {
+          "used": false,
+          "source_count": 0,
+          "partial_result": false,
+          "source_tier_used": null,
+          "evidence_sufficient": false,
+          "insufficiency_reason": null,
+          "query_rewrite_applied": false,
+          "retrieved_chunk_count": 0,
+          "retrieved_context_chars": 0,
+          "retrieved_context_token_estimate": "[REDACTED]"
+        },
+        "reason_code": "no_validated_candidate",
+        "strategy_id": "judge_bootstrap_incremental_v1",
+        "judge_called": true,
+        "execution_mode": "deployed",
+        "fallback_model": "gpt-4.1-mini",
+        "policy_version": "judge-rag-mix-v1",
+        "selected_model": "gpt-4.1",
+        "decision_source": "runtime_judge",
+        "matched_rule_id": null,
+        "runtime_context": {
+          "intent": "generate",
+          "node_task": "generate",
+          "risk_level": "medium",
+          "input_length": 168,
+          "output_format": "json",
+          "prompt_length": 251,
+          "has_file_input": false,
+          "customer_facing": false,
+          "schema_required": true,
+          "knowledge_enabled": false,
+          "input_length_bucket": "short",
+          "prompt_length_bucket": "short"
+        },
+        "decision_factors": {
+          "learning_mode": "judge_first",
+          "judged_request_count": 0,
+          "candidate_model_count": 6
+        }
+      },
+      "rag_context": {
+        "used": false,
+        "source_count": 0,
+        "partial_result": false,
+        "source_tier_used": null,
+        "evidence_sufficient": false,
+        "insufficiency_reason": null,
+        "query_rewrite_applied": false,
+        "retrieved_chunk_count": 0,
+        "retrieved_context_chars": 0,
+        "retrieved_context_token_estimate": "[REDACTED]"
+      },
+      "error": null
+    },
+    {
+      "case_id": "advanced-05",
+      "node_id": "llm-direct",
+      "category": "short_advanced_direct",
+      "expected_difficulty": "advanced",
+      "requires_rag": false,
+      "workflow_success": true,
+      "schema_pass": true,
+      "selected_model": "gpt-4.1",
+      "task_cost_usd": 0.001412,
+      "task_latency_ms": 5632,
+      "routing_judge_cost_usd": 0.001828,
+      "routing_judge_tokens": 1057,
+      "routing": {
+        "judge": {
+          "cost": 0.00182775,
+          "model": "gpt-5.4-mini",
+          "usage": {
+            "latency_ms": 2841,
+            "total_tokens": 1057,
+            "prompt_tokens": 781,
+            "completion_tokens": 276
+          },
+          "status": "selected",
+          "attempted": true,
+          "confidence": 0.84,
+          "reason_code": "requirement_judge_ambiguous",
+          "reason_short": "요구 수준 기반 선택",
+          "reason_factors": [
+            "security_or_compliance_risk",
+            "multi_step_reasoning",
+            "high_decision_impact"
+          ],
+          "rubric_version": "routing-requirements-v2",
+          "selected_model": "gpt-4.1",
+          "ambiguity_flags": [
+            "insufficient_context",
+            "high_impact_uncertainty"
+          ],
+          "learning_status": "not_queued",
+          "selection_source": "server_evidence_selection",
+          "task_requirements": {
+            "decision_impact": 2,
+            "task_complexity": 2,
+            "evidence_synthesis": 1
+          },
+          "candidate_model_count": 11,
+          "learning_not_queued_reason": "requirement_adjudication_required"
+        },
+        "enabled": true,
+        "policy_id": "c0a504ad-b20f-480e-9f8f-8a36abf791a2",
+        "rag_context": {
+          "used": false,
+          "source_count": 0,
+          "partial_result": false,
+          "source_tier_used": null,
+          "evidence_sufficient": false,
+          "insufficiency_reason": null,
+          "query_rewrite_applied": false,
+          "retrieved_chunk_count": 0,
+          "retrieved_context_chars": 0,
+          "retrieved_context_token_estimate": "[REDACTED]"
+        },
+        "reason_code": "requirement_judge_ambiguous",
+        "strategy_id": "judge_bootstrap_incremental_v1",
+        "judge_called": true,
+        "execution_mode": "deployed",
+        "fallback_model": "gpt-4.1-mini",
+        "policy_version": "judge-rag-mix-v1",
+        "selected_model": "gpt-4.1",
+        "decision_source": "runtime_judge",
+        "learning_status": "not_queued",
+        "matched_rule_id": null,
+        "runtime_context": {
+          "intent": "generate",
+          "node_task": "generate",
+          "risk_level": "medium",
+          "input_length": 156,
+          "output_format": "json",
+          "prompt_length": 251,
+          "has_file_input": false,
+          "customer_facing": false,
+          "schema_required": true,
+          "knowledge_enabled": false,
+          "input_length_bucket": "short",
+          "prompt_length_bucket": "short"
+        },
+        "decision_factors": {
+          "learning_mode": "judge_first",
+          "judged_request_count": 0,
+          "candidate_model_count": 6
+        }
+      },
+      "rag_context": {
+        "used": false,
+        "source_count": 0,
+        "partial_result": false,
+        "source_tier_used": null,
+        "evidence_sufficient": false,
+        "insufficiency_reason": null,
+        "query_rewrite_applied": false,
+        "retrieved_chunk_count": 0,
+        "retrieved_context_chars": 0,
+        "retrieved_context_token_estimate": "[REDACTED]"
+      },
+      "error": null
+    },
+    {
+      "case_id": "advanced-06",
+      "node_id": "llm-direct",
+      "category": "short_advanced_direct",
+      "expected_difficulty": "advanced",
+      "requires_rag": false,
+      "workflow_success": true,
+      "schema_pass": true,
+      "selected_model": "gpt-4.1",
+      "task_cost_usd": 0.001212,
+      "task_latency_ms": 4364,
+      "routing_judge_cost_usd": 0.001471,
+      "routing_judge_tokens": 976,
+      "routing": {
+        "judge": {
+          "cost": 0.00147075,
+          "model": "gpt-5.4-mini",
+          "usage": {
+            "latency_ms": 2299,
+            "total_tokens": 976,
+            "prompt_tokens": 779,
+            "completion_tokens": 197
+          },
+          "status": "selected",
+          "attempted": true,
+          "confidence": 0.93,
+          "reason_code": "requirement_judge_ambiguous",
+          "reason_short": "요구 수준 기반 선택",
+          "reason_factors": [
+            "security_or_compliance_risk",
+            "high_decision_impact",
+            "multi_step_reasoning"
+          ],
+          "rubric_version": "routing-requirements-v2",
+          "selected_model": "gpt-4.1",
+          "ambiguity_flags": [
+            "insufficient_context",
+            "high_impact_uncertainty"
+          ],
+          "learning_status": "not_queued",
+          "selection_source": "server_evidence_selection",
+          "task_requirements": {
+            "decision_impact": 3,
+            "task_complexity": 2,
+            "evidence_synthesis": 2
+          },
+          "candidate_model_count": 11,
+          "learning_not_queued_reason": "requirement_adjudication_required"
+        },
+        "enabled": true,
+        "policy_id": "c0a504ad-b20f-480e-9f8f-8a36abf791a2",
+        "rag_context": {
+          "used": false,
+          "source_count": 0,
+          "partial_result": false,
+          "source_tier_used": null,
+          "evidence_sufficient": false,
+          "insufficiency_reason": null,
+          "query_rewrite_applied": false,
+          "retrieved_chunk_count": 0,
+          "retrieved_context_chars": 0,
+          "retrieved_context_token_estimate": "[REDACTED]"
+        },
+        "reason_code": "requirement_judge_ambiguous",
+        "strategy_id": "judge_bootstrap_incremental_v1",
+        "judge_called": true,
+        "execution_mode": "deployed",
+        "fallback_model": "gpt-4.1-mini",
+        "policy_version": "judge-rag-mix-v1",
+        "selected_model": "gpt-4.1",
+        "decision_source": "runtime_judge",
+        "learning_status": "not_queued",
+        "matched_rule_id": null,
+        "runtime_context": {
+          "intent": "generate",
+          "node_task": "generate",
+          "risk_level": "medium",
+          "input_length": 161,
+          "output_format": "json",
+          "prompt_length": 251,
+          "has_file_input": false,
+          "customer_facing": false,
+          "schema_required": true,
+          "knowledge_enabled": false,
+          "input_length_bucket": "short",
+          "prompt_length_bucket": "short"
+        },
+        "decision_factors": {
+          "learning_mode": "judge_first",
+          "judged_request_count": 0,
+          "candidate_model_count": 6
+        }
+      },
+      "rag_context": {
+        "used": false,
+        "source_count": 0,
+        "partial_result": false,
+        "source_tier_used": null,
+        "evidence_sufficient": false,
+        "insufficiency_reason": null,
+        "query_rewrite_applied": false,
+        "retrieved_chunk_count": 0,
+        "retrieved_context_chars": 0,
+        "retrieved_context_token_estimate": "[REDACTED]"
+      },
+      "error": null
+    },
+    {
+      "case_id": "routine-05",
+      "node_id": "llm-direct",
+      "category": "routine_direct",
+      "expected_difficulty": "economy",
+      "requires_rag": false,
+      "workflow_success": true,
+      "schema_pass": true,
+      "selected_model": "gpt-4.1",
+      "task_cost_usd": 0.000892,
+      "task_latency_ms": 5649,
+      "routing_judge_cost_usd": 0.001386,
+      "routing_judge_tokens": 943,
+      "routing": {
+        "judge": {
+          "cost": 0.001386,
+          "model": "gpt-5.4-mini",
+          "usage": {
+            "latency_ms": 3934,
+            "total_tokens": 943,
+            "prompt_tokens": 762,
+            "completion_tokens": 181
+          },
+          "status": "selected",
+          "attempted": true,
+          "confidence": 0.86,
+          "reason_code": "requirement_judge_ambiguous",
+          "reason_short": "요구 수준 기반 선택",
+          "reason_factors": [
+            "multi_step_reasoning"
+          ],
+          "rubric_version": "routing-requirements-v2",
+          "selected_model": "gpt-4.1",
+          "ambiguity_flags": [
+            "insufficient_context"
+          ],
+          "learning_status": "not_queued",
+          "selection_source": "server_evidence_selection",
+          "task_requirements": {
+            "decision_impact": 1,
+            "task_complexity": 1,
+            "evidence_synthesis": 1
+          },
+          "candidate_model_count": 11,
+          "learning_not_queued_reason": "requirement_adjudication_required"
+        },
+        "enabled": true,
+        "policy_id": "c0a504ad-b20f-480e-9f8f-8a36abf791a2",
+        "rag_context": {
+          "used": false,
+          "source_count": 0,
+          "partial_result": false,
+          "source_tier_used": null,
+          "evidence_sufficient": false,
+          "insufficiency_reason": null,
+          "query_rewrite_applied": false,
+          "retrieved_chunk_count": 0,
+          "retrieved_context_chars": 0,
+          "retrieved_context_token_estimate": "[REDACTED]"
+        },
+        "reason_code": "requirement_judge_ambiguous",
+        "strategy_id": "judge_bootstrap_incremental_v1",
+        "judge_called": true,
+        "execution_mode": "deployed",
+        "fallback_model": "gpt-4.1-mini",
+        "policy_version": "judge-rag-mix-v1",
+        "selected_model": "gpt-4.1",
+        "decision_source": "runtime_judge",
+        "learning_status": "not_queued",
+        "matched_rule_id": null,
+        "runtime_context": {
+          "intent": "generate",
+          "node_task": "generate",
+          "risk_level": "medium",
+          "input_length": 140,
+          "output_format": "json",
+          "prompt_length": 251,
+          "has_file_input": false,
+          "customer_facing": false,
+          "schema_required": true,
+          "knowledge_enabled": false,
+          "input_length_bucket": "short",
+          "prompt_length_bucket": "short"
+        },
+        "decision_factors": {
+          "learning_mode": "judge_first",
+          "judged_request_count": 0,
+          "candidate_model_count": 6
+        }
+      },
+      "rag_context": {
+        "used": false,
+        "source_count": 0,
+        "partial_result": false,
+        "source_tier_used": null,
+        "evidence_sufficient": false,
+        "insufficiency_reason": null,
+        "query_rewrite_applied": false,
+        "retrieved_chunk_count": 0,
+        "retrieved_context_chars": 0,
+        "retrieved_context_token_estimate": "[REDACTED]"
+      },
+      "error": null
+    },
+    {
+      "case_id": "routine-06",
+      "node_id": "llm-direct",
+      "category": "routine_direct",
+      "expected_difficulty": "economy",
+      "requires_rag": false,
+      "workflow_success": true,
+      "schema_pass": true,
+      "selected_model": "gpt-4.1",
+      "task_cost_usd": 0.000939,
+      "task_latency_ms": 4278,
+      "routing_judge_cost_usd": 0.001577,
+      "routing_judge_tokens": 993,
+      "routing": {
+        "judge": {
+          "cost": 0.00157725,
+          "model": "gpt-5.4-mini",
+          "usage": {
+            "latency_ms": 2465,
+            "total_tokens": 993,
+            "prompt_tokens": 771,
+            "completion_tokens": 222
+          },
+          "status": "selected",
+          "attempted": true,
+          "confidence": 0.92,
+          "reason_code": "requirement_judge_ambiguous",
+          "reason_short": "요구 수준 기반 선택",
+          "rubric_version": "routing-requirements-v2",
+          "selected_model": "gpt-4.1",
+          "ambiguity_flags": [
+            "insufficient_context"
+          ],
+          "learning_status": "not_queued",
+          "selection_source": "server_evidence_selection",
+          "task_requirements": {
+            "decision_impact": 1,
+            "task_complexity": 1,
+            "evidence_synthesis": 0
+          },
+          "candidate_model_count": 11,
+          "learning_not_queued_reason": "requirement_adjudication_required"
+        },
+        "enabled": true,
+        "policy_id": "c0a504ad-b20f-480e-9f8f-8a36abf791a2",
+        "rag_context": {
+          "used": false,
+          "source_count": 0,
+          "partial_result": false,
+          "source_tier_used": null,
+          "evidence_sufficient": false,
+          "insufficiency_reason": null,
+          "query_rewrite_applied": false,
+          "retrieved_chunk_count": 0,
+          "retrieved_context_chars": 0,
+          "retrieved_context_token_estimate": "[REDACTED]"
+        },
+        "reason_code": "requirement_judge_ambiguous",
+        "strategy_id": "judge_bootstrap_incremental_v1",
+        "judge_called": true,
+        "execution_mode": "deployed",
+        "fallback_model": "gpt-4.1-mini",
+        "policy_version": "judge-rag-mix-v1",
+        "selected_model": "gpt-4.1",
+        "decision_source": "runtime_judge",
+        "learning_status": "not_queued",
+        "matched_rule_id": null,
+        "runtime_context": {
+          "intent": "generate",
+          "node_task": "generate",
+          "risk_level": "medium",
+          "input_length": 149,
+          "output_format": "json",
+          "prompt_length": 251,
+          "has_file_input": false,
+          "customer_facing": false,
+          "schema_required": true,
+          "knowledge_enabled": false,
+          "input_length_bucket": "short",
+          "prompt_length_bucket": "short"
+        },
+        "decision_factors": {
+          "learning_mode": "judge_first",
+          "judged_request_count": 0,
+          "candidate_model_count": 6
+        }
+      },
+      "rag_context": {
+        "used": false,
+        "source_count": 0,
+        "partial_result": false,
+        "source_tier_used": null,
+        "evidence_sufficient": false,
+        "insufficiency_reason": null,
+        "query_rewrite_applied": false,
+        "retrieved_chunk_count": 0,
+        "retrieved_context_chars": 0,
+        "retrieved_context_token_estimate": "[REDACTED]"
+      },
+      "error": null
+    },
+    {
+      "case_id": "balanced-05",
+      "node_id": "llm-direct",
+      "category": "balanced_direct",
+      "expected_difficulty": "balanced",
+      "requires_rag": false,
+      "workflow_success": true,
+      "schema_pass": true,
+      "selected_model": "gpt-4.1",
+      "task_cost_usd": 0.001171,
+      "task_latency_ms": 4830,
+      "routing_judge_cost_usd": 0.001377,
+      "routing_judge_tokens": 966,
+      "routing": {
+        "judge": {
+          "cost": 0.001377,
+          "model": "gpt-5.4-mini",
+          "usage": {
+            "latency_ms": 2254,
+            "total_tokens": 966,
+            "prompt_tokens": 792,
+            "completion_tokens": 174
+          },
+          "status": "selected",
+          "attempted": true,
+          "confidence": 0.9,
+          "reason_code": "requirement_judge_ambiguous",
+          "reason_short": "요구 수준 기반 선택",
+          "reason_factors": [
+            "multi_step_reasoning",
+            "broad_context_synthesis"
+          ],
+          "rubric_version": "routing-requirements-v2",
+          "selected_model": "gpt-4.1",
+          "ambiguity_flags": [
+            "insufficient_context"
+          ],
+          "learning_status": "not_queued",
+          "selection_source": "server_evidence_selection",
+          "task_requirements": {
+            "decision_impact": 1,
+            "task_complexity": 2,
+            "evidence_synthesis": 2
+          },
+          "candidate_model_count": 11,
+          "learning_not_queued_reason": "requirement_adjudication_required"
+        },
+        "enabled": true,
+        "policy_id": "c0a504ad-b20f-480e-9f8f-8a36abf791a2",
+        "rag_context": {
+          "used": false,
+          "source_count": 0,
+          "partial_result": false,
+          "source_tier_used": null,
+          "evidence_sufficient": false,
+          "insufficiency_reason": null,
+          "query_rewrite_applied": false,
+          "retrieved_chunk_count": 0,
+          "retrieved_context_chars": 0,
+          "retrieved_context_token_estimate": "[REDACTED]"
+        },
+        "reason_code": "requirement_judge_ambiguous",
+        "strategy_id": "judge_bootstrap_incremental_v1",
+        "judge_called": true,
+        "execution_mode": "deployed",
+        "fallback_model": "gpt-4.1-mini",
+        "policy_version": "judge-rag-mix-v1",
+        "selected_model": "gpt-4.1",
+        "decision_source": "runtime_judge",
+        "learning_status": "not_queued",
+        "matched_rule_id": null,
+        "runtime_context": {
+          "intent": "generate",
+          "node_task": "generate",
+          "risk_level": "medium",
+          "input_length": 164,
+          "output_format": "json",
+          "prompt_length": 251,
+          "has_file_input": false,
+          "customer_facing": false,
+          "schema_required": true,
+          "knowledge_enabled": false,
+          "input_length_bucket": "short",
+          "prompt_length_bucket": "short"
+        },
+        "decision_factors": {
+          "learning_mode": "judge_first",
+          "judged_request_count": 0,
+          "candidate_model_count": 6
+        }
+      },
+      "rag_context": {
+        "used": false,
+        "source_count": 0,
+        "partial_result": false,
+        "source_tier_used": null,
+        "evidence_sufficient": false,
+        "insufficiency_reason": null,
+        "query_rewrite_applied": false,
+        "retrieved_chunk_count": 0,
+        "retrieved_context_chars": 0,
+        "retrieved_context_token_estimate": "[REDACTED]"
+      },
+      "error": null
+    },
+    {
+      "case_id": "balanced-06",
+      "node_id": "llm-direct",
+      "category": "balanced_direct",
+      "expected_difficulty": "balanced",
+      "requires_rag": false,
+      "workflow_success": true,
+      "schema_pass": true,
+      "selected_model": "gpt-4.1",
+      "task_cost_usd": 0.001189,
+      "task_latency_ms": 4827,
+      "routing_judge_cost_usd": 0.001598,
+      "routing_judge_tokens": 1005,
+      "routing": {
+        "judge": {
+          "cost": 0.0015975,
+          "model": "gpt-5.4-mini",
+          "usage": {
+            "latency_ms": 2462,
+            "total_tokens": 1005,
+            "prompt_tokens": 780,
+            "completion_tokens": 225
+          },
+          "status": "selected",
+          "attempted": true,
+          "confidence": 0.86,
+          "reason_code": "requirement_judge_ambiguous",
+          "reason_short": "요구 수준 기반 선택",
+          "reason_factors": [
+            "multi_step_reasoning",
+            "broad_context_synthesis"
+          ],
+          "rubric_version": "routing-requirements-v2",
+          "selected_model": "gpt-4.1",
+          "ambiguity_flags": [
+            "insufficient_context"
+          ],
+          "learning_status": "not_queued",
+          "selection_source": "server_evidence_selection",
+          "task_requirements": {
+            "decision_impact": 1,
+            "task_complexity": 2,
+            "evidence_synthesis": 2
+          },
+          "candidate_model_count": 11,
+          "learning_not_queued_reason": "requirement_adjudication_required"
+        },
+        "enabled": true,
+        "policy_id": "c0a504ad-b20f-480e-9f8f-8a36abf791a2",
+        "rag_context": {
+          "used": false,
+          "source_count": 0,
+          "partial_result": false,
+          "source_tier_used": null,
+          "evidence_sufficient": false,
+          "insufficiency_reason": null,
+          "query_rewrite_applied": false,
+          "retrieved_chunk_count": 0,
+          "retrieved_context_chars": 0,
+          "retrieved_context_token_estimate": "[REDACTED]"
+        },
+        "reason_code": "requirement_judge_ambiguous",
+        "strategy_id": "judge_bootstrap_incremental_v1",
+        "judge_called": true,
+        "execution_mode": "deployed",
+        "fallback_model": "gpt-4.1-mini",
+        "policy_version": "judge-rag-mix-v1",
+        "selected_model": "gpt-4.1",
+        "decision_source": "runtime_judge",
+        "learning_status": "not_queued",
+        "matched_rule_id": null,
+        "runtime_context": {
+          "intent": "generate",
+          "node_task": "generate",
+          "risk_level": "medium",
+          "input_length": 165,
+          "output_format": "json",
+          "prompt_length": 251,
+          "has_file_input": false,
+          "customer_facing": false,
+          "schema_required": true,
+          "knowledge_enabled": false,
+          "input_length_bucket": "short",
+          "prompt_length_bucket": "short"
+        },
+        "decision_factors": {
+          "learning_mode": "judge_first",
+          "judged_request_count": 0,
+          "candidate_model_count": 6
+        }
+      },
+      "rag_context": {
+        "used": false,
+        "source_count": 0,
+        "partial_result": false,
+        "source_tier_used": null,
+        "evidence_sufficient": false,
+        "insufficiency_reason": null,
+        "query_rewrite_applied": false,
+        "retrieved_chunk_count": 0,
+        "retrieved_context_chars": 0,
+        "retrieved_context_token_estimate": "[REDACTED]"
+      },
+      "error": null
+    },
+    {
+      "case_id": "advanced-07",
+      "node_id": "llm-direct",
+      "category": "short_advanced_direct",
+      "expected_difficulty": "advanced",
+      "requires_rag": false,
+      "workflow_success": true,
+      "schema_pass": true,
+      "selected_model": "gpt-4.1",
+      "task_cost_usd": 0.001069,
+      "task_latency_ms": 4879,
+      "routing_judge_cost_usd": 0.001728,
+      "routing_judge_tokens": 1034,
+      "routing": {
+        "judge": {
+          "cost": 0.001728,
+          "model": "gpt-5.4-mini",
+          "usage": {
+            "latency_ms": 2601,
+            "total_tokens": 1034,
+            "prompt_tokens": 780,
+            "completion_tokens": 254
+          },
+          "status": "selected",
+          "attempted": true,
+          "confidence": 0.89,
+          "reason_code": "requirement_judge_ambiguous",
+          "reason_short": "요구 수준 기반 선택",
+          "reason_factors": [
+            "security_or_compliance_risk",
+            "multi_step_reasoning",
+            "high_decision_impact"
+          ],
+          "rubric_version": "routing-requirements-v2",
+          "selected_model": "gpt-4.1",
+          "ambiguity_flags": [
+            "high_impact_uncertainty",
+            "insufficient_context"
+          ],
+          "learning_status": "not_queued",
+          "selection_source": "server_evidence_selection",
+          "task_requirements": {
+            "decision_impact": 3,
+            "task_complexity": 2,
+            "evidence_synthesis": 2
+          },
+          "candidate_model_count": 11,
+          "learning_not_queued_reason": "requirement_adjudication_required"
+        },
+        "enabled": true,
+        "policy_id": "c0a504ad-b20f-480e-9f8f-8a36abf791a2",
+        "rag_context": {
+          "used": false,
+          "source_count": 0,
+          "partial_result": false,
+          "source_tier_used": null,
+          "evidence_sufficient": false,
+          "insufficiency_reason": null,
+          "query_rewrite_applied": false,
+          "retrieved_chunk_count": 0,
+          "retrieved_context_chars": 0,
+          "retrieved_context_token_estimate": "[REDACTED]"
+        },
+        "reason_code": "requirement_judge_ambiguous",
+        "strategy_id": "judge_bootstrap_incremental_v1",
+        "judge_called": true,
+        "execution_mode": "deployed",
+        "fallback_model": "gpt-4.1-mini",
+        "policy_version": "judge-rag-mix-v1",
+        "selected_model": "gpt-4.1",
+        "decision_source": "runtime_judge",
+        "learning_status": "not_queued",
+        "matched_rule_id": null,
+        "runtime_context": {
+          "intent": "generate",
+          "node_task": "generate",
+          "risk_level": "medium",
+          "input_length": 158,
+          "output_format": "json",
+          "prompt_length": 251,
+          "has_file_input": false,
+          "customer_facing": false,
+          "schema_required": true,
+          "knowledge_enabled": false,
+          "input_length_bucket": "short",
+          "prompt_length_bucket": "short"
+        },
+        "decision_factors": {
+          "learning_mode": "judge_first",
+          "judged_request_count": 0,
+          "candidate_model_count": 6
+        }
+      },
+      "rag_context": {
+        "used": false,
+        "source_count": 0,
+        "partial_result": false,
+        "source_tier_used": null,
+        "evidence_sufficient": false,
+        "insufficiency_reason": null,
+        "query_rewrite_applied": false,
+        "retrieved_chunk_count": 0,
+        "retrieved_context_chars": 0,
+        "retrieved_context_token_estimate": "[REDACTED]"
+      },
+      "error": null
+    },
+    {
+      "case_id": "advanced-08",
+      "node_id": "llm-direct",
+      "category": "short_advanced_direct",
+      "expected_difficulty": "advanced",
+      "requires_rag": false,
+      "workflow_success": true,
+      "schema_pass": true,
+      "selected_model": "gpt-4.1",
+      "task_cost_usd": 0.000867,
+      "task_latency_ms": 4114,
+      "routing_judge_cost_usd": 0.001133,
+      "routing_judge_tokens": 905,
+      "routing": {
+        "judge": {
+          "cost": 0.0011325,
+          "model": "gpt-5.4-mini",
+          "usage": {
+            "latency_ms": 2290,
+            "total_tokens": 905,
+            "prompt_tokens": 784,
+            "completion_tokens": 121
+          },
+          "status": "selected",
+          "attempted": true,
+          "confidence": 0.9,
+          "reason_code": "requirement_judge_ambiguous",
+          "reason_short": "요구 수준 기반 선택",
+          "reason_factors": [
+            "high_decision_impact",
+            "multi_step_reasoning"
+          ],
+          "rubric_version": "routing-requirements-v2",
+          "selected_model": "gpt-4.1",
+          "ambiguity_flags": [
+            "insufficient_context"
+          ],
+          "learning_status": "not_queued",
+          "selection_source": "server_evidence_selection",
+          "task_requirements": {
+            "decision_impact": 2,
+            "task_complexity": 2,
+            "evidence_synthesis": 2
+          },
+          "candidate_model_count": 11,
+          "learning_not_queued_reason": "requirement_adjudication_required"
+        },
+        "enabled": true,
+        "policy_id": "c0a504ad-b20f-480e-9f8f-8a36abf791a2",
+        "rag_context": {
+          "used": false,
+          "source_count": 0,
+          "partial_result": false,
+          "source_tier_used": null,
+          "evidence_sufficient": false,
+          "insufficiency_reason": null,
+          "query_rewrite_applied": false,
+          "retrieved_chunk_count": 0,
+          "retrieved_context_chars": 0,
+          "retrieved_context_token_estimate": "[REDACTED]"
+        },
+        "reason_code": "requirement_judge_ambiguous",
+        "strategy_id": "judge_bootstrap_incremental_v1",
+        "judge_called": true,
+        "execution_mode": "deployed",
+        "fallback_model": "gpt-4.1-mini",
+        "policy_version": "judge-rag-mix-v1",
+        "selected_model": "gpt-4.1",
+        "decision_source": "runtime_judge",
+        "learning_status": "not_queued",
+        "matched_rule_id": null,
+        "runtime_context": {
+          "intent": "generate",
+          "node_task": "generate",
+          "risk_level": "medium",
+          "input_length": 157,
+          "output_format": "json",
+          "prompt_length": 251,
+          "has_file_input": false,
+          "customer_facing": false,
+          "schema_required": true,
+          "knowledge_enabled": false,
+          "input_length_bucket": "short",
+          "prompt_length_bucket": "short"
+        },
+        "decision_factors": {
+          "learning_mode": "judge_first",
+          "judged_request_count": 0,
+          "candidate_model_count": 6
+        }
+      },
+      "rag_context": {
+        "used": false,
+        "source_count": 0,
+        "partial_result": false,
+        "source_tier_used": null,
+        "evidence_sufficient": false,
+        "insufficiency_reason": null,
+        "query_rewrite_applied": false,
+        "retrieved_chunk_count": 0,
+        "retrieved_context_chars": 0,
+        "retrieved_context_token_estimate": "[REDACTED]"
+      },
+      "error": null
+    },
+    {
+      "case_id": "routine-07",
+      "node_id": "llm-direct",
+      "category": "routine_direct",
+      "expected_difficulty": "economy",
+      "requires_rag": false,
+      "workflow_success": true,
+      "schema_pass": true,
+      "selected_model": "gpt-4.1",
+      "task_cost_usd": 0.000958,
+      "task_latency_ms": 10453,
+      "routing_judge_cost_usd": 0.001517,
+      "routing_judge_tokens": 982,
+      "routing": {
+        "judge": {
+          "cost": 0.0015165,
+          "model": "gpt-5.4-mini",
+          "usage": {
+            "latency_ms": 2410,
+            "total_tokens": 982,
+            "prompt_tokens": 774,
+            "completion_tokens": 208
+          },
+          "status": "selected",
+          "attempted": true,
+          "confidence": 0.86,
+          "reason_code": "requirement_judge_ambiguous",
+          "reason_short": "요구 수준 기반 선택",
+          "rubric_version": "routing-requirements-v2",
+          "selected_model": "gpt-4.1",
+          "ambiguity_flags": [
+            "insufficient_context"
+          ],
+          "learning_status": "not_queued",
+          "selection_source": "server_evidence_selection",
+          "task_requirements": {
+            "decision_impact": 1,
+            "task_complexity": 1,
+            "evidence_synthesis": 0
+          },
+          "candidate_model_count": 11,
+          "learning_not_queued_reason": "requirement_adjudication_required"
+        },
+        "enabled": true,
+        "policy_id": "c0a504ad-b20f-480e-9f8f-8a36abf791a2",
+        "rag_context": {
+          "used": false,
+          "source_count": 0,
+          "partial_result": false,
+          "source_tier_used": null,
+          "evidence_sufficient": false,
+          "insufficiency_reason": null,
+          "query_rewrite_applied": false,
+          "retrieved_chunk_count": 0,
+          "retrieved_context_chars": 0,
+          "retrieved_context_token_estimate": "[REDACTED]"
+        },
+        "reason_code": "requirement_judge_ambiguous",
+        "strategy_id": "judge_bootstrap_incremental_v1",
+        "judge_called": true,
+        "execution_mode": "deployed",
+        "fallback_model": "gpt-4.1-mini",
+        "policy_version": "judge-rag-mix-v1",
+        "selected_model": "gpt-4.1",
+        "decision_source": "runtime_judge",
+        "learning_status": "not_queued",
+        "matched_rule_id": null,
+        "runtime_context": {
+          "intent": "generate",
+          "node_task": "generate",
+          "risk_level": "medium",
+          "input_length": 148,
+          "output_format": "json",
+          "prompt_length": 251,
+          "has_file_input": false,
+          "customer_facing": false,
+          "schema_required": true,
+          "knowledge_enabled": false,
+          "input_length_bucket": "short",
+          "prompt_length_bucket": "short"
+        },
+        "decision_factors": {
+          "learning_mode": "judge_first",
+          "judged_request_count": 0,
+          "candidate_model_count": 6
+        }
+      },
+      "rag_context": {
+        "used": false,
+        "source_count": 0,
+        "partial_result": false,
+        "source_tier_used": null,
+        "evidence_sufficient": false,
+        "insufficiency_reason": null,
+        "query_rewrite_applied": false,
+        "retrieved_chunk_count": 0,
+        "retrieved_context_chars": 0,
+        "retrieved_context_token_estimate": "[REDACTED]"
+      },
+      "error": null
+    },
+    {
+      "case_id": "routine-08",
+      "node_id": "llm-direct",
+      "category": "routine_direct",
+      "expected_difficulty": "economy",
+      "requires_rag": false,
+      "workflow_success": true,
+      "schema_pass": true,
+      "selected_model": "gpt-4.1",
+      "task_cost_usd": 0.000813,
+      "task_latency_ms": 4501,
+      "routing_judge_cost_usd": 0.001776,
+      "routing_judge_tokens": 1038,
+      "routing": {
+        "judge": {
+          "cost": 0.001776,
+          "model": "gpt-5.4-mini",
+          "usage": {
+            "latency_ms": 3042,
+            "total_tokens": 1038,
+            "prompt_tokens": 772,
+            "completion_tokens": 266
+          },
+          "status": "selected",
+          "attempted": true,
+          "confidence": 0.74,
+          "reason_code": "requirement_judge_ambiguous",
+          "reason_short": "요구 수준 기반 선택",
+          "reason_factors": [
+            "multi_step_reasoning",
+            "security_or_compliance_risk"
+          ],
+          "rubric_version": "routing-requirements-v2",
+          "selected_model": "gpt-4.1",
+          "ambiguity_flags": [
+            "boundary_score"
+          ],
+          "learning_status": "not_queued",
+          "selection_source": "server_evidence_selection",
+          "task_requirements": {
+            "decision_impact": 2,
+            "task_complexity": 1,
+            "evidence_synthesis": 1
+          },
+          "candidate_model_count": 11,
+          "learning_not_queued_reason": "requirement_adjudication_required"
+        },
+        "enabled": true,
+        "policy_id": "c0a504ad-b20f-480e-9f8f-8a36abf791a2",
+        "rag_context": {
+          "used": false,
+          "source_count": 0,
+          "partial_result": false,
+          "source_tier_used": null,
+          "evidence_sufficient": false,
+          "insufficiency_reason": null,
+          "query_rewrite_applied": false,
+          "retrieved_chunk_count": 0,
+          "retrieved_context_chars": 0,
+          "retrieved_context_token_estimate": "[REDACTED]"
+        },
+        "reason_code": "requirement_judge_ambiguous",
+        "strategy_id": "judge_bootstrap_incremental_v1",
+        "judge_called": true,
+        "execution_mode": "deployed",
+        "fallback_model": "gpt-4.1-mini",
+        "policy_version": "judge-rag-mix-v1",
+        "selected_model": "gpt-4.1",
+        "decision_source": "runtime_judge",
+        "learning_status": "not_queued",
+        "matched_rule_id": null,
+        "runtime_context": {
+          "intent": "generate",
+          "node_task": "generate",
+          "risk_level": "medium",
+          "input_length": 155,
+          "output_format": "json",
+          "prompt_length": 251,
+          "has_file_input": false,
+          "customer_facing": false,
+          "schema_required": true,
+          "knowledge_enabled": false,
+          "input_length_bucket": "short",
+          "prompt_length_bucket": "short"
+        },
+        "decision_factors": {
+          "learning_mode": "judge_first",
+          "judged_request_count": 0,
+          "candidate_model_count": 6
+        }
+      },
+      "rag_context": {
+        "used": false,
+        "source_count": 0,
+        "partial_result": false,
+        "source_tier_used": null,
+        "evidence_sufficient": false,
+        "insufficiency_reason": null,
+        "query_rewrite_applied": false,
+        "retrieved_chunk_count": 0,
+        "retrieved_context_chars": 0,
+        "retrieved_context_token_estimate": "[REDACTED]"
+      },
+      "error": null
+    },
+    {
+      "case_id": "balanced-07",
+      "node_id": "llm-direct",
+      "category": "balanced_direct",
+      "expected_difficulty": "balanced",
+      "requires_rag": false,
+      "workflow_success": true,
+      "schema_pass": true,
+      "selected_model": "gpt-4.1",
+      "task_cost_usd": 0.000844,
+      "task_latency_ms": 5725,
+      "routing_judge_cost_usd": 0.002152,
+      "routing_judge_tokens": 1134,
+      "routing": {
+        "judge": {
+          "cost": 0.00215175,
+          "model": "gpt-5.4-mini",
+          "usage": {
+            "latency_ms": 4029,
+            "total_tokens": 1134,
+            "prompt_tokens": 787,
+            "completion_tokens": 347
+          },
+          "status": "selected",
+          "attempted": true,
+          "confidence": 0.87,
+          "reason_code": "requirement_judge_ambiguous",
+          "reason_short": "요구 수준 기반 선택",
+          "reason_factors": [
+            "multi_step_reasoning",
+            "broad_context_synthesis"
+          ],
+          "rubric_version": "routing-requirements-v2",
+          "selected_model": "gpt-4.1",
+          "ambiguity_flags": [
+            "insufficient_context"
+          ],
+          "learning_status": "not_queued",
+          "selection_source": "server_evidence_selection",
+          "task_requirements": {
+            "decision_impact": 1,
+            "task_complexity": 2,
+            "evidence_synthesis": 1
+          },
+          "candidate_model_count": 11,
+          "learning_not_queued_reason": "requirement_adjudication_required"
+        },
+        "enabled": true,
+        "policy_id": "c0a504ad-b20f-480e-9f8f-8a36abf791a2",
+        "rag_context": {
+          "used": false,
+          "source_count": 0,
+          "partial_result": false,
+          "source_tier_used": null,
+          "evidence_sufficient": false,
+          "insufficiency_reason": null,
+          "query_rewrite_applied": false,
+          "retrieved_chunk_count": 0,
+          "retrieved_context_chars": 0,
+          "retrieved_context_token_estimate": "[REDACTED]"
+        },
+        "reason_code": "requirement_judge_ambiguous",
+        "strategy_id": "judge_bootstrap_incremental_v1",
+        "judge_called": true,
+        "execution_mode": "deployed",
+        "fallback_model": "gpt-4.1-mini",
+        "policy_version": "judge-rag-mix-v1",
+        "selected_model": "gpt-4.1",
+        "decision_source": "runtime_judge",
+        "learning_status": "not_queued",
+        "matched_rule_id": null,
+        "runtime_context": {
+          "intent": "generate",
+          "node_task": "generate",
+          "risk_level": "medium",
+          "input_length": 169,
+          "output_format": "json",
+          "prompt_length": 251,
+          "has_file_input": false,
+          "customer_facing": false,
+          "schema_required": true,
+          "knowledge_enabled": false,
+          "input_length_bucket": "short",
+          "prompt_length_bucket": "short"
+        },
+        "decision_factors": {
+          "learning_mode": "judge_first",
+          "judged_request_count": 0,
+          "candidate_model_count": 6
+        }
+      },
+      "rag_context": {
+        "used": false,
+        "source_count": 0,
+        "partial_result": false,
+        "source_tier_used": null,
+        "evidence_sufficient": false,
+        "insufficiency_reason": null,
+        "query_rewrite_applied": false,
+        "retrieved_chunk_count": 0,
+        "retrieved_context_chars": 0,
+        "retrieved_context_token_estimate": "[REDACTED]"
+      },
+      "error": null
+    },
+    {
+      "case_id": "balanced-08",
+      "node_id": "llm-direct",
+      "category": "balanced_direct",
+      "expected_difficulty": "balanced",
+      "requires_rag": false,
+      "workflow_success": true,
+      "schema_pass": true,
+      "selected_model": "gpt-4.1",
+      "task_cost_usd": 0.001144,
+      "task_latency_ms": 5027,
+      "routing_judge_cost_usd": 0.001683,
+      "routing_judge_tokens": 1029,
+      "routing": {
+        "judge": {
+          "cost": 0.001683,
+          "model": "gpt-5.4-mini",
+          "usage": {
+            "latency_ms": 2645,
+            "total_tokens": 1029,
+            "prompt_tokens": 786,
+            "completion_tokens": 243
+          },
+          "status": "selected",
+          "attempted": true,
+          "confidence": 0.83,
+          "reason_code": "requirement_judge_ambiguous",
+          "reason_short": "요구 수준 기반 선택",
+          "reason_factors": [
+            "multi_step_reasoning",
+            "broad_context_synthesis"
+          ],
+          "rubric_version": "routing-requirements-v2",
+          "selected_model": "gpt-4.1",
+          "ambiguity_flags": [
+            "insufficient_context"
+          ],
+          "learning_status": "not_queued",
+          "selection_source": "server_evidence_selection",
+          "task_requirements": {
+            "decision_impact": 1,
+            "task_complexity": 2,
+            "evidence_synthesis": 1
+          },
+          "candidate_model_count": 11,
+          "learning_not_queued_reason": "requirement_adjudication_required"
+        },
+        "enabled": true,
+        "policy_id": "c0a504ad-b20f-480e-9f8f-8a36abf791a2",
+        "rag_context": {
+          "used": false,
+          "source_count": 0,
+          "partial_result": false,
+          "source_tier_used": null,
+          "evidence_sufficient": false,
+          "insufficiency_reason": null,
+          "query_rewrite_applied": false,
+          "retrieved_chunk_count": 0,
+          "retrieved_context_chars": 0,
+          "retrieved_context_token_estimate": "[REDACTED]"
+        },
+        "reason_code": "requirement_judge_ambiguous",
+        "strategy_id": "judge_bootstrap_incremental_v1",
+        "judge_called": true,
+        "execution_mode": "deployed",
+        "fallback_model": "gpt-4.1-mini",
+        "policy_version": "judge-rag-mix-v1",
+        "selected_model": "gpt-4.1",
+        "decision_source": "runtime_judge",
+        "learning_status": "not_queued",
+        "matched_rule_id": null,
+        "runtime_context": {
+          "intent": "generate",
+          "node_task": "generate",
+          "risk_level": "medium",
+          "input_length": 163,
+          "output_format": "json",
+          "prompt_length": 251,
+          "has_file_input": false,
+          "customer_facing": false,
+          "schema_required": true,
+          "knowledge_enabled": false,
+          "input_length_bucket": "short",
+          "prompt_length_bucket": "short"
+        },
+        "decision_factors": {
+          "learning_mode": "judge_first",
+          "judged_request_count": 0,
+          "candidate_model_count": 6
+        }
+      },
+      "rag_context": {
+        "used": false,
+        "source_count": 0,
+        "partial_result": false,
+        "source_tier_used": null,
+        "evidence_sufficient": false,
+        "insufficiency_reason": null,
+        "query_rewrite_applied": false,
+        "retrieved_chunk_count": 0,
+        "retrieved_context_chars": 0,
+        "retrieved_context_token_estimate": "[REDACTED]"
+      },
+      "error": null
+    },
+    {
+      "case_id": "advanced-09",
+      "node_id": "llm-direct",
+      "category": "short_advanced_direct",
+      "expected_difficulty": "advanced",
+      "requires_rag": false,
+      "workflow_success": true,
+      "schema_pass": true,
+      "selected_model": "gpt-4.1",
+      "task_cost_usd": 0.001044,
+      "task_latency_ms": 4728,
+      "routing_judge_cost_usd": 0.001655,
+      "routing_judge_tokens": 1016,
+      "routing": {
+        "judge": {
+          "cost": 0.0016545,
+          "model": "gpt-5.4-mini",
+          "usage": {
+            "latency_ms": 2790,
+            "total_tokens": 1016,
+            "prompt_tokens": 778,
+            "completion_tokens": 238
+          },
+          "status": "selected",
+          "attempted": true,
+          "confidence": 0.92,
+          "reason_code": "requirement_judge_ambiguous",
+          "reason_short": "요구 수준 기반 선택",
+          "reason_factors": [
+            "high_decision_impact",
+            "multi_step_reasoning"
+          ],
+          "rubric_version": "routing-requirements-v2",
+          "selected_model": "gpt-4.1",
+          "ambiguity_flags": [
+            "high_impact_uncertainty"
+          ],
+          "learning_status": "not_queued",
+          "selection_source": "server_evidence_selection",
+          "task_requirements": {
+            "decision_impact": 2,
+            "task_complexity": 2,
+            "evidence_synthesis": 1
+          },
+          "candidate_model_count": 11,
+          "learning_not_queued_reason": "requirement_adjudication_required"
+        },
+        "enabled": true,
+        "policy_id": "c0a504ad-b20f-480e-9f8f-8a36abf791a2",
+        "rag_context": {
+          "used": false,
+          "source_count": 0,
+          "partial_result": false,
+          "source_tier_used": null,
+          "evidence_sufficient": false,
+          "insufficiency_reason": null,
+          "query_rewrite_applied": false,
+          "retrieved_chunk_count": 0,
+          "retrieved_context_chars": 0,
+          "retrieved_context_token_estimate": "[REDACTED]"
+        },
+        "reason_code": "requirement_judge_ambiguous",
+        "strategy_id": "judge_bootstrap_incremental_v1",
+        "judge_called": true,
+        "execution_mode": "deployed",
+        "fallback_model": "gpt-4.1-mini",
+        "policy_version": "judge-rag-mix-v1",
+        "selected_model": "gpt-4.1",
+        "decision_source": "runtime_judge",
+        "learning_status": "not_queued",
+        "matched_rule_id": null,
+        "runtime_context": {
+          "intent": "generate",
+          "node_task": "generate",
+          "risk_level": "medium",
+          "input_length": 161,
+          "output_format": "json",
+          "prompt_length": 251,
+          "has_file_input": false,
+          "customer_facing": false,
+          "schema_required": true,
+          "knowledge_enabled": false,
+          "input_length_bucket": "short",
+          "prompt_length_bucket": "short"
+        },
+        "decision_factors": {
+          "learning_mode": "judge_first",
+          "judged_request_count": 0,
+          "candidate_model_count": 6
+        }
+      },
+      "rag_context": {
+        "used": false,
+        "source_count": 0,
+        "partial_result": false,
+        "source_tier_used": null,
+        "evidence_sufficient": false,
+        "insufficiency_reason": null,
+        "query_rewrite_applied": false,
+        "retrieved_chunk_count": 0,
+        "retrieved_context_chars": 0,
+        "retrieved_context_token_estimate": "[REDACTED]"
+      },
+      "error": null
+    },
+    {
+      "case_id": "advanced-10",
+      "node_id": "llm-direct",
+      "category": "short_advanced_direct",
+      "expected_difficulty": "advanced",
+      "requires_rag": false,
+      "workflow_success": true,
+      "schema_pass": true,
+      "selected_model": "gpt-4.1",
+      "task_cost_usd": 0.001461,
+      "task_latency_ms": 5799,
+      "routing_judge_cost_usd": 0.001587,
+      "routing_judge_tokens": 1006,
+      "routing": {
+        "judge": {
+          "cost": 0.001587,
+          "model": "gpt-5.4-mini",
+          "usage": {
+            "latency_ms": 2846,
+            "total_tokens": 1006,
+            "prompt_tokens": 784,
+            "completion_tokens": 222
+          },
+          "status": "selected",
+          "attempted": true,
+          "confidence": 0.89,
+          "reason_code": "requirement_judge_ambiguous",
+          "reason_short": "요구 수준 기반 선택",
+          "reason_factors": [
+            "high_decision_impact",
+            "multi_step_reasoning"
+          ],
+          "rubric_version": "routing-requirements-v2",
+          "selected_model": "gpt-4.1",
+          "ambiguity_flags": [
+            "insufficient_context"
+          ],
+          "learning_status": "not_queued",
+          "selection_source": "server_evidence_selection",
+          "task_requirements": {
+            "decision_impact": 2,
+            "task_complexity": 2,
+            "evidence_synthesis": 1
+          },
+          "candidate_model_count": 11,
+          "learning_not_queued_reason": "requirement_adjudication_required"
+        },
+        "enabled": true,
+        "policy_id": "c0a504ad-b20f-480e-9f8f-8a36abf791a2",
+        "rag_context": {
+          "used": false,
+          "source_count": 0,
+          "partial_result": false,
+          "source_tier_used": null,
+          "evidence_sufficient": false,
+          "insufficiency_reason": null,
+          "query_rewrite_applied": false,
+          "retrieved_chunk_count": 0,
+          "retrieved_context_chars": 0,
+          "retrieved_context_token_estimate": "[REDACTED]"
+        },
+        "reason_code": "requirement_judge_ambiguous",
+        "strategy_id": "judge_bootstrap_incremental_v1",
+        "judge_called": true,
+        "execution_mode": "deployed",
+        "fallback_model": "gpt-4.1-mini",
+        "policy_version": "judge-rag-mix-v1",
+        "selected_model": "gpt-4.1",
+        "decision_source": "runtime_judge",
+        "learning_status": "not_queued",
+        "matched_rule_id": null,
+        "runtime_context": {
+          "intent": "generate",
+          "node_task": "generate",
+          "risk_level": "medium",
+          "input_length": 160,
+          "output_format": "json",
+          "prompt_length": 251,
+          "has_file_input": false,
+          "customer_facing": false,
+          "schema_required": true,
+          "knowledge_enabled": false,
+          "input_length_bucket": "short",
+          "prompt_length_bucket": "short"
+        },
+        "decision_factors": {
+          "learning_mode": "judge_first",
+          "judged_request_count": 0,
+          "candidate_model_count": 6
+        }
+      },
+      "rag_context": {
+        "used": false,
+        "source_count": 0,
+        "partial_result": false,
+        "source_tier_used": null,
+        "evidence_sufficient": false,
+        "insufficiency_reason": null,
+        "query_rewrite_applied": false,
+        "retrieved_chunk_count": 0,
+        "retrieved_context_chars": 0,
+        "retrieved_context_token_estimate": "[REDACTED]"
+      },
+      "error": null
+    },
+    {
+      "case_id": "routine-09",
+      "node_id": "llm-direct",
+      "category": "routine_direct",
+      "expected_difficulty": "economy",
+      "requires_rag": false,
+      "workflow_success": true,
+      "schema_pass": true,
+      "selected_model": "gpt-4.1",
+      "task_cost_usd": 0.000835,
+      "task_latency_ms": 3603,
+      "routing_judge_cost_usd": 0.001274,
+      "routing_judge_tokens": 924,
+      "routing": {
+        "judge": {
+          "cost": 0.00127425,
+          "model": "gpt-5.4-mini",
+          "usage": {
+            "latency_ms": 1890,
+            "total_tokens": 924,
+            "prompt_tokens": 769,
+            "completion_tokens": 155
+          },
+          "status": "selected",
+          "attempted": true,
+          "confidence": 0.96,
+          "reason_code": "no_validated_candidate",
+          "reason_short": "요구 수준 기반 선택",
+          "learning_error": "TypeError",
+          "rubric_version": "routing-requirements-v2",
+          "selected_model": "gpt-4.1",
+          "ambiguity_flags": [],
+          "selection_source": "server_evidence_selection",
+          "task_requirements": {
+            "decision_impact": 0,
+            "task_complexity": 1,
+            "evidence_synthesis": 0
+          },
+          "candidate_model_count": 11
+        },
+        "enabled": true,
+        "policy_id": "c0a504ad-b20f-480e-9f8f-8a36abf791a2",
+        "rag_context": {
+          "used": false,
+          "source_count": 0,
+          "partial_result": false,
+          "source_tier_used": null,
+          "evidence_sufficient": false,
+          "insufficiency_reason": null,
+          "query_rewrite_applied": false,
+          "retrieved_chunk_count": 0,
+          "retrieved_context_chars": 0,
+          "retrieved_context_token_estimate": "[REDACTED]"
+        },
+        "reason_code": "no_validated_candidate",
+        "strategy_id": "judge_bootstrap_incremental_v1",
+        "judge_called": true,
+        "execution_mode": "deployed",
+        "fallback_model": "gpt-4.1-mini",
+        "policy_version": "judge-rag-mix-v1",
+        "selected_model": "gpt-4.1",
+        "decision_source": "runtime_judge",
+        "matched_rule_id": null,
+        "runtime_context": {
+          "intent": "generate",
+          "node_task": "generate",
+          "risk_level": "medium",
+          "input_length": 145,
+          "output_format": "json",
+          "prompt_length": 251,
+          "has_file_input": false,
+          "customer_facing": false,
+          "schema_required": true,
+          "knowledge_enabled": false,
+          "input_length_bucket": "short",
+          "prompt_length_bucket": "short"
+        },
+        "decision_factors": {
+          "learning_mode": "judge_first",
+          "judged_request_count": 0,
+          "candidate_model_count": 6
+        }
+      },
+      "rag_context": {
+        "used": false,
+        "source_count": 0,
+        "partial_result": false,
+        "source_tier_used": null,
+        "evidence_sufficient": false,
+        "insufficiency_reason": null,
+        "query_rewrite_applied": false,
+        "retrieved_chunk_count": 0,
+        "retrieved_context_chars": 0,
+        "retrieved_context_token_estimate": "[REDACTED]"
+      },
+      "error": null
+    },
+    {
+      "case_id": "routine-10",
+      "node_id": "llm-direct",
+      "category": "routine_direct",
+      "expected_difficulty": "economy",
+      "requires_rag": false,
+      "workflow_success": true,
+      "schema_pass": true,
+      "selected_model": "gpt-4.1",
+      "task_cost_usd": 0.000911,
+      "task_latency_ms": 5913,
+      "routing_judge_cost_usd": 0.002234,
+      "routing_judge_tokens": 1133,
+      "routing": {
+        "judge": {
+          "cost": 0.0022335,
+          "model": "gpt-5.4-mini",
+          "usage": {
+            "latency_ms": 3562,
+            "total_tokens": 1133,
+            "prompt_tokens": 764,
+            "completion_tokens": 369
+          },
+          "status": "selected",
+          "attempted": true,
+          "confidence": 0.84,
+          "reason_code": "requirement_judge_ambiguous",
+          "reason_short": "요구 수준 기반 선택",
+          "reason_factors": [
+            "security_or_compliance_risk"
+          ],
+          "rubric_version": "routing-requirements-v2",
+          "selected_model": "gpt-4.1",
+          "ambiguity_flags": [
+            "insufficient_context"
+          ],
+          "learning_status": "not_queued",
+          "selection_source": "server_evidence_selection",
+          "task_requirements": {
+            "decision_impact": 2,
+            "task_complexity": 1,
+            "evidence_synthesis": 0
+          },
+          "candidate_model_count": 11,
+          "learning_not_queued_reason": "requirement_adjudication_required"
+        },
+        "enabled": true,
+        "policy_id": "c0a504ad-b20f-480e-9f8f-8a36abf791a2",
+        "rag_context": {
+          "used": false,
+          "source_count": 0,
+          "partial_result": false,
+          "source_tier_used": null,
+          "evidence_sufficient": false,
+          "insufficiency_reason": null,
+          "query_rewrite_applied": false,
+          "retrieved_chunk_count": 0,
+          "retrieved_context_chars": 0,
+          "retrieved_context_token_estimate": "[REDACTED]"
+        },
+        "reason_code": "requirement_judge_ambiguous",
+        "strategy_id": "judge_bootstrap_incremental_v1",
+        "judge_called": true,
+        "execution_mode": "deployed",
+        "fallback_model": "gpt-4.1-mini",
+        "policy_version": "judge-rag-mix-v1",
+        "selected_model": "gpt-4.1",
+        "decision_source": "runtime_judge",
+        "learning_status": "not_queued",
+        "matched_rule_id": null,
+        "runtime_context": {
+          "intent": "generate",
+          "node_task": "generate",
+          "risk_level": "medium",
+          "input_length": 145,
+          "output_format": "json",
+          "prompt_length": 251,
+          "has_file_input": false,
+          "customer_facing": false,
+          "schema_required": true,
+          "knowledge_enabled": false,
+          "input_length_bucket": "short",
+          "prompt_length_bucket": "short"
+        },
+        "decision_factors": {
+          "learning_mode": "judge_first",
+          "judged_request_count": 0,
+          "candidate_model_count": 6
+        }
+      },
+      "rag_context": {
+        "used": false,
+        "source_count": 0,
+        "partial_result": false,
+        "source_tier_used": null,
+        "evidence_sufficient": false,
+        "insufficiency_reason": null,
+        "query_rewrite_applied": false,
+        "retrieved_chunk_count": 0,
+        "retrieved_context_chars": 0,
+        "retrieved_context_token_estimate": "[REDACTED]"
+      },
+      "error": null
+    },
+    {
+      "case_id": "balanced-09",
+      "node_id": "llm-direct",
+      "category": "balanced_direct",
+      "expected_difficulty": "balanced",
+      "requires_rag": false,
+      "workflow_success": true,
+      "schema_pass": true,
+      "selected_model": "gpt-4.1",
+      "task_cost_usd": 0.000874,
+      "task_latency_ms": 4047,
+      "routing_judge_cost_usd": 0.001404,
+      "routing_judge_tokens": 967,
+      "routing": {
+        "judge": {
+          "cost": 0.001404,
+          "model": "gpt-5.4-mini",
+          "usage": {
+            "latency_ms": 2321,
+            "total_tokens": 967,
+            "prompt_tokens": 786,
+            "completion_tokens": 181
+          },
+          "status": "selected",
+          "attempted": true,
+          "confidence": 0.91,
+          "reason_code": "requirement_judge_ambiguous",
+          "reason_short": "요구 수준 기반 선택",
+          "reason_factors": [
+            "multi_step_reasoning",
+            "high_decision_impact"
+          ],
+          "rubric_version": "routing-requirements-v2",
+          "selected_model": "gpt-4.1",
+          "ambiguity_flags": [
+            "insufficient_context"
+          ],
+          "learning_status": "not_queued",
+          "selection_source": "server_evidence_selection",
+          "task_requirements": {
+            "decision_impact": 2,
+            "task_complexity": 2,
+            "evidence_synthesis": 2
+          },
+          "candidate_model_count": 11,
+          "learning_not_queued_reason": "requirement_adjudication_required"
+        },
+        "enabled": true,
+        "policy_id": "c0a504ad-b20f-480e-9f8f-8a36abf791a2",
+        "rag_context": {
+          "used": false,
+          "source_count": 0,
+          "partial_result": false,
+          "source_tier_used": null,
+          "evidence_sufficient": false,
+          "insufficiency_reason": null,
+          "query_rewrite_applied": false,
+          "retrieved_chunk_count": 0,
+          "retrieved_context_chars": 0,
+          "retrieved_context_token_estimate": "[REDACTED]"
+        },
+        "reason_code": "requirement_judge_ambiguous",
+        "strategy_id": "judge_bootstrap_incremental_v1",
+        "judge_called": true,
+        "execution_mode": "deployed",
+        "fallback_model": "gpt-4.1-mini",
+        "policy_version": "judge-rag-mix-v1",
+        "selected_model": "gpt-4.1",
+        "decision_source": "runtime_judge",
+        "learning_status": "not_queued",
+        "matched_rule_id": null,
+        "runtime_context": {
+          "intent": "generate",
+          "node_task": "generate",
+          "risk_level": "medium",
+          "input_length": 168,
+          "output_format": "json",
+          "prompt_length": 251,
+          "has_file_input": false,
+          "customer_facing": false,
+          "schema_required": true,
+          "knowledge_enabled": false,
+          "input_length_bucket": "short",
+          "prompt_length_bucket": "short"
+        },
+        "decision_factors": {
+          "learning_mode": "judge_first",
+          "judged_request_count": 0,
+          "candidate_model_count": 6
+        }
+      },
+      "rag_context": {
+        "used": false,
+        "source_count": 0,
+        "partial_result": false,
+        "source_tier_used": null,
+        "evidence_sufficient": false,
+        "insufficiency_reason": null,
+        "query_rewrite_applied": false,
+        "retrieved_chunk_count": 0,
+        "retrieved_context_chars": 0,
+        "retrieved_context_token_estimate": "[REDACTED]"
+      },
+      "error": null
+    },
+    {
+      "case_id": "balanced-10",
+      "node_id": "llm-direct",
+      "category": "balanced_direct",
+      "expected_difficulty": "balanced",
+      "requires_rag": false,
+      "workflow_success": true,
+      "schema_pass": true,
+      "selected_model": "gpt-4.1",
+      "task_cost_usd": 0.001446,
+      "task_latency_ms": 5684,
+      "routing_judge_cost_usd": 0.001542,
+      "routing_judge_tokens": 1001,
+      "routing": {
+        "judge": {
+          "cost": 0.001542,
+          "model": "gpt-5.4-mini",
+          "usage": {
+            "latency_ms": 2832,
+            "total_tokens": 1001,
+            "prompt_tokens": 790,
+            "completion_tokens": 211
+          },
+          "status": "selected",
+          "attempted": true,
+          "confidence": 0.89,
+          "reason_code": "no_validated_candidate",
+          "reason_short": "요구 수준 기반 선택",
+          "learning_error": "TypeError",
+          "reason_factors": [
+            "high_decision_impact"
+          ],
+          "rubric_version": "routing-requirements-v2",
+          "selected_model": "gpt-4.1",
+          "ambiguity_flags": [],
+          "selection_source": "server_evidence_selection",
+          "task_requirements": {
+            "decision_impact": 1,
+            "task_complexity": 1,
+            "evidence_synthesis": 0
+          },
+          "candidate_model_count": 11
+        },
+        "enabled": true,
+        "policy_id": "c0a504ad-b20f-480e-9f8f-8a36abf791a2",
+        "rag_context": {
+          "used": false,
+          "source_count": 0,
+          "partial_result": false,
+          "source_tier_used": null,
+          "evidence_sufficient": false,
+          "insufficiency_reason": null,
+          "query_rewrite_applied": false,
+          "retrieved_chunk_count": 0,
+          "retrieved_context_chars": 0,
+          "retrieved_context_token_estimate": "[REDACTED]"
+        },
+        "reason_code": "no_validated_candidate",
+        "strategy_id": "judge_bootstrap_incremental_v1",
+        "judge_called": true,
+        "execution_mode": "deployed",
+        "fallback_model": "gpt-4.1-mini",
+        "policy_version": "judge-rag-mix-v1",
+        "selected_model": "gpt-4.1",
+        "decision_source": "runtime_judge",
+        "matched_rule_id": null,
+        "runtime_context": {
+          "intent": "generate",
+          "node_task": "generate",
+          "risk_level": "medium",
+          "input_length": 164,
+          "output_format": "json",
+          "prompt_length": 251,
+          "has_file_input": false,
+          "customer_facing": false,
+          "schema_required": true,
+          "knowledge_enabled": false,
+          "input_length_bucket": "short",
+          "prompt_length_bucket": "short"
+        },
+        "decision_factors": {
+          "learning_mode": "judge_first",
+          "judged_request_count": 0,
+          "candidate_model_count": 6
+        }
+      },
+      "rag_context": {
+        "used": false,
+        "source_count": 0,
+        "partial_result": false,
+        "source_tier_used": null,
+        "evidence_sufficient": false,
+        "insufficiency_reason": null,
+        "query_rewrite_applied": false,
+        "retrieved_chunk_count": 0,
+        "retrieved_context_chars": 0,
+        "retrieved_context_token_estimate": "[REDACTED]"
+      },
+      "error": null
+    }
+  ],
+  "stopped_reason": null
+}

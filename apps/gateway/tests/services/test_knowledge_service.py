@@ -13,11 +13,13 @@ def test_knowledge_base_creation():
     # Given
     kb_id = uuid4()
     user_id = uuid4()
+    organization_id = uuid4()
 
     # When
     kb = KnowledgeBase(
         id=kb_id,
         user_id=user_id,
+        organization_id=organization_id,
         name="테스트 지식 베이스",
         description="단위 테스트용 KB",
         embedding_model="text-embedding-3-small",
@@ -28,6 +30,7 @@ def test_knowledge_base_creation():
     # Then
     assert kb.id == kb_id
     assert kb.user_id == user_id
+    assert kb.organization_id == organization_id
     assert kb.name == "테스트 지식 베이스"
     assert kb.embedding_model == "text-embedding-3-small"
     assert kb.top_k == 5

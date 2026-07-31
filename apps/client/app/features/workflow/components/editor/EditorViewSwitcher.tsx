@@ -12,14 +12,14 @@ export default function EditorViewSwitcher({
   onViewModeChange,
 }: EditorViewSwitcherProps) {
   return (
-    <div className="relative h-0 flex justify-center z-50">
-      <div className="absolute top-3 -translate-y-1/2 bg-gray-100 p-1 rounded-lg flex items-center border border-gray-200/60">
+    <div className="relative z-50 flex h-0 justify-center">
+      <div className="absolute top-3 flex -translate-y-1/2 items-center rounded-lg border border-slate-200 bg-slate-100 p-1 shadow-sm">
         <button
           onClick={() => onViewModeChange('edit')}
           className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-md transition-all ${
             viewMode === 'edit'
-              ? 'bg-white text-gray-900 border border-gray-200'
-              : 'text-gray-500 hover:text-gray-900 hover:bg-gray-200/50 border border-transparent'
+              ? 'bg-white text-slate-950 border border-slate-200 shadow-sm'
+              : 'text-slate-500 hover:text-slate-950 hover:bg-slate-200/60 border border-transparent'
           }`}
         >
           <Workflow className="w-4 h-4" />
@@ -29,8 +29,8 @@ export default function EditorViewSwitcher({
           onClick={() => onViewModeChange('log')}
           className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-md transition-all ${
             viewMode === 'log'
-              ? 'bg-white text-gray-900 border border-gray-200'
-              : 'text-gray-500 hover:text-gray-900 hover:bg-gray-200/50 border border-transparent'
+              ? 'bg-white text-slate-950 border border-slate-200 shadow-sm'
+              : 'text-slate-500 hover:text-slate-950 hover:bg-slate-200/60 border border-transparent'
           }`}
         >
           <ScrollText className="w-4 h-4" />
@@ -40,8 +40,8 @@ export default function EditorViewSwitcher({
           onClick={() => onViewModeChange('monitoring')}
           className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-md transition-all ${
             viewMode === 'monitoring'
-              ? 'bg-white text-gray-900 border border-gray-200'
-              : 'text-gray-500 hover:text-gray-900 hover:bg-gray-200/50 border border-transparent'
+              ? 'bg-white text-slate-950 border border-slate-200 shadow-sm'
+              : 'text-slate-500 hover:text-slate-950 hover:bg-slate-200/60 border border-transparent'
           }`}
         >
           <Activity className="w-4 h-4" />

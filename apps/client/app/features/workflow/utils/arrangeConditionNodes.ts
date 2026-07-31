@@ -25,27 +25,27 @@ export function arrangeConditionNodeChildren(
     return nodes;
   }
 
-  // Sort edges by case order: case1, case2, ..., default
-  const sortedEdges = [...connectedEdges].sort((a, b) => {
-    const handleA = a.sourceHandle || '';
-    const handleB = b.sourceHandle || '';
+  const caseOrder = new Map(
+    ((conditionNode.data.cases as Array<{ id?: string }> | undefined) || [])
+      .map((caseItem, index) => [caseItem.id, index + 1] as const)
+      .filter(([caseId]) => Boolean(caseId)),
+  );
 
-    // Extract case numbers or identify default
-    const getCaseOrder = (handle: string): number => {
-      if (handle === 'default') return 9999; // default goes last
-      const match = handle.match(/case(\d+)/);
-      return match ? parseInt(match[1], 10) : 9998; // unknown cases go before default
+  // Default is the top exit. Configured branches follow their configured order.
+  const sortedEdges = [...connectedEdges].sort((a, b) => {
+    const getHandleOrder = (handle?: string | null): number => {
+      if (handle === 'default') return 0;
+      return caseOrder.get(handle || '') ?? Number.MAX_SAFE_INTEGER;
     };
 
-    return getCaseOrder(handleA) - getCaseOrder(handleB);
+    return getHandleOrder(a.sourceHandle) - getHandleOrder(b.sourceHandle);
   });
 
   // Get condition node position
   const conditionPos = conditionNode.position;
 
-  // Calculate starting Y position (centered around condition node)
-  const totalHeight = (sortedEdges.length - 1) * VERTICAL_SPACING;
-  const startY = conditionPos.y - totalHeight / 2;
+  // Keep Default aligned with the condition and expand branches downward.
+  const startY = conditionPos.y;
 
   // Create a map of node positions based on sorted order
   const nodePositions = new Map<string, { x: number; y: number }>();

@@ -8,8 +8,14 @@ BaseLLMClient를 직접 상속하여 독립적인 구현을 제공합니다.
 from typing import Any, Dict, List
 
 import httpx
+from apps.shared.services.egress_guard import EgressGuardError
 
-from .base import BaseLLMClient
+from .base import (
+    BaseLLMClient,
+    EmbeddingProviderResult,
+    LLMResponseValidationError,
+    PreparedEmbeddingInvocation,
+)
 
 
 class GoogleClient(BaseLLMClient):
@@ -34,6 +40,7 @@ class GoogleClient(BaseLLMClient):
         self.base_url = credentials.get("baseUrl") or credentials.get("base_url")
         if not self.api_key or not self.base_url:
             raise ValueError("Google Gemini credentials에 apiKey/baseUrl가 필요합니다.")
+        self._configure_provider_endpoint(self.base_url)
         self.chat_url = self.base_url.rstrip("/") + "/chat/completions"
         self.embedding_url = self.base_url.rstrip("/") + "/embeddings"
 
@@ -47,6 +54,7 @@ class GoogleClient(BaseLLMClient):
         if not kwargs:
             return {}
         filtered = dict(kwargs)
+        filtered.pop("request_timeout_seconds", None)
         # Gemini OpenAI-compat endpoint rejects these fields.
         filtered.pop("frequency_penalty", None)
         filtered.pop("presence_penalty", None)
@@ -58,20 +66,21 @@ class GoogleClient(BaseLLMClient):
         """
         payload = {"model": self.model_id, "input": text}
 
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(
+            timeout=30,
+            **self._async_http_client_options(),
+        ) as client:
             try:
                 resp = await client.post(
                     self.embedding_url,
                     headers=self._build_headers(),
                     json=payload,
                 )
-            except httpx.RequestError as exc:
-                raise ValueError(f"Google Gemini 임베딩 호출 실패: {exc}") from exc
+            except (httpx.RequestError, EgressGuardError) as exc:
+                self._raise_provider_transport_error(exc)
 
         if resp.status_code >= 400:
-            raise ValueError(
-                f"Google Gemini 임베딩 호출 실패 (status {resp.status_code}): {resp.text[:200]}"
-            )
+            self._raise_provider_http_error(resp.status_code)
 
         try:
             data = resp.json()
@@ -79,6 +88,63 @@ class GoogleClient(BaseLLMClient):
             return data["data"][0]["embedding"]
         except (ValueError, KeyError, IndexError) as exc:
             raise ValueError("Google Gemini 임베딩 응답 파싱 실패") from exc
+
+    def prepare_embedding_invocation(
+        self,
+        text: str,
+    ) -> PreparedEmbeddingInvocation:
+        payload = {"model": self.model_id, "input": text}
+        return self._seal_embedding_invocation(
+            text=text,
+            invoke=lambda: self._invoke_typed_embedding_sync(payload),
+        )
+
+    def _invoke_typed_embedding_sync(
+        self,
+        payload: Dict[str, Any],
+    ) -> EmbeddingProviderResult:
+        try:
+            with httpx.Client(
+                timeout=30,
+                **self._sync_http_client_options(),
+            ) as client:
+                response = client.post(
+                    self.embedding_url,
+                    headers=self._build_headers(),
+                    json=payload,
+                )
+        except (httpx.RequestError, EgressGuardError) as exc:
+            self._raise_provider_transport_error(exc)
+        if response.status_code >= 400:
+            self._raise_provider_http_error(response.status_code)
+        try:
+            data = response.json()
+            usage = data["usage"]
+            vector = tuple(data["data"][0]["embedding"])
+            if not isinstance(usage, dict):
+                raise TypeError
+            input_tokens = usage.get("prompt_tokens", usage.get("input_tokens"))
+            if (
+                isinstance(input_tokens, bool)
+                or not isinstance(input_tokens, int)
+                or input_tokens < 0
+            ):
+                raise TypeError
+            total_tokens = usage.get("total_tokens")
+            if total_tokens is not None and (
+                isinstance(total_tokens, bool)
+                or not isinstance(total_tokens, int)
+                or total_tokens != input_tokens
+            ):
+                raise TypeError
+            return EmbeddingProviderResult(
+                vector=vector,
+                input_tokens=input_tokens,
+            )
+        except (IndexError, KeyError, TypeError, ValueError) as exc:
+            raise LLMResponseValidationError(
+                "Embedding provider response is invalid."
+            ) from exc
 
     async def invoke(self, messages: List[Dict[str, Any]], **kwargs) -> Dict[str, Any]:
         """
@@ -98,19 +164,28 @@ class GoogleClient(BaseLLMClient):
             "model": self.model_id,
             "messages": messages,
         }
+        request_timeout = kwargs.get("request_timeout_seconds", 60)
+        if (
+            isinstance(request_timeout, bool)
+            or not isinstance(request_timeout, (int, float))
+            or request_timeout <= 0
+        ):
+            request_timeout = 60
         payload.update(self._sanitize_kwargs(kwargs))
 
-        async with httpx.AsyncClient(timeout=60) as client:
+        async with httpx.AsyncClient(
+            timeout=request_timeout,
+            **self._async_http_client_options(),
+        ) as client:
             try:
                 resp = await client.post(
                     self.chat_url, headers=self._build_headers(), json=payload
                 )
-            except httpx.RequestError as exc:
-                raise ValueError(f"Google Gemini 호출 실패: {exc}") from exc
+            except (httpx.RequestError, EgressGuardError) as exc:
+                self._raise_provider_transport_error(exc)
 
         if resp.status_code >= 400:
-            snippet = resp.text[:200] if resp.text else ""
-            raise ValueError(f"Google Gemini 호출 실패 (status {resp.status_code}): {snippet}")
+            self._raise_provider_http_error(resp.status_code)
 
         try:
             return resp.json()

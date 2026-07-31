@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, useMemo } from 'react';
+import { useCallback, useEffect, useRef, useState, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { ChevronDown, Check } from 'lucide-react';
 
 export interface Option {
@@ -9,7 +10,7 @@ export interface Option {
 
 interface RoundedSelectProps {
   value: string | number;
-  onChange: (value: string | any) => void;
+  onChange: (value: string | number) => void;
   options: Option[];
   placeholder?: string;
   disabled?: boolean;
@@ -31,7 +32,9 @@ export function RoundedSelect({
   className = '',
 }: RoundedSelectProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const [menuRect, setMenuRect] = useState<DOMRect | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   // 선택된 옵션 찾기
   const selectedOption = useMemo(
@@ -39,15 +42,35 @@ export function RoundedSelect({
     [options, value],
   );
 
+  const updateMenuRect = useCallback(() => {
+    const rect = dropdownRef.current?.getBoundingClientRect();
+    if (rect) setMenuRect(rect);
+  }, []);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const frameId = window.requestAnimationFrame(updateMenuRect);
+
+    window.addEventListener('scroll', updateMenuRect, true);
+    window.addEventListener('resize', updateMenuRect);
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      window.removeEventListener('scroll', updateMenuRect, true);
+      window.removeEventListener('resize', updateMenuRect);
+    };
+  }, [isOpen, updateMenuRect]);
+
   // 바깥 클릭 시 닫기
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Node;
       if (
-        dropdownRef.current &&
-        !dropdownRef.current.contains(event.target as Node)
+        dropdownRef.current?.contains(target) ||
+        menuRef.current?.contains(target)
       ) {
-        setIsOpen(false);
+        return;
       }
+      setIsOpen(false);
     };
 
     document.addEventListener('mousedown', handleClickOutside);
@@ -88,41 +111,53 @@ export function RoundedSelect({
       </button>
 
       {/* 드롭다운 팝오버 */}
-      {isOpen && !disabled && (
-        <div className="absolute z-50 mt-1 min-w-full w-auto bg-white rounded-lg border border-gray-200 shadow-lg overflow-hidden max-h-60 overflow-y-auto animate-in fade-in zoom-in-95 duration-100">
-          <div className="py-1">
-            {options.length > 0 ? (
-              options.map((option) => {
-                const isSelected = String(option.value) === String(value);
-                return (
-                  <button
-                    key={String(option.value)}
-                    type="button"
-                    onClick={() => handleSelect(option)}
-                    disabled={option.disabled}
-                    className={`min-w-full flex items-center justify-between px-3 py-2 text-sm text-left transition-colors whitespace-nowrap ${
-                      option.disabled
-                        ? 'opacity-50 cursor-not-allowed bg-gray-50'
-                        : isSelected
-                          ? 'bg-blue-50 text-blue-700'
-                          : 'hover:bg-gray-50 text-gray-700'
-                    }`}
-                  >
-                    <span>{option.label}</span>
-                    {isSelected && (
-                      <Check className="w-3.5 h-3.5 text-blue-600 flex-shrink-0 ml-4" />
-                    )}
-                  </button>
-                );
-              })
-            ) : (
-              <div className="px-3 py-4 text-sm text-gray-400 text-center">
-                옵션이 없습니다.
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+      {isOpen &&
+        !disabled &&
+        menuRect &&
+        createPortal(
+          <div
+            ref={menuRef}
+            className="fixed z-[1000] w-auto min-w-full max-h-60 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg animate-in fade-in zoom-in-95 duration-100"
+            style={{
+              left: menuRect.left,
+              top: menuRect.bottom + 4,
+              minWidth: menuRect.width,
+            }}
+          >
+            <div className="py-1">
+              {options.length > 0 ? (
+                options.map((option) => {
+                  const isSelected = String(option.value) === String(value);
+                  return (
+                    <button
+                      key={String(option.value)}
+                      type="button"
+                      onClick={() => handleSelect(option)}
+                      disabled={option.disabled}
+                      className={`min-w-full flex items-center justify-between px-3 py-2 text-sm text-left transition-colors whitespace-nowrap ${
+                        option.disabled
+                          ? 'opacity-50 cursor-not-allowed bg-gray-50'
+                          : isSelected
+                            ? 'bg-blue-50 text-blue-700'
+                            : 'hover:bg-gray-50 text-gray-700'
+                      }`}
+                    >
+                      <span>{option.label}</span>
+                      {isSelected && (
+                        <Check className="w-3.5 h-3.5 text-blue-600 flex-shrink-0 ml-4" />
+                      )}
+                    </button>
+                  );
+                })
+              ) : (
+                <div className="px-3 py-4 text-sm text-gray-400 text-center">
+                  옵션이 없습니다.
+                </div>
+              )}
+            </div>
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }

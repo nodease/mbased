@@ -8,7 +8,6 @@ Fair Scheduler Unit Tests
 """
 import asyncio
 import time
-from unittest.mock import MagicMock
 
 import pytest
 
@@ -20,7 +19,7 @@ from apps.sandbox.models.job import Job, Priority
 # 테스트 유틸리티
 # ============================================================================
 
-def create_mock_job(tenant_id: str, priority: Priority = Priority.NORMAL) -> Job:
+def create_mock_job(organization_id: str, priority: Priority = Priority.NORMAL) -> Job:
     """테스트용 Job 객체 생성"""
     job = Job(
         priority=priority,
@@ -28,7 +27,7 @@ def create_mock_job(tenant_id: str, priority: Priority = Priority.NORMAL) -> Job
         inputs={},
         timeout=10,
         enable_network=False,
-        tenant_id=tenant_id,
+        organization_id=organization_id,
     )
     job.future = asyncio.get_event_loop().create_future()
     return job
@@ -64,7 +63,7 @@ async def test_priority_bucket_round_robin():
     await bucket.add(job_c1)
     
     # 모든 테넌트 허용
-    def allow_all(tenant_id: str) -> bool:
+    def allow_all(organization_id: str) -> bool:
         return True
     
     # Round-Robin으로 꺼내기
@@ -74,7 +73,7 @@ async def test_priority_bucket_round_robin():
     result4 = await bucket.pop_next_round_robin(allow_all)
     
     # 검증: 각 테넌트에서 하나씩 순서대로 나와야 함
-    tenants = [result1.tenant_id, result2.tenant_id, result3.tenant_id, result4.tenant_id]
+    tenants = [result1.organization_id, result2.organization_id, result3.organization_id, result4.organization_id]
     
     # A, B, C가 모두 한 번씩은 나와야 함 (순서는 추가 순서에 따름)
     assert "tenant_a" in tenants
@@ -99,14 +98,14 @@ async def test_round_robin_with_tenant_limit():
     await bucket.add(job_b)
     
     # A는 제한, B만 허용
-    def allow_only_b(tenant_id: str) -> bool:
-        return tenant_id == "tenant_b"
+    def allow_only_b(organization_id: str) -> bool:
+        return organization_id == "tenant_b"
     
     result = await bucket.pop_next_round_robin(allow_only_b)
     
     # B만 나와야 함
     assert result is not None
-    assert result.tenant_id == "tenant_b"
+    assert result.organization_id == "tenant_b"
 
 
 # ============================================================================
@@ -129,7 +128,7 @@ async def test_mlfq_priority_order():
     high_job = create_mock_job("tenant_b", Priority.HIGH)
     await high_bucket.add(high_job)
     
-    def allow_all(tenant_id: str) -> bool:
+    def allow_all(organization_id: str) -> bool:
         return True
     
     # MLFQ 정책: HIGH 먼저 확인
@@ -145,7 +144,7 @@ async def test_mlfq_priority_order():
     # HIGH가 먼저 나와야 함
     assert result is not None
     assert result.priority == Priority.HIGH
-    assert result.tenant_id == "tenant_b"
+    assert result.organization_id == "tenant_b"
 
 
 # ============================================================================
@@ -186,7 +185,7 @@ async def test_aging_promotion():
     assert low_bucket.total_jobs == 0  # LOW에서 제거됨
     assert normal_bucket.total_jobs == 1  # NORMAL로 이동됨
     
-    def allow_all(tenant_id: str) -> bool:
+    def allow_all(organization_id: str) -> bool:
         return True
     
     promoted_job = await normal_bucket.pop_next_round_robin(allow_all)

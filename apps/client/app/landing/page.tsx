@@ -2,7 +2,6 @@
 
 import { useState } from 'react';
 import type { ReactNode } from 'react';
-import Image from 'next/image';
 import Link from 'next/link';
 
 import {
@@ -16,21 +15,15 @@ import {
   CheckCircle2,
   Clock,
   ChevronRight,
-  Database,
   DollarSign,
-  FileText,
-  FolderOpen,
-  Github,
   GitFork,
   Globe,
   Layout,
   MessageSquare,
   MousePointerClick,
   Play,
-  Plus,
   Search,
   TrendingUp,
-  Users2,
   Webhook,
   Workflow,
   Zap,
@@ -41,165 +34,16 @@ import { cn } from '@/lib/utils';
 // Mock Components for Tab Content
 // ----------------------------------------------------------------------
 
-function DataView() {
-  const knowledgeBases = [
-    {
-      id: 'kb-1',
-      name: '고객 지원 센터',
-      description: 'FAQ, 상담 스크립트, 제품 정책',
-      sourceTypes: ['FILE', 'API'],
-      documentCount: 28,
-      updatedAt: '2시간 전',
-    },
-    {
-      id: 'kb-2',
-      name: 'DB 연동 지식 베이스',
-      description: 'CRM/주문 DB를 RAG로 바로 검색',
-      sourceTypes: ['DB', 'API'],
-      documentCount: 42,
-      updatedAt: '방금 전',
-      tag: 'DB 연동',
-      tagClassName: 'bg-purple-50 text-purple-700 border-purple-100',
-    },
-    {
-      id: 'kb-3',
-      name: '세일즈 플레이북',
-      description: '제안서, 케이스 스터디',
-      sourceTypes: ['FILE'],
-      documentCount: 15,
-      updatedAt: '5일 전',
-    },
-  ];
-
-  const sourceTypeMeta = {
-    FILE: {
-      label: '파일',
-      badgeClass: 'bg-blue-100',
-      iconClass: 'text-blue-600',
-      Icon: FileText,
-    },
-    API: {
-      label: 'API',
-      badgeClass: 'bg-green-100',
-      iconClass: 'text-green-600',
-      Icon: Webhook,
-    },
-    DB: {
-      label: 'DB',
-      badgeClass: 'bg-purple-100',
-      iconClass: 'text-purple-600',
-      Icon: Database,
-    },
-  } as const;
-
+function AIChatView() {
   return (
-    <div className="w-full h-full bg-white rounded-xl border border-gray-200 shadow-sm flex flex-col overflow-hidden">
-      <div className="p-6 border-b border-gray-100">
-        <h2 className="text-lg font-bold text-gray-800 mb-4">지식 관리</h2>
-        <div className="flex items-center justify-between gap-4">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
-            <input
-              type="text"
-              placeholder="지식 베이스 검색"
-              className="w-56 rounded-lg border border-gray-200 bg-white py-2 pl-9 pr-4 text-sm text-gray-900 placeholder-gray-400 focus:border-blue-400 focus:outline-none focus:ring-1 focus:ring-blue-400"
-            />
-          </div>
-          <button className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 transition-colors">
-            <Plus className="-ml-1 mr-2 h-5 w-5" aria-hidden="true" />
-            새 지식 베이스
-          </button>
-        </div>
-      </div>
-
-      <div className="flex-1 overflow-auto p-6 pt-4">
-        <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-          {knowledgeBases.map((kb, index) => (
-            <div
-              key={kb.id}
-              className={cn(
-                'group flex items-center gap-4 p-5 hover:bg-gray-50 transition-all cursor-pointer',
-                index !== knowledgeBases.length - 1
-                  ? 'border-b border-gray-200'
-                  : '',
-              )}
-            >
-              <div className="p-3 bg-blue-50 rounded-xl text-blue-600 shrink-0">
-                <FolderOpen className="w-6 h-6" />
-              </div>
-
-              <div className="flex-1 min-w-0 ml-2">
-              <div className="flex items-center gap-2">
-                <h3 className="text-base font-bold text-gray-900 group-hover:text-blue-600 transition-colors">
-                  {kb.name}
-                </h3>
-                {kb.tag ? (
-                  <span
-                    className={cn(
-                      'text-[10px] font-semibold px-2 py-0.5 rounded-full border',
-                      kb.tagClassName,
-                    )}
-                  >
-                    {kb.tag}
-                  </span>
-                ) : null}
-              </div>
-                <p className="text-sm text-gray-500 truncate mt-1">
-                  {kb.description}
-                </p>
-
-                <div className="flex items-center gap-4 mt-3 text-xs text-gray-500">
-                  {kb.sourceTypes.length > 0 && (
-                    <div className="flex items-center gap-2">
-                      <div className="flex items-center -space-x-1.5">
-                        {kb.sourceTypes.map((type) => {
-                          const meta =
-                            sourceTypeMeta[
-                              type as keyof typeof sourceTypeMeta
-                            ];
-                          if (!meta) return null;
-                          const Icon = meta.Icon;
-                          return (
-                            <div
-                              key={`${kb.id}-${type}`}
-                              className="relative z-10 bg-white rounded-full p-0.5"
-                              title={meta.label}
-                            >
-                              <div
-                                className={cn(
-                                  'p-1 rounded-full',
-                                  meta.badgeClass,
-                                )}
-                              >
-                                <Icon
-                                  className={cn('w-3 h-3', meta.iconClass)}
-                                />
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                      <span className="w-px h-3 bg-gray-300 mx-1"></span>
-                    </div>
-                  )}
-
-                  <span>자료 {kb.documentCount}개</span>
-
-                  <span className="w-px h-3 bg-gray-300 mx-1"></span>
-                  <div className="flex items-center gap-1">
-                    <Clock className="w-3 h-3" />
-                    <span>{kb.updatedAt} 업데이트</span>
-                  </div>
-                </div>
-              </div>
-
-              <ChevronRight className="w-5 h-5 text-gray-300 group-hover:text-blue-500 transition-colors" />
-            </div>
-          ))}
-        </div>
-      </div>
+    <div className="h-full overflow-y-auto">
+      <img
+        src="/landingpage-01.png"
+        alt="Landing page preview"
+        className="w-full h-auto"
+      />
     </div>
-  );
+  )
 }
 
 type NodePreviewProps = {
@@ -209,12 +53,7 @@ type NodePreviewProps = {
   children?: ReactNode;
 };
 
-function NodePreview({
-  title,
-  icon,
-  iconColor,
-  children,
-}: NodePreviewProps) {
+function NodePreview({ title, icon, iconColor, children }: NodePreviewProps) {
   return (
     <div className="relative w-[180px] min-h-[72px] rounded-[16px] border-2 border-gray-200 bg-white p-3 shadow-sm">
       <div className="mb-1.5 flex items-center gap-2.5">
@@ -506,7 +345,13 @@ function ReportingView() {
             <div className="h-[200px] w-full">
               <svg viewBox="0 0 600 200" className="w-full h-full">
                 <defs>
-                  <linearGradient id="reportingRuns" x1="0" y1="0" x2="0" y2="1">
+                  <linearGradient
+                    id="reportingRuns"
+                    x1="0"
+                    y1="0"
+                    x2="0"
+                    y2="1"
+                  >
                     <stop offset="5%" stopColor="#3b82f6" stopOpacity="0.15" />
                     <stop offset="95%" stopColor="#3b82f6" stopOpacity="0" />
                   </linearGradient>
@@ -545,9 +390,7 @@ function ReportingView() {
                   <span className="text-xs text-blue-500">(Total Runs)</span>
                 </div>
               </div>
-              <div className="text-3xl font-extrabold text-gray-800">
-                1,248
-              </div>
+              <div className="text-3xl font-extrabold text-gray-800">1,248</div>
             </div>
             <div className="bg-green-50 p-4 rounded-xl border border-green-100 flex flex-col justify-between">
               <div className="flex items-center gap-2 text-green-600 mb-2">
@@ -557,9 +400,7 @@ function ReportingView() {
                   <span className="text-xs text-green-500">(Success Rate)</span>
                 </div>
               </div>
-              <div className="text-3xl font-extrabold text-gray-800">
-                98.4%
-              </div>
+              <div className="text-3xl font-extrabold text-gray-800">98.4%</div>
             </div>
             <div className="bg-purple-50 p-4 rounded-xl border border-purple-100 flex flex-col justify-between">
               <div className="flex items-center gap-2 text-purple-600 mb-2">
@@ -611,9 +452,7 @@ function ReportingView() {
                       key={fail.time}
                       className="hover:bg-red-50/30 transition-colors"
                     >
-                      <td className="px-4 py-3 text-gray-600">
-                        {fail.time}
-                      </td>
+                      <td className="px-4 py-3 text-gray-600">{fail.time}</td>
                       <td className="px-4 py-3">
                         <span
                           className={`inline-flex items-center gap-1.5 px-2 py-1 rounded text-sm font-medium ${fail.badgeClass}`}
@@ -669,9 +508,7 @@ function ReportingView() {
                       <td className="px-6 py-4 font-bold text-red-600">
                         {item.count}
                       </td>
-                      <td className="px-6 py-4 text-gray-500">
-                        {item.reason}
-                      </td>
+                      <td className="px-6 py-4 text-gray-500">{item.reason}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -830,8 +667,8 @@ export default function LandingPage() {
   const [activeTab, setActiveTab] = useState('nodes'); // Default tab
 
   const tabs = [
-    { id: 'rag', label: 'RAG', icon: Database },
-    { id: 'nodes', label: 'Nodes', icon: Workflow },
+    { id: 'rag', label: 'AI Agent', icon: Workflow },
+    { id: 'nodes', label: 'AI Agent', icon: Bot },
     { id: 'reporting', label: 'Reporting', icon: BarChart3 },
     { id: 'community', label: 'Community', icon: Globe },
   ];
@@ -841,16 +678,11 @@ export default function LandingPage() {
       {/* ------------------- Navbar ------------------- */}
       <nav className="fixed top-0 left-0 right-0 z-50 bg-white/80 backdrop-blur-md border-b border-slate-200/60 lg:px-8 px-4 h-16 flex items-center justify-between transition-all duration-300">
         <div className="flex items-center gap-8">
-          {/* Logo */}
-          <Link href="/" className="flex items-center gap-2 group">
-            <div className="relative w-24 h-8">
-              <Image
-                src="/moduly-logo.png"
-                alt="Moduly"
-                fill
-                className="object-contain object-left"
-              />
-            </div>
+          <Link
+            href="/"
+            className="text-xl font-black tracking-tight text-slate-950 transition-colors hover:text-blue-600"
+          >
+            Nodease
           </Link>
 
           {/* Nav Links */}
@@ -858,14 +690,6 @@ export default function LandingPage() {
 
         {/* CTA Buttons */}
         <div className="flex items-center gap-3">
-          <a
-            href="https://github.com/jungle-scope/moduly"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-slate-900 px-3 py-2 transition-colors mr-2"
-          >
-            <Github className="w-5 h-5" />
-          </a>
           <Link
             href="/auth/login"
             className="hidden sm:inline-flex text-sm font-medium text-slate-600 hover:text-slate-900 px-3 py-2 transition-colors"
@@ -891,16 +715,15 @@ export default function LandingPage() {
           </div>
 
           <h1 className="text-5xl md:text-7xl font-bold tracking-tight text-slate-900 mb-6 animate-in fade-in slide-in-from-bottom-8 duration-700">
-            Modular AI System <br className="hidden md:block" />
-            <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-indigo-600">
-              magic.
+            Nodease Enterprise <br className="hidden md:block" />
+            <span className="text-4xl md:text-6xl text-transparent bg-clip-text bg-gradient-to-r from-blue-600 to-indigo-600">
+              AI Workflow Platform
             </span>
           </h1>
 
           <p className="text-lg md:text-xl text-slate-500 max-w-2xl mx-auto mb-10 leading-relaxed animate-in fade-in slide-in-from-bottom-8 duration-700 delay-100">
-            Moduly는 직관적인 노드와 유연한 모듈 시스템으로 강력한 LLM
-            오케스트레이션을 <br />실현합니다. 코딩 없이 복잡한 AI 프로세스를
-            설계하고 비즈니스를 혁신하세요.
+            Nodease는 사내 데이터, LLM, 업무 도구를 노드 기반 워크플로우로 연결합니다. <br/>
+권한 기반 RAG와 LLMOps 기능을 통해 <br/>기업이 AI를 더 안전하고, 빠르고, 안정적으로 운영할 수 있도록 돕습니다.
           </p>
 
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4 animate-in fade-in slide-in-from-bottom-8 duration-700 delay-200">
@@ -948,8 +771,8 @@ export default function LandingPage() {
           <div className="bg-slate-50/50 rounded-b-3xl border-x border-b border-slate-200/60 p-4 md:p-8 min-h-[500px]">
             <div className="relative w-full h-[500px] shadow-2xl shadow-slate-200/50 rounded-xl overflow-hidden bg-white border border-slate-200 transition-all duration-500">
               {/* Content Switcher */}
-              {activeTab === 'rag' && <DataView />}
-              {activeTab === 'nodes' && <NodesView />}
+              {activeTab === 'rag' && <NodesView />}
+              {activeTab === 'nodes' && <AIChatView />}
               {activeTab === 'reporting' && <ReportingView />}
               {activeTab === 'community' && <CommunityView />}
             </div>

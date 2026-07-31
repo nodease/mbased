@@ -2,16 +2,27 @@
 {{- $fullName := include "moduly.fullname" . -}}
 {{- $gatewayServiceName := printf "%s-gateway" $fullName -}}
 {{- $frontendServiceName := printf "%s-frontend" $fullName -}}
+{{- $publicChatTimeoutSeconds := int (required "ingress.publicChatTimeoutSeconds is required" .Values.ingress.publicChatTimeoutSeconds) -}}
+{{- if le $publicChatTimeoutSeconds 600 -}}
+{{- fail "ingress.publicChatTimeoutSeconds must be greater than the 600 second public request deadline" -}}
+{{- end -}}
+{{- $proxyTimeout := printf "%d" $publicChatTimeoutSeconds -}}
+{{- $requiredAnnotations := dict
+  "nginx.ingress.kubernetes.io/proxy-read-timeout" $proxyTimeout
+  "nginx.ingress.kubernetes.io/proxy-send-timeout" $proxyTimeout
+-}}
+{{- $annotations := mergeOverwrite
+  (deepCopy (.Values.ingress.annotations | default dict))
+  $requiredAnnotations
+-}}
 apiVersion: {{ include "moduly.ingress.apiVersion" . }}
 kind: Ingress
 metadata:
   name: {{ $fullName }}
   labels:
     {{- include "moduly.labels" . | nindent 4 }}
-  {{- with .Values.ingress.annotations }}
   annotations:
-    {{- toYaml . | nindent 4 }}
-  {{- end }}
+    {{- toYaml $annotations | nindent 4 }}
 spec:
   {{- if .Values.ingress.className }}
   ingressClassName: {{ .Values.ingress.className }}

@@ -4,6 +4,14 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Dict
 
+from apps.shared.services.connection_runtime_snapshot import (
+    ConnectionRuntimeSnapshotConfigurationInvalid,
+    ConnectionRuntimeSnapshotProvider,
+)
+from apps.shared.services.connection_use_resolver import (
+    ConnectionUseDenied,
+    ConnectionUseUnavailable,
+)
 from apps.shared.services.ingestion.chunkers.adaptive_db_chunker import (
     AdaptiveDbChunker,
 )
@@ -15,6 +23,12 @@ from apps.shared.services.ingestion.transformers.db_nl_transformer import (
     DbNlTransformer,
 )
 from apps.shared.utils.encryption import encryption_manager
+from apps.shared.utils.join_query_utils import (
+    convert_to_namespace,
+    generate_join_query,
+    normalize_query_limit,
+    quote_postgres_identifier,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -25,6 +39,17 @@ class DbProcessor(BaseProcessor):
     외부 DB 연결 정보를 사용하여 SQL을 실행하고,
     결과 Row를 자연어로 변환하여 청킹합니다.
     """
+
+    def __init__(
+        self,
+        db_session=None,
+        user_id=None,
+        organization_id=None,
+        *,
+        connection_snapshot_provider: ConnectionRuntimeSnapshotProvider | None = None,
+    ) -> None:
+        super().__init__(db_session, user_id, organization_id)
+        self.connection_snapshot_provider = connection_snapshot_provider
 
     @staticmethod
     def _convert_to_json_serializable(data: Dict[str, Any]) -> Dict[str, Any]:
@@ -66,88 +91,27 @@ class DbProcessor(BaseProcessor):
             # 또는 meta_info에서 필요한 정보 전달
         }
         """
-        connection_id = source_config.get("connection_id")
-        if not connection_id:
-            return ProcessingResult(
-                chunks=[], metadata={"error": "No connection_id provided"}
+        if self.connection_snapshot_provider is None:
+            return self._connection_lookup_unavailable_result()
+
+        try:
+            connection_snapshot = self.connection_snapshot_provider.load(
+                source_config.get("connection_id"),
+                execution_subject_user_id=self.user_id,
             )
-
-        # DB 연결 정보 조회 (BaseProcessor의 self.db 사용)
-
-        from apps.shared.db.models.connection import Connection
-
-        conn_record = (
-            self.db.query(Connection).filter(Connection.id == connection_id).first()
-        )
-        if not conn_record:
-            return ProcessingResult(
-                chunks=[], metadata={"error": "Connection not found"}
-            )
+        except ConnectionUseDenied:
+            return self._connection_unavailable_result()
+        except ConnectionUseUnavailable:
+            return self._connection_lookup_unavailable_result()
+        except ConnectionRuntimeSnapshotConfigurationInvalid:
+            return self._connection_configuration_invalid_result()
 
         # Connector 인스턴스 생성
-        connector = self._get_connector(conn_record.type)
+        connector = self._get_connector(connection_snapshot.adapter_type)
         if not connector:
-            return ProcessingResult(
-                metadata={"error": f"Unsupported DB type: {conn_record.type}"},
-            )
+            return self._connection_configuration_invalid_result()
 
-        # 연결 설정 복호화
-        try:
-            # 개별 필드에서 설정 구성 및 비밀번호 복호화
-            try:
-                password = encryption_manager.decrypt(conn_record.encrypted_password)
-            except Exception:
-                # Decryption 실패 시 원본 값 사용 (개발 환경 등에서 암호화 안 된 경우)
-                logger.warning(
-                    f"Decryption failed for connection {connection_id}, using raw password"
-                )
-                password = conn_record.encrypted_password
-
-            config_dict = {
-                "host": conn_record.host,
-                "port": conn_record.port,
-                "database": conn_record.database,
-                "username": conn_record.username,
-                "password": password,
-            }
-
-            # SSH 설정 추가
-            if conn_record.use_ssh:
-                ssh_config = {
-                    "enabled": True,
-                    "host": conn_record.ssh_host,
-                    "port": conn_record.ssh_port,
-                    "username": conn_record.ssh_username,
-                    "auth_type": conn_record.ssh_auth_type,
-                }
-
-                # SSH 인증 정보 복호화
-                try:
-                    if conn_record.ssh_auth_type == "key":
-                        ssh_config["private_key"] = encryption_manager.decrypt(
-                            conn_record.encrypted_ssh_private_key
-                        )
-                    else:
-                        ssh_config["password"] = encryption_manager.decrypt(
-                            conn_record.encrypted_ssh_password
-                        )
-                except Exception:
-                    # 복호화 실패 시 원본 값 사용 (개발 환경 등)
-                    logger.warning(
-                        f"SSH Decryption failed for connection {connection_id}, using raw value"
-                    )
-                    if conn_record.ssh_auth_type == "key":
-                        ssh_config["private_key"] = (
-                            conn_record.encrypted_ssh_private_key
-                        )
-                    else:
-                        ssh_config["password"] = conn_record.encrypted_ssh_password
-
-                config_dict["ssh"] = ssh_config
-        except Exception as e:
-            return ProcessingResult(
-                chunks=[], metadata={"error": f"Config setup failed: {str(e)}"}
-            )
+        config_dict = connection_snapshot.to_connector_config()
 
         # 3. 데이터 패칭
         chunks = []
@@ -175,16 +139,13 @@ class DbProcessor(BaseProcessor):
                         "선택한 테이블 간 FK 관계가 없습니다."
                     )
                 
-                logger.info(
-                    f"[DB처리] JOIN 모드: {selections[0]['table_name']} + {selections[1]['table_name']}"
-                )
+                logger.info("[DB처리] JOIN 모드")
                 join_chunks = self._process_with_join(
                     connector,
                     config_dict,
                     selections,
                     join_config,
                     source_config,
-                    conn_record,
                     transformer,
                     chunker,
                 )
@@ -197,21 +158,68 @@ class DbProcessor(BaseProcessor):
                         config_dict,
                         selections,
                         source_config,
-                        conn_record,
                         transformer,
                         chunker,
                     )
                 )
-        except Exception as e:
-            return ProcessingResult(chunks=[], metadata={"error": str(e)})
+        except Exception as exc:
+            error_code = (
+                "configuration_invalid"
+                if isinstance(exc, (KeyError, TypeError, ValueError))
+                else "temporarily_unavailable"
+            )
+            return ProcessingResult(
+                chunks=[],
+                metadata={
+                    "error": "DB source processing failed",
+                    "error_code": error_code,
+                    "reason_code": (
+                        "configuration.invalid"
+                        if error_code == "configuration_invalid"
+                        else "source.temporarily_unavailable"
+                    ),
+                },
+            )
+        return ProcessingResult(chunks=chunks, metadata={"source_type": "DB"})
+
+    @staticmethod
+    def _connection_unavailable_result() -> ProcessingResult:
         return ProcessingResult(
-            chunks=chunks, metadata={"connection_id": str(connection_id)}
+            chunks=[],
+            metadata={
+                "error": "Resource unavailable",
+                "error_code": "configuration_invalid",
+                "reason_code": "resource.hidden",
+            },
+        )
+
+    @staticmethod
+    def _connection_lookup_unavailable_result() -> ProcessingResult:
+        return ProcessingResult(
+            chunks=[],
+            metadata={
+                "error": "Connection lookup unavailable",
+                "error_code": "temporarily_unavailable",
+                "reason_code": "source.temporarily_unavailable",
+            },
+        )
+
+    @staticmethod
+    def _connection_configuration_invalid_result() -> ProcessingResult:
+        return ProcessingResult(
+            chunks=[],
+            metadata={
+                "error": "Connection configuration unavailable",
+                "error_code": "configuration_invalid",
+                "reason_code": "configuration.invalid",
+            },
         )
 
     def _get_connector(self, db_type: str):
         if db_type == "postgres":
             from apps.shared.connectors.postgres import PostgresConnector
 
+            # Knowledge ingestion은 기존 workflow connector와 달리 SSH tunnel을 기본 허용하지 않는다.
             return PostgresConnector()
         # 추후 mysql, oracle 등 추가
         return None
@@ -222,7 +230,6 @@ class DbProcessor(BaseProcessor):
         config_dict,
         selections,
         source_config,
-        conn_record,
         transformer,
         chunker,
     ):
@@ -233,13 +240,23 @@ class DbProcessor(BaseProcessor):
 
         selection = selections[0]
         table_name = selection["table_name"]
-        logger.info(f"[DB처리] 단일 테이블 처리: {table_name}")
+        logger.info("[DB처리] 단일 테이블 처리")
 
         columns = selection.get("columns", ["*"])
-        limit = source_config.get("limit", 1000)
+        if not isinstance(columns, list) or not columns:
+            raise ValueError("columns must be a non-empty list")
+        if "*" in columns and columns != ["*"]:
+            raise ValueError("wildcard must be the only selected column")
+        limit = normalize_query_limit(source_config.get("limit", 1000))
 
-        req_cols = ", ".join(columns)
-        query = f"SELECT {req_cols} FROM {table_name} LIMIT {limit}"
+        req_cols = ", ".join(
+            quote_postgres_identifier(column, allow_wildcard=True)
+            for column in columns
+        )
+        query = (
+            f"SELECT {req_cols} FROM {quote_postgres_identifier(table_name)} "
+            f"LIMIT {limit}"
+        )
 
         # Strategies
         def transform_strategy(row_dict):
@@ -258,7 +275,6 @@ class DbProcessor(BaseProcessor):
             query,
             config_dict,
             selections,
-            conn_record,
             transformer,
             chunker,
             source_config,
@@ -273,19 +289,13 @@ class DbProcessor(BaseProcessor):
         selections,
         join_config,
         source_config,
-        conn_record,
         transformer,
         chunker,
     ):
         """2테이블 JOIN 모드 처리"""
-        from apps.shared.utils.join_query_utils import (
-            convert_to_namespace,
-            generate_join_query,
-        )
-
         limit = source_config.get("limit", 1000)
         query = generate_join_query(selections, join_config, limit)
-        logger.info(f"Generated JOIN query: {query[:200]}...")
+        logger.info("DB JOIN query generated")
 
         # 템플릿 (전역 템플릿 사용)
         template_str = source_config.get("template", None)
@@ -323,7 +333,6 @@ class DbProcessor(BaseProcessor):
             query,
             config_dict,
             selections,
-            conn_record,
             transformer,
             chunker,
             source_config,
@@ -337,7 +346,6 @@ class DbProcessor(BaseProcessor):
         query,
         config_dict,
         selections,
-        conn_record,
         transformer,
         chunker,
         source_config,
@@ -378,7 +386,7 @@ class DbProcessor(BaseProcessor):
 
             # 4. 메타데이터 구성
             metadata = {
-                "source": f"DB:{conn_record.name}:{'JOIN' if len(selections) > 1 else selections[0]['table_name']}",
+                "source": f"DB:{'JOIN' if len(selections) > 1 else selections[0]['table_name']}",
                 "tables": [s["table_name"] for s in selections],
                 "row_index": row_count,
                 "original_data": original_data,
@@ -395,8 +403,11 @@ class DbProcessor(BaseProcessor):
                     enable_chunking=enable_chunking,
                 )
                 chunks.extend(row_chunks)
-            except ValueError as e:
-                logger.error(f"Row {row_count} chunking failed: {e}")
+            except ValueError as exc:
+                logger.error(
+                    "DB row chunking failed: error_type=%s",
+                    type(exc).__name__,
+                )
                 continue
 
         logger.info(f"[DB처리] 완료: {row_count}개 행, {len(chunks)}개 청크")

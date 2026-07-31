@@ -1,0 +1,18 @@
+{{- $storageType := include "moduly.storageType" . -}}
+{{- if and .Values.knowledgeWorker.enabled (eq $storageType "LOCAL") .Values.knowledgeWorker.localStorage.enabled (not .Values.knowledgeWorker.localStorage.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "moduly.knowledgeUploadClaimName" . }}
+  labels:
+    {{- include "moduly.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    {{- toYaml .Values.knowledgeWorker.localStorage.accessModes | nindent 4 }}
+  {{- if .Values.global.storageClass }}
+  storageClassName: {{ .Values.global.storageClass | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.knowledgeWorker.localStorage.size }}
+{{- end }}

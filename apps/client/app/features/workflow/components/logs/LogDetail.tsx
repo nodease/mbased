@@ -2,6 +2,7 @@ import { format } from 'date-fns';
 import { JsonDataDisplay } from './shared/JsonDataDisplay';
 import { ko } from 'date-fns/locale';
 import {
+  LLMTrace,
   WorkflowRun,
 } from '@/app/features/workflow/types/Api';
 import {
@@ -13,7 +14,6 @@ import {
   AlertCircle,
   Upload,
   Download,
-  BookOpen,
 } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import { LogExecutionPath } from './detail-components/LogExecutionPath';
@@ -22,6 +22,8 @@ import { getNodeDisplayInfo } from './shared/nodeDisplayInfo';
 import { getNodeDuration } from './shared/nodeUtils';
 import { CollapsibleSection } from './shared/CollapsibleSection';
 import { NodeOptionsDisplay } from './shared/NodeOptionsDisplay';
+import { workflowApi } from '../../api/workflowApi';
+import { ModelRoutingDecisionDetails } from '../modelRouting/ModelRoutingDecisionDetails';
 
 interface LogDetailProps {
   run: WorkflowRun;
@@ -90,6 +92,9 @@ export const LogDetail = ({
   compactMode = false,
 }: LogDetailProps) => {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [llmTraces, setLlmTraces] = useState<LLMTrace[]>([]);
+  const [llmTraceLoading, setLlmTraceLoading] = useState(false);
+  const [llmTraceError, setLlmTraceError] = useState(false);
   const nodeRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
 
   const selectedNode =
@@ -105,20 +110,60 @@ export const LogDetail = ({
     }
   }, [selectedNode?.node_id]);
 
-  // Calculate actual total tokens and cost from node runs
-  const { totalTokens, totalCost } = (run.node_runs || []).reduce(
-    (acc, node) => {
-      const usage = (node.outputs as any)?.usage;
-      if (usage) {
-        acc.totalTokens += usage.total_tokens || 0;
-        if (typeof (node.outputs as any)?.cost === 'number') {
-          acc.totalCost += (node.outputs as any).cost;
-        }
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadLlmTraces = async () => {
+      try {
+        setLlmTraces([]);
+        setLlmTraceLoading(true);
+        setLlmTraceError(false);
+        const response = await workflowApi.getWorkflowRunLlmTraces(
+          run.workflow_id,
+          run.id,
+          { limit: 500 },
+        );
+        if (cancelled) return;
+        setLlmTraces(response.items);
+      } catch {
+        if (cancelled) return;
+        setLlmTraces([]);
+        setLlmTraceError(true);
+      } finally {
+        if (!cancelled) setLlmTraceLoading(false);
       }
-      return acc;
-    },
-    { totalTokens: 0, totalCost: 0 },
-  );
+    };
+
+    loadLlmTraces();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [run.id, run.workflow_id]);
+
+  const hasTraceRows = llmTraces.length > 0;
+  const { totalTokens, totalCost } = hasTraceRows
+    ? llmTraces.reduce(
+        (acc, trace) => {
+          acc.totalTokens += trace.total_tokens || 0;
+          acc.totalCost += Number(trace.total_cost || 0);
+          return acc;
+        },
+        { totalTokens: 0, totalCost: 0 },
+      )
+    : (run.node_runs || []).reduce(
+        (acc, node) => {
+          const usage = (node.outputs as any)?.usage;
+          if (usage) {
+            acc.totalTokens += usage.total_tokens || 0;
+            if (typeof (node.outputs as any)?.cost === 'number') {
+              acc.totalCost += (node.outputs as any).cost;
+            }
+          }
+          return acc;
+        },
+        { totalTokens: 0, totalCost: 0 },
+      );
 
   return (
     <div className="flex flex-col h-full overflow-y-auto p-1">
@@ -187,7 +232,13 @@ export const LogDetail = ({
       </div>
 
       {/* 2. Token Analysis Sections */}
-      <LogTokenAnalysis run={run} onNodeSelect={setSelectedNodeId} />
+      <LogTokenAnalysis
+        run={run}
+        llmTraces={llmTraces}
+        loading={llmTraceLoading}
+        error={llmTraceError}
+        onNodeSelect={setSelectedNodeId}
+      />
 
       {/* 3. Visual Execution Path */}
       <div className="mb-6">
@@ -231,8 +282,8 @@ export const LogDetail = ({
                         {displayInfo.label}
                       </span>
                       <span className={`text-[9px] px-1 py-0.5 rounded ${
-                        node.status === 'success' 
-                          ? 'bg-green-100 text-green-700' 
+                        node.status === 'success'
+                          ? 'bg-green-100 text-green-700'
                           : node.status === 'running'
                           ? 'bg-blue-100 text-blue-700'
                           : 'bg-red-100 text-red-700'
@@ -259,6 +310,12 @@ export const LogDetail = ({
                     options={selectedNode.process_data.node_options}
                   />
                 )}
+                {selectedNode.node_type === 'llmNode' ? (
+                  <ModelRoutingDecisionDetails
+                    output={selectedNode.outputs}
+                    traceMetadata={selectedNode.trace_metadata}
+                  />
+                ) : null}
                 <InputDataSection data={selectedNode.inputs} />
                 <OutputDataSection data={selectedNode.outputs} />
                 {selectedNode.error_message && (
@@ -349,6 +406,12 @@ export const LogDetail = ({
                     options={selectedNode.process_data.node_options}
                   />
                 )}
+                {selectedNode.node_type === 'llmNode' ? (
+                  <ModelRoutingDecisionDetails
+                    output={selectedNode.outputs}
+                    traceMetadata={selectedNode.trace_metadata}
+                  />
+                ) : null}
                 <InputDataSection data={selectedNode.inputs} />
                 <OutputDataSection data={selectedNode.outputs} />
                 {selectedNode.error_message && (

@@ -1,0 +1,104 @@
+name: Test Knowledge PostgreSQL Contracts
+
+on:
+  workflow_call:
+  push:
+    branches:
+      - dev
+    paths:
+      - "apps/gateway/adapters/db/knowledge_document_ingestion_repository.py"
+      - "apps/gateway/adapters/db/sqlalchemy_unit_of_work.py"
+      - "apps/gateway/application/knowledge_document_ingestion/**"
+      - "apps/gateway/composition/knowledge_document_ingestion*.py"
+      - "apps/gateway/knowledge_ingestion_tasks.py"
+      - "apps/gateway/services/ingestion/job_runner.py"
+      - "apps/gateway/tests/adapters/db/test_knowledge_document_ingestion_repository_postgres.py"
+      - "apps/shared/alembic/**"
+      - "apps/shared/db/models/knowledge.py"
+      - "apps/shared/domain/knowledge_document_ingestion.py"
+      - "apps/shared/domain/knowledge_runtime_candidates.py"
+      - "apps/shared/services/knowledge_document_ingestion_*.py"
+      - "apps/shared/services/knowledge_ingestion_*.py"
+      - "apps/shared/services/knowledge_permission_service.py"
+      - "apps/shared/tests/db/test_knowledge_runtime_snapshot_disposable_postgres.py"
+      - "apps/shared/tests/domain/test_knowledge_runtime_candidates.py"
+      - "apps/shared/tests/services/test_knowledge_permission_runtime_bulk.py"
+      - "apps/workflow_engine/adapters/knowledge_runtime_candidates.py"
+      - "apps/workflow_engine/adapters/rag_retrieval_connection_acquirer.py"
+      - "apps/workflow_engine/adapters/rag_retrieval_executor.py"
+      - "apps/workflow_engine/adapters/rag_retrieval_session.py"
+      - "apps/workflow_engine/application/rag_retrieval_fanout.py"
+      - "apps/workflow_engine/application/runtime_retrieval/**"
+      - "apps/workflow_engine/composition/runtime_retrieval.py"
+      - "apps/workflow_engine/tests/adapters/test_postgres_knowledge_runtime_candidate_adapter.py"
+      - "apps/workflow_engine/tests/adapters/test_rag_retrieval_session_postgres.py"
+      - ".github/workflows/test-knowledge-runtime-postgres.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  knowledge-runtime-postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DB_HOST: 127.0.0.1
+      DB_PORT: "5432"
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      NODEASE_DISPOSABLE_DB_MAINTENANCE_DB: postgres
+      NODEASE_RUN_DISPOSABLE_DB_TEST: "1"
+      PYTHONPATH: ${{ github.workspace }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+
+      - name: Install Knowledge runtime test dependencies
+        run: |
+          uv sync --project apps/workflow_engine --extra dev --frozen
+          uv pip install --python apps/workflow_engine/.venv/bin/python -e apps/shared
+
+      - name: Install Knowledge ingestion test dependencies
+        run: |
+          uv venv .venv-ci-knowledge-ingestion --python 3.11
+          uv pip install --python .venv-ci-knowledge-ingestion/bin/python \
+            -e apps/shared \
+            -e "apps/gateway[dev]"
+
+      - name: Run durable Knowledge ingestion SQL contracts
+        run: >-
+          .venv-ci-knowledge-ingestion/bin/python -m pytest
+          apps/gateway/tests/adapters/db/test_knowledge_document_ingestion_repository_postgres.py
+          -q
+
+      - name: Run Knowledge runtime SQL contracts
+        run: >-
+          apps/workflow_engine/.venv/bin/python -m pytest
+          apps/shared/tests/db/test_knowledge_runtime_snapshot_disposable_postgres.py
+          apps/workflow_engine/tests/adapters/test_postgres_knowledge_runtime_candidate_adapter.py
+          apps/workflow_engine/tests/adapters/test_rag_retrieval_session_postgres.py
+          -q

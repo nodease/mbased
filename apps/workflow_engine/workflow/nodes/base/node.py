@@ -1,6 +1,10 @@
+import copy
 import logging
 from abc import ABC, abstractmethod
 from typing import Any, Dict, Generic, TypeVar, final
+
+from apps.workflow_engine.domain.execution import NodeExecutionControl
+from apps.workflow_engine.domain.external_effect import ExternalEffectError
 
 from .entities import BaseNodeData, NodeStatus
 
@@ -26,9 +30,16 @@ class Node(ABC, Generic[NodeDataT]):
         self.data = data
         self.execution_context = execution_context or {}
         self.status = NodeStatus.IDLE
+        self.runtime_node_type = self.node_type
+        self._runtime_control: NodeExecutionControl | None = None
 
     @final
-    def execute(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+    def execute(
+        self,
+        inputs: Dict[str, Any],
+        *,
+        runtime_control: NodeExecutionControl | None = None,
+    ) -> Dict[str, Any]:
         """
         [Template Method Pattern]
         실제 실행 흐름을 제어합니다. (로그 남기기, 상태 변경 등)
@@ -36,21 +47,86 @@ class Node(ABC, Generic[NodeDataT]):
 
         [GEVENT] 동기 메서드로 변환 - gevent pool 호환성을 위해
         """
-        logger.info(f"[{self.node_type}] 노드 실행 시작: {self.data.title}")
+        logger.info("[%s] node execution started", self.runtime_node_type)
         self.status = NodeStatus.RUNNING
+        self._runtime_control = runtime_control
 
         try:
             # 실제 비즈니스 로직 실행 (하위 클래스에 위임)
             outputs = self._run(inputs)
 
             self.status = NodeStatus.COMPLETED
-            logger.info(f"[{self.node_type}] 실행 성공!")
+            logger.info("[%s] node execution succeeded", self.runtime_node_type)
             return outputs
 
         except Exception as e:
             self.status = NodeStatus.FAILED
-            logger.info(f"[{self.node_type}] 실행 실패: {str(e)}")
-            raise e
+            error_code = getattr(e, "code", "node_error")
+            logger.info(
+                "[%s] node execution failed: code=%s error_type=%s",
+                self.runtime_node_type,
+                error_code,
+                type(e).__name__,
+            )
+            raise
+        finally:
+            self._runtime_control = None
+
+    def _run_external_effect(self, adapter, payload: Any) -> Any:
+        control = self._runtime_control
+        try:
+            if control is None:
+                # Direct node unit usage remains available; WorkflowEngine always supplies
+                # a control object and therefore cannot bypass the durable boundary.
+                return adapter.invoke_effect(
+                    adapter.finalize_provider_call(
+                        adapter.prepare_effect(payload), None
+                    )
+                ).output
+            context = control.external_effect_context
+            if context is None:
+                raise ExternalEffectError(
+                    "external_effect.identity_invalid",
+                    retryable=False,
+                    node_id=self.id,
+                )
+            from apps.workflow_engine.composition.external_effect import (
+                build_external_effect_executor,
+            )
+
+            executor = build_external_effect_executor(
+                task_deadline=lambda: control.task_deadline,
+            )
+            return executor.execute(context=context, adapter=adapter, payload=payload)
+        finally:
+            self._capture_provider_trace(adapter)
+
+    def _capture_provider_trace(self, adapter) -> None:
+        metadata = getattr(adapter, "trace_metadata", None)
+        self._trace_metadata = (
+            copy.deepcopy(metadata) if isinstance(metadata, dict) else {}
+        )
+
+    def _guard_read_only_effect_slot(self) -> None:
+        control = self._runtime_control
+        if control is None:
+            return
+        context = control.external_effect_context
+        if context is None:
+            if not control.external_effect_enforced:
+                return
+            raise ExternalEffectError(
+                "external_effect.identity_invalid",
+                retryable=False,
+                node_id=self.id,
+            )
+        from apps.workflow_engine.composition.external_effect import (
+            build_external_effect_executor,
+        )
+
+        build_external_effect_executor(
+            task_deadline=lambda: control.task_deadline,
+        ).guard_read_only_slot(context=context)
 
     @abstractmethod
     def _run(self, inputs: Dict[str, Any]) -> Dict[str, Any]:

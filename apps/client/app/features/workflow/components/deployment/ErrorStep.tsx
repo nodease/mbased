@@ -27,7 +27,7 @@ export function ErrorStep({ message, onRetry, onClose }: ErrorStepProps) {
       </div>
 
       <div className="p-6">
-        <p className="text-gray-700 text-sm">{message}</p>
+        <p className="whitespace-pre-line text-gray-700 text-sm">{message}</p>
       </div>
 
       <div className="px-6 py-4 bg-gray-50 flex justify-end gap-3">

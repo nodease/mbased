@@ -1,0 +1,966 @@
+name: PR Quality Gate
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-quality-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  BASE_SHA: ${{ github.event.pull_request.base.sha }}
+  HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+  PYTHON_VERSION: "3.11"
+
+jobs:
+  scope:
+    name: change-scope
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      ci_control_changed: ${{ steps.ci_control.outputs.changed }}
+      dockerfile_config_changed: ${{ steps.ci_control.outputs.dockerfile_config_changed }}
+      docs_only: ${{ steps.scope_outputs.outputs.docs_only }}
+      python_lint: ${{ steps.scope_outputs.outputs.python_lint }}
+      client: ${{ steps.scope_outputs.outputs.client }}
+      gateway_tests: ${{ steps.scope_outputs.outputs.gateway_tests }}
+      gateway_job: ${{ steps.scope_outputs.outputs.gateway_job }}
+      workflow_tests: ${{ steps.scope_outputs.outputs.workflow_tests }}
+      shared_tests: ${{ steps.scope_outputs.outputs.shared_tests }}
+      log_tests: ${{ steps.scope_outputs.outputs.log_tests }}
+      sandbox_tests: ${{ steps.scope_outputs.outputs.sandbox_tests }}
+      root_tests: ${{ steps.scope_outputs.outputs.root_tests }}
+      memory_tests: ${{ steps.scope_outputs.outputs.memory_tests }}
+      knowledge_postgres: ${{ steps.scope_outputs.outputs.knowledge_postgres }}
+      workflow_postgres: ${{ steps.scope_outputs.outputs.workflow_postgres }}
+      agent_builder_postgres: ${{ steps.scope_outputs.outputs.agent_builder_postgres }}
+      memory_postgres: ${{ steps.scope_outputs.outputs.memory_postgres }}
+      deployment_validation: ${{ steps.scope_outputs.outputs.deployment_validation }}
+      actions_validation: ${{ steps.scope_outputs.outputs.actions_validation }}
+      helm_validation: ${{ steps.scope_outputs.outputs.helm_validation }}
+      support_surface_validation: ${{ steps.scope_outputs.outputs.support_surface_validation }}
+      compose_validation: ${{ steps.scope_outputs.outputs.compose_validation }}
+      egress_proxy_validation: ${{ steps.scope_outputs.outputs.egress_proxy_validation }}
+      dockerfile_validation: ${{ steps.scope_outputs.outputs.dockerfile_validation }}
+      broad_python: ${{ steps.scope_outputs.outputs.broad_python }}
+    steps:
+      - name: Checkout pull request merge
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Enforce supported deployment execution closure
+        run: python -m scripts.ci.check_supported_deployment_surface
+
+      - name: Validate ADR registry
+        run: python -m scripts.ci.check_adr_registry
+
+      - name: Detect CI control changes outside the selector
+        id: ci_control
+        shell: bash
+        run: |
+          changed=false
+          dockerfile_config_changed=false
+          while IFS= read -r -d '' path; do
+            case "$path" in
+              .github/workflows/pr-ci-control-guard.yml)
+                changed=true
+                ;;
+              .github/workflows/pr-quality-gate.yml)
+                changed=true
+                ;;
+              .github/workflows/test-knowledge-runtime-postgres.yml)
+                changed=true
+                ;;
+              .github/workflows/test-schedule-dispatch-postgres.yml)
+                changed=true
+                ;;
+              .github/workflows/test-agent-builder-postgres.yml)
+                changed=true
+                ;;
+              .github/workflows/test-memory-postgres.yml)
+                changed=true
+                ;;
+              .github/actions/*|scripts/ci/*|tests/ci/*)
+                changed=true
+                ;;
+            esac
+            case "$path" in
+              */Dockerfile|Dockerfile|*/Dockerfile.*|Dockerfile.*|*.Dockerfile)
+                dockerfile_config_changed=true
+                ;;
+            esac
+          done < <(git diff --name-only --no-renames -z "$BASE_SHA" "$HEAD_SHA" --)
+          {
+            echo "changed=$changed"
+            echo "dockerfile_config_changed=$dockerfile_config_changed"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Classify changed paths
+        id: classify
+        run: >-
+          python -m scripts.ci.changed_scope
+          --base "$BASE_SHA"
+          --head "$HEAD_SHA"
+          --github-output "$GITHUB_OUTPUT"
+
+      - name: Fail closed for CI control changes
+        id: scope_outputs
+        shell: bash
+        env:
+          CI_CONTROL_CHANGED: ${{ steps.ci_control.outputs.changed }}
+          CLASSIFIED_DOCS_ONLY: ${{ steps.classify.outputs.docs_only }}
+          CLASSIFIED_PYTHON_LINT: ${{ steps.classify.outputs.python_lint }}
+          CLASSIFIED_CLIENT: ${{ steps.classify.outputs.client }}
+          CLASSIFIED_GATEWAY_TESTS: ${{ steps.classify.outputs.gateway_tests }}
+          CLASSIFIED_GATEWAY_JOB: ${{ steps.classify.outputs.gateway_job }}
+          CLASSIFIED_WORKFLOW_TESTS: ${{ steps.classify.outputs.workflow_tests }}
+          CLASSIFIED_SHARED_TESTS: ${{ steps.classify.outputs.shared_tests }}
+          CLASSIFIED_LOG_TESTS: ${{ steps.classify.outputs.log_tests }}
+          CLASSIFIED_SANDBOX_TESTS: ${{ steps.classify.outputs.sandbox_tests }}
+          CLASSIFIED_ROOT_TESTS: ${{ steps.classify.outputs.root_tests }}
+          CLASSIFIED_MEMORY_TESTS: ${{ steps.classify.outputs.memory_tests }}
+          CLASSIFIED_KNOWLEDGE_POSTGRES: ${{ steps.classify.outputs.knowledge_postgres }}
+          CLASSIFIED_WORKFLOW_POSTGRES: ${{ steps.classify.outputs.workflow_postgres }}
+          CLASSIFIED_AGENT_BUILDER_POSTGRES: ${{ steps.classify.outputs.agent_builder_postgres }}
+          CLASSIFIED_MEMORY_POSTGRES: ${{ steps.classify.outputs.memory_postgres }}
+          CLASSIFIED_DEPLOYMENT_VALIDATION: ${{ steps.classify.outputs.deployment_validation }}
+          CLASSIFIED_ACTIONS_VALIDATION: ${{ steps.classify.outputs.actions_validation }}
+          CLASSIFIED_HELM_VALIDATION: ${{ steps.classify.outputs.helm_validation }}
+          CLASSIFIED_SUPPORT_SURFACE_VALIDATION: ${{ steps.classify.outputs.support_surface_validation }}
+          CLASSIFIED_COMPOSE_VALIDATION: ${{ steps.classify.outputs.compose_validation }}
+          CLASSIFIED_EGRESS_PROXY_VALIDATION: ${{ steps.classify.outputs.egress_proxy_validation }}
+          CLASSIFIED_DOCKERFILE_VALIDATION: ${{ steps.classify.outputs.dockerfile_validation }}
+          CLASSIFIED_BROAD_PYTHON: ${{ steps.classify.outputs.broad_python }}
+        run: |
+          emit_boolean() {
+            local name="$1"
+            local value="$2"
+            if [[ "$value" != "true" && "$value" != "false" ]]; then
+              echo "::error::$name output is missing or invalid"
+              exit 1
+            fi
+            printf '%s=%s\n' "$name" "$value" >> "$GITHUB_OUTPUT"
+          }
+
+          if [[ "$CI_CONTROL_CHANGED" == "true" ]]; then
+            emit_boolean docs_only false
+            emit_boolean python_lint true
+            emit_boolean client true
+            emit_boolean gateway_tests true
+            emit_boolean gateway_job true
+            emit_boolean workflow_tests true
+            emit_boolean shared_tests true
+            emit_boolean log_tests true
+            emit_boolean sandbox_tests true
+            emit_boolean root_tests true
+            emit_boolean memory_tests true
+            emit_boolean knowledge_postgres true
+            emit_boolean workflow_postgres true
+            emit_boolean agent_builder_postgres true
+            emit_boolean memory_postgres true
+            emit_boolean deployment_validation true
+            emit_boolean actions_validation true
+            emit_boolean helm_validation true
+            emit_boolean support_surface_validation true
+            emit_boolean compose_validation true
+            emit_boolean egress_proxy_validation true
+            emit_boolean dockerfile_validation true
+            emit_boolean broad_python true
+            exit 0
+          fi
+
+          emit_boolean docs_only "$CLASSIFIED_DOCS_ONLY"
+          emit_boolean python_lint "$CLASSIFIED_PYTHON_LINT"
+          emit_boolean client "$CLASSIFIED_CLIENT"
+          emit_boolean gateway_tests "$CLASSIFIED_GATEWAY_TESTS"
+          emit_boolean gateway_job "$CLASSIFIED_GATEWAY_JOB"
+          emit_boolean workflow_tests "$CLASSIFIED_WORKFLOW_TESTS"
+          emit_boolean shared_tests "$CLASSIFIED_SHARED_TESTS"
+          emit_boolean log_tests "$CLASSIFIED_LOG_TESTS"
+          emit_boolean sandbox_tests "$CLASSIFIED_SANDBOX_TESTS"
+          emit_boolean root_tests "$CLASSIFIED_ROOT_TESTS"
+          emit_boolean memory_tests "$CLASSIFIED_MEMORY_TESTS"
+          emit_boolean knowledge_postgres "$CLASSIFIED_KNOWLEDGE_POSTGRES"
+          emit_boolean workflow_postgres "$CLASSIFIED_WORKFLOW_POSTGRES"
+          emit_boolean agent_builder_postgres "$CLASSIFIED_AGENT_BUILDER_POSTGRES"
+          emit_boolean memory_postgres "$CLASSIFIED_MEMORY_POSTGRES"
+          emit_boolean deployment_validation "$CLASSIFIED_DEPLOYMENT_VALIDATION"
+          emit_boolean actions_validation "$CLASSIFIED_ACTIONS_VALIDATION"
+          emit_boolean helm_validation "$CLASSIFIED_HELM_VALIDATION"
+          emit_boolean support_surface_validation "$CLASSIFIED_SUPPORT_SURFACE_VALIDATION"
+          emit_boolean compose_validation "$CLASSIFIED_COMPOSE_VALIDATION"
+          emit_boolean egress_proxy_validation "$CLASSIFIED_EGRESS_PROXY_VALIDATION"
+          emit_boolean dockerfile_validation "$CLASSIFIED_DOCKERFILE_VALIDATION"
+          emit_boolean broad_python "$CLASSIFIED_BROAD_PYTHON"
+
+  alembic_graph:
+    name: alembic-single-head
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout pull request merge
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Validate Alembic revision graph
+        run: python scripts/ci/check_alembic_graph.py
+
+  python_lint:
+    name: python-lint
+    needs: scope
+    if: needs.scope.outputs.python_lint == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout pull request merge
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: true
+
+      - name: Lint changed Python files
+        shell: bash
+        run: |
+          mapfile -d '' files < <(
+            python -m scripts.ci.changed_scope \
+              --base "$BASE_SHA" \
+              --head "$HEAD_SHA" \
+              --python-files0
+          )
+          if (( ${#files[@]} == 0 )); then
+            echo "No existing changed Python files require linting."
+            exit 0
+          fi
+          uvx --from ruff==0.15.20 ruff check -- "${files[@]}"
+
+  client:
+    name: client-quality
+    needs: scope
+    if: needs.scope.outputs.client == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: apps/client
+    steps:
+      - name: Checkout pull request merge
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: apps/client/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run ESLint
+        run: npm run lint
+
+      - name: Run TypeScript typecheck
+        run: npm run typecheck
+
+      - name: Run tests affected by the pull request
+        run: npm run test -- --changed="$BASE_SHA" --passWithNoTests
+
+      - name: Run Client smoke test for CI control changes
+        if: needs.scope.outputs.broad_python == 'true'
+        run: npm run test -- proxy.test.ts
+
+      - name: Build Client
+        run: npm run build
+
+  gateway_tests:
+    name: gateway-and-root-tests
+    needs: scope
+    if: needs.scope.outputs.gateway_job == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+    steps:
+      - name: Checkout pull request merge
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            apps/gateway/pyproject.toml
+            apps/shared/pyproject.toml
+
+      - name: Install Gateway test dependencies
+        run: |
+          uv venv .venv-ci --python "$PYTHON_VERSION"
+          uv pip install --python .venv-ci/bin/python \
+            -e apps/shared \
+            -e "apps/gateway[dev]"
+
+      - name: Run selected Gateway tests
+        if: needs.scope.outputs.gateway_tests == 'true'
+        run: >-
+          python -m scripts.ci.select_pytest_targets
+          --component gateway
+          --base "$BASE_SHA"
+          --head "$HEAD_SHA"
+          --broad "${{ needs.scope.outputs.broad_python }}"
+          --run-with .venv-ci/bin/python
+
+      - name: Run selected root tests
+        if: needs.scope.outputs.root_tests == 'true'
+        run: >-
+          python -m scripts.ci.select_pytest_targets
+          --component root
+          --base "$BASE_SHA"
+          --head "$HEAD_SHA"
+          --broad "${{ needs.scope.outputs.broad_python }}"
+          --run-with .venv-ci/bin/python
+
+  workflow_tests:
+    name: workflow-engine-tests
+    needs: scope
+    if: needs.scope.outputs.workflow_tests == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+    steps:
+      - name: Checkout pull request merge
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: true
+
+      - name: Install Workflow Engine test dependencies
+        run: |
+          uv sync --project apps/workflow_engine --extra dev --frozen
+          uv pip install \
+            --python apps/workflow_engine/.venv/bin/python \
+            -e apps/shared
+
+      - name: Run selected Workflow Engine tests
+        run: >-
+          python -m scripts.ci.select_pytest_targets
+          --component workflow_engine
+          --base "$BASE_SHA"
+          --head "$HEAD_SHA"
+          --broad "${{ needs.scope.outputs.broad_python }}"
+          --run-with apps/workflow_engine/.venv/bin/python
+
+  shared_tests:
+    name: shared-tests
+    needs: scope
+    if: needs.scope.outputs.shared_tests == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+    steps:
+      - name: Checkout pull request merge
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: apps/shared/pyproject.toml
+
+      - name: Install Shared test dependencies
+        run: |
+          uv venv .venv-ci-shared --python "$PYTHON_VERSION"
+          uv pip install --python .venv-ci-shared/bin/python \
+            -e apps/shared \
+            pytest==9.1.1 \
+            pytest-asyncio==1.4.0
+
+      - name: Run selected Shared tests
+        run: >-
+          python -m scripts.ci.select_pytest_targets
+          --component shared
+          --base "$BASE_SHA"
+          --head "$HEAD_SHA"
+          --broad "${{ needs.scope.outputs.broad_python }}"
+          --run-with .venv-ci-shared/bin/python
+
+  memory_tests:
+    name: memory-tests
+    needs: scope
+    if: needs.scope.outputs.memory_tests == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+    steps:
+      - name: Checkout pull request merge
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: apps/shared/pyproject.toml
+
+      - name: Install Memory test dependencies
+        run: |
+          uv venv .venv-ci-memory --python "$PYTHON_VERSION"
+          uv pip install --python .venv-ci-memory/bin/python \
+            -e apps/shared \
+            pytest==9.1.1
+
+      - name: Run selected Memory tests
+        run: >-
+          python -m scripts.ci.select_pytest_targets
+          --component memory
+          --base "$BASE_SHA"
+          --head "$HEAD_SHA"
+          --broad "${{ needs.scope.outputs.broad_python }}"
+          --run-with .venv-ci-memory/bin/python
+
+  log_tests:
+    name: log-system-tests
+    needs: scope
+    if: needs.scope.outputs.log_tests == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+    steps:
+      - name: Checkout pull request merge
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: true
+
+      - name: Install Log System test dependencies
+        run: |
+          uv sync --project apps/log_system --extra dev --frozen
+          uv pip install \
+            --python apps/log_system/.venv/bin/python \
+            -e apps/shared
+
+      - name: Run selected Log System tests
+        run: >-
+          python -m scripts.ci.select_pytest_targets
+          --component log_system
+          --base "$BASE_SHA"
+          --head "$HEAD_SHA"
+          --broad "${{ needs.scope.outputs.broad_python }}"
+          --run-with apps/log_system/.venv/bin/python
+
+  sandbox_tests:
+    name: sandbox-tests
+    needs: scope
+    if: needs.scope.outputs.sandbox_tests == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+    steps:
+      - name: Checkout pull request merge
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: apps/sandbox/pyproject.toml
+
+      - name: Install Sandbox test dependencies
+        run: |
+          uv venv .venv-ci-sandbox --python "$PYTHON_VERSION"
+          uv pip install --python .venv-ci-sandbox/bin/python \
+            -e "apps/sandbox[dev]"
+
+      - name: Run selected Sandbox tests
+        run: >-
+          python -m scripts.ci.select_pytest_targets
+          --component sandbox
+          --base "$BASE_SHA"
+          --head "$HEAD_SHA"
+          --broad "${{ needs.scope.outputs.broad_python }}"
+          --run-with .venv-ci-sandbox/bin/python
+
+  deployment_validation:
+    name: deployment-config-validation
+    needs: scope
+    if: needs.scope.outputs.deployment_validation == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout pull request merge
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go for deployment validators
+        if: >-
+          needs.scope.outputs.actions_validation == 'true' ||
+          needs.scope.outputs.helm_validation == 'true' ||
+          needs.scope.outputs.egress_proxy_validation == 'true'
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: "1.25.x"
+          cache: false
+
+      - name: Set up Python for deployment contract tests
+        if: >-
+          needs.scope.outputs.helm_validation == 'true' ||
+          needs.scope.outputs.egress_proxy_validation == 'true' ||
+          needs.scope.outputs.dockerfile_validation == 'true'
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install uv for deployment contract tests
+        if: >-
+          needs.scope.outputs.helm_validation == 'true' ||
+          needs.scope.outputs.egress_proxy_validation == 'true' ||
+          needs.scope.outputs.dockerfile_validation == 'true'
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: true
+
+      - name: Install deployment contract test dependencies
+        if: >-
+          needs.scope.outputs.helm_validation == 'true' ||
+          needs.scope.outputs.egress_proxy_validation == 'true' ||
+          needs.scope.outputs.dockerfile_validation == 'true'
+        run: |
+          uv venv .venv-ci-deployment --python "$PYTHON_VERSION"
+          uv pip install --python .venv-ci-deployment/bin/python \
+            pytest==9.1.1 \
+            PyYAML==6.0.3
+
+      - name: Validate GitHub Actions workflows
+        if: needs.scope.outputs.actions_validation == 'true'
+        env:
+          CI_CONTROL_CHANGED: ${{ needs.scope.outputs.ci_control_changed }}
+        run: |
+          mapfile -d '' changed_workflow_files < <(
+            git diff --name-only --no-renames --diff-filter=ACMR -z \
+              "$BASE_SHA" "$HEAD_SHA" -- \
+              '.github/workflows/*.yml' \
+              '.github/workflows/*.yaml'
+          )
+          if [[ "$CI_CONTROL_CHANGED" == "true" ]]; then
+            workflow_files=(
+              '.github/workflows/pr-quality-gate.yml'
+              '.github/workflows/pr-ci-control-guard.yml'
+              '.github/workflows/test-knowledge-runtime-postgres.yml'
+              '.github/workflows/test-schedule-dispatch-postgres.yml'
+              '.github/workflows/test-agent-builder-postgres.yml'
+              '.github/workflows/test-memory-postgres.yml'
+            )
+          else
+            workflow_files=()
+          fi
+          workflow_files+=("${changed_workflow_files[@]}")
+
+          declare -A seen_workflow_files=()
+          unique_workflow_files=()
+          for path in "${workflow_files[@]}"; do
+            if [[ -z "$path" || ! -f "$path" || -n "${seen_workflow_files[$path]+x}" ]]; then
+              continue
+            fi
+            seen_workflow_files["$path"]=1
+            unique_workflow_files+=("$path")
+          done
+          workflow_files=("${unique_workflow_files[@]}")
+
+          if (( ${#workflow_files[@]} == 0 )); then
+            echo "No changed workflow files to validate."
+            exit 0
+          fi
+          go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12 "${workflow_files[@]}"
+
+      - name: Validate composite action metadata
+        if: needs.scope.outputs.actions_validation == 'true'
+        uses: mpalmer/action-validator@c994f427b7c42cd5ecb1bc9315cb91c3d7d72e3d # v0.9.0
+        with:
+          version: "0.9.0"
+          patterns: |
+            tests/ci/fixtures/composite-action-smoke/action.yml
+            :(glob).github/actions/**/action.yml
+            :(glob).github/actions/**/action.yaml
+
+      - name: Set up Helm
+        if: >-
+          needs.scope.outputs.helm_validation == 'true' ||
+          needs.scope.outputs.egress_proxy_validation == 'true'
+        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310 # v5.0.1
+
+      - name: Validate Helm chart
+        if: needs.scope.outputs.helm_validation == 'true'
+        run: |
+          chart_lock="infra/helm/moduly/Chart.lock"
+          if ! git ls-files --error-unmatch -- "$chart_lock" > /dev/null 2>&1 || \
+            [[ ! -f "$chart_lock" || -L "$chart_lock" ]]; then
+            echo "::error::$chart_lock must remain a tracked regular file."
+            exit 1
+          fi
+          helm repo add bitnami https://charts.bitnami.com/bitnami
+          helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+          helm dependency build infra/helm/moduly
+          git diff --exit-code -- "$chart_lock"
+          helm lint infra/helm/moduly \
+            -f tests/ci/fixtures/helm-values-ci.yaml
+          helm lint infra/helm/moduly \
+            -f infra/helm/moduly/values-production.yaml \
+            -f tests/ci/fixtures/helm-values-ci.yaml
+          validate_rendered_chart() {
+            local rendered_manifest
+            rendered_manifest="$(mktemp)"
+            helm template nodease-ci infra/helm/moduly "$@" > "$rendered_manifest"
+            go run github.com/yannh/kubeconform/cmd/kubeconform@v0.7.0 \
+              -strict \
+              -summary \
+              -kubernetes-version 1.31.0 \
+              "$rendered_manifest"
+            rm -f "$rendered_manifest"
+          }
+          validate_rendered_chart \
+            -f tests/ci/fixtures/helm-values-ci.yaml
+          validate_rendered_chart \
+            -f infra/helm/moduly/values-production.yaml \
+            -f tests/ci/fixtures/helm-values-ci.yaml
+          assert_invalid_storage_configuration() {
+            local invalid_override="$1"
+            local safe_field="$2"
+            if helm template nodease-invalid-storage infra/helm/moduly \
+              -f infra/helm/moduly/values-production.yaml \
+              -f tests/ci/fixtures/helm-values-ci.yaml \
+              --set-string "$invalid_override" > /dev/null 2>&1; then
+              echo "::error::Helm accepted invalid cloud storage field: $safe_field"
+              exit 1
+            fi
+          }
+          assert_invalid_storage_configuration "storage.type=REMOTE" "storage.type"
+          assert_invalid_storage_configuration "storage.bucketName=" "storage.bucketName"
+          assert_invalid_storage_configuration "storage.region=" "storage.region"
+          assert_invalid_storage_configuration \
+            "gateway.env.STORAGE_TYPE=CLOUD" "gateway.env.STORAGE_TYPE"
+          assert_invalid_storage_configuration \
+            "worker.env.S3_BUCKET_NAME=legacy-bucket" "worker.env.S3_BUCKET_NAME"
+
+      - name: Run Helm deployment contract tests
+        if: needs.scope.outputs.helm_validation == 'true'
+        env:
+          NODEASE_RUN_HELM_INTEGRATION_TESTS: "1"
+        run: >-
+          .venv-ci-deployment/bin/python -m pytest
+          tests/ci/test_supported_deployment_surface.py
+          tests/ci/test_storage_deployment_contract.py
+          -q
+
+      - name: Prepare Helm dependencies for egress-only validation
+        if: >-
+          needs.scope.outputs.egress_proxy_validation == 'true' &&
+          needs.scope.outputs.helm_validation != 'true'
+        run: |
+          helm repo add bitnami https://charts.bitnami.com/bitnami
+          helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+          helm dependency build infra/helm/moduly
+
+      - name: Create pinned kind and Calico policy cluster
+        if: needs.scope.outputs.egress_proxy_validation == 'true'
+        env:
+          KIND_NODE_IMAGE: kindest/node:v1.32.11@sha256:5fc52d52a7b9574015299724bd68f183702956aa4a2116ae75a63cb574b35af8
+          CALICO_MANIFEST_URL: https://raw.githubusercontent.com/projectcalico/calico/0ca9d1b93644778cafdf1812f3dda02ac0c361e8/manifests/calico.yaml
+        run: |
+          go install sigs.k8s.io/kind@v0.31.0
+          "$(go env GOPATH)/bin/kind" create cluster \
+            --name nodease-egress-ci \
+            --image "$KIND_NODE_IMAGE" \
+            --config tests/ci/fixtures/egress-proxy/kind-calico.yaml
+          curl --fail --location --proto '=https' --tlsv1.2 \
+            "$CALICO_MANIFEST_URL" \
+            --output /tmp/nodease-calico.yaml
+          kubectl apply --server-side --force-conflicts \
+            --field-manager=nodease-egress-ci \
+            --filename /tmp/nodease-calico.yaml
+          kubectl rollout status daemonset/calico-node \
+            --namespace kube-system \
+            --timeout=240s
+          kubectl rollout status deployment/calico-kube-controllers \
+            --namespace kube-system \
+            --timeout=240s
+          kubectl wait --for=condition=Ready nodes --all --timeout=120s
+
+      - name: Reject unsupported or unapproved deployment surface
+        if: needs.scope.outputs.support_surface_validation == 'true'
+        run: python -m scripts.ci.check_supported_deployment_surface
+
+      - name: Validate Docker Compose configurations
+        if: needs.scope.outputs.compose_validation == 'true'
+        shell: bash
+        env:
+          ENCRYPTION_KEY: ci-validation-placeholder
+          MASTER_KEY: ci-validation-placeholder
+        run: |
+          mapfile -d '' compose_paths < <(
+            git ls-files -z -- \
+              ':(glob)**/compose.yml' \
+              ':(glob)**/compose.yaml' \
+              ':(glob)**/compose.*.yml' \
+              ':(glob)**/compose.*.yaml' \
+              ':(glob)**/docker-compose.yml' \
+              ':(glob)**/docker-compose.yaml' \
+              ':(glob)**/docker-compose.*.yml' \
+              ':(glob)**/docker-compose.*.yaml'
+          )
+          if (( ${#compose_paths[@]} == 0 )); then
+            echo "::error::Compose validation was selected without a tracked Compose file."
+            exit 1
+          fi
+
+          validated=0
+          for path in "${compose_paths[@]}"; do
+            directory="$(dirname "$path")"
+            file_name="$(basename "$path")"
+            base_path=""
+            is_variant=false
+
+            case "$file_name" in
+              compose.*.yml|compose.*.yaml)
+                is_variant=true
+                for candidate in "$directory/compose.yml" "$directory/compose.yaml"; do
+                  if [[ -f "$candidate" ]]; then
+                    base_path="$candidate"
+                    break
+                  fi
+                done
+                ;;
+              docker-compose.*.yml|docker-compose.*.yaml)
+                is_variant=true
+                for candidate in \
+                  "$directory/docker-compose.yml" \
+                  "$directory/docker-compose.yaml"; do
+                  if [[ -f "$candidate" ]]; then
+                    base_path="$candidate"
+                    break
+                  fi
+                done
+                ;;
+            esac
+
+            if [[ "$is_variant" == "true" && -z "$base_path" ]]; then
+              echo "::error::$path has no matching base Compose file."
+              exit 1
+            fi
+
+            if [[ -n "$base_path" ]]; then
+            docker compose --profile "*" --file "$base_path" --file "$path" config --quiet
+            else
+              docker compose --file "$path" config --quiet
+            fi
+            validated=$((validated + 1))
+          done
+          echo "Validated $validated tracked Compose configuration(s)."
+
+      - name: Run egress proxy runtime contracts
+        if: needs.scope.outputs.egress_proxy_validation == 'true'
+        env:
+          NODEASE_RUN_EGRESS_PROXY_INTEGRATION: "1"
+          NODEASE_RUN_EGRESS_PROXY_KUBERNETES: "1"
+        run: >-
+          .venv-ci-deployment/bin/python -m pytest
+          tests/ci/test_egress_proxy_runtime.py
+          tests/ci/test_egress_proxy_kubernetes.py
+          -q
+
+      - name: Validate changed Dockerfiles
+        if: needs.scope.outputs.dockerfile_validation == 'true'
+        shell: bash
+        env:
+          CI_CONTROL_CHANGED: ${{ needs.scope.outputs.ci_control_changed }}
+          DOCKERFILE_CONFIG_CHANGED: ${{ needs.scope.outputs.dockerfile_config_changed }}
+        run: |
+          if [[ \
+            "$CI_CONTROL_CHANGED" == "true" && \
+            "$DOCKERFILE_CONFIG_CHANGED" != "true" \
+          ]]; then
+            dockerfile_paths=("tests/ci/fixtures/dockerfile-smoke/Dockerfile")
+          else
+            mapfile -d '' dockerfile_paths < <(
+              git diff --name-only --no-renames -z "$BASE_SHA" "$HEAD_SHA" --
+            )
+          fi
+          selected=0
+          validated=0
+          for path in "${dockerfile_paths[@]}"; do
+            case "$(basename "$path")" in
+              Dockerfile|Dockerfile.*|*.Dockerfile)
+                selected=$((selected + 1))
+                if [[ -f "$path" ]]; then
+                  docker build --check \
+                    --build-arg "BUILDKIT_DOCKERFILE_CHECK=error=true" \
+                    --file "$path" .
+                  validated=$((validated + 1))
+                fi
+                ;;
+            esac
+          done
+          if (( selected == 0 )); then
+            echo "::error::Dockerfile validation was selected without a changed Dockerfile."
+            exit 1
+          fi
+          echo "Validated $validated existing Dockerfile(s); deleted files: $((selected - validated))."
+
+      - name: Run Dockerfile deployment contract tests
+        if: needs.scope.outputs.dockerfile_validation == 'true'
+        run: >-
+          .venv-ci-deployment/bin/python -m pytest
+          tests/ci/test_demo_seed_image_contract.py
+          tests/ci/test_tokenizer_runtime_contract.py
+          -q
+
+  knowledge_postgres:
+    name: knowledge-postgres-contracts
+    needs: scope
+    if: needs.scope.outputs.knowledge_postgres == 'true'
+    uses: ./.github/workflows/test-knowledge-runtime-postgres.yml
+
+  workflow_postgres:
+    name: workflow-postgres-contracts
+    needs: scope
+    if: needs.scope.outputs.workflow_postgres == 'true'
+    uses: ./.github/workflows/test-schedule-dispatch-postgres.yml
+
+  agent_builder_postgres:
+    name: agent-builder-postgres-contracts
+    needs: scope
+    if: needs.scope.outputs.agent_builder_postgres == 'true'
+    uses: ./.github/workflows/test-agent-builder-postgres.yml
+
+  memory_postgres:
+    name: memory-postgres-contracts
+    needs: scope
+    if: needs.scope.outputs.memory_postgres == 'true'
+    uses: ./.github/workflows/test-memory-postgres.yml
+
+  ci_required:
+    name: ci-required
+    if: always()
+    needs:
+      - scope
+      - alembic_graph
+      - python_lint
+      - client
+      - gateway_tests
+      - workflow_tests
+      - shared_tests
+      - memory_tests
+      - log_tests
+      - sandbox_tests
+      - deployment_validation
+      - knowledge_postgres
+      - workflow_postgres
+      - agent_builder_postgres
+      - memory_postgres
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout pull request merge
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Evaluate required job results
+        run: >-
+          python scripts/ci/evaluate_job_results.py
+          --required "scope=${{ needs.scope.result }}"
+          --required "alembic-graph=${{ needs.alembic_graph.result }}"
+          --conditional "python-lint=${{ needs.scope.outputs.python_lint }}=${{ needs.python_lint.result }}"
+          --conditional "client=${{ needs.scope.outputs.client }}=${{ needs.client.result }}"
+          --conditional "gateway=${{ needs.scope.outputs.gateway_job }}=${{ needs.gateway_tests.result }}"
+          --conditional "workflow-engine=${{ needs.scope.outputs.workflow_tests }}=${{ needs.workflow_tests.result }}"
+          --conditional "shared=${{ needs.scope.outputs.shared_tests }}=${{ needs.shared_tests.result }}"
+          --conditional "memory=${{ needs.scope.outputs.memory_tests }}=${{ needs.memory_tests.result }}"
+          --conditional "log-system=${{ needs.scope.outputs.log_tests }}=${{ needs.log_tests.result }}"
+          --conditional "sandbox=${{ needs.scope.outputs.sandbox_tests }}=${{ needs.sandbox_tests.result }}"
+          --conditional "deployment-validation=${{ needs.scope.outputs.deployment_validation }}=${{ needs.deployment_validation.result }}"
+          --conditional "knowledge-postgres=${{ needs.scope.outputs.knowledge_postgres }}=${{ needs.knowledge_postgres.result }}"
+          --conditional "workflow-postgres=${{ needs.scope.outputs.workflow_postgres }}=${{ needs.workflow_postgres.result }}"
+          --conditional "agent-builder-postgres=${{ needs.scope.outputs.agent_builder_postgres }}=${{ needs.agent_builder_postgres.result }}"
+          --conditional "memory-postgres=${{ needs.scope.outputs.memory_postgres }}=${{ needs.memory_postgres.result }}"

@@ -1,0 +1,13 @@
+name: Composite Action Smoke
+description: Validates the composite action metadata contract.
+inputs:
+  message:
+    description: Message to print.
+    required: false
+    default: ci
+runs:
+  using: composite
+  steps:
+    - name: Print message
+      shell: bash
+      run: printf '%s\n' "${{ inputs.message }}"

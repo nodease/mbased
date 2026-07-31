@@ -1,0 +1,380 @@
+{
+  "version": 3,
+  "capability_contracts": {
+    "start_input": {"description": "manual user input entry", "planner_aliases": ["입력", "입력 노드", "start", "input"], "standalone_creation": "allowed"},
+    "webhook_trigger": {"description": "receive a webhook request", "planner_aliases": ["웹훅", "웹 훅", "webhook"], "standalone_creation": "allowed"},
+    "schedule_trigger": {"description": "start on a schedule", "planner_aliases": ["스케줄", "일정", "알람", "schedule", "cron"], "standalone_creation": "allowed"},
+    "llm": {"description": "analyze, summarize, review, or generate text with an LLM", "planner_aliases": ["llm", "언어 모델", "ai 모델"], "standalone_creation": "allowed"},
+    "knowledge_backed_llm": {"description": "use Knowledge Base evidence in an LLM step", "planner_aliases": ["지식 베이스 llm", "knowledge base llm", "rag", "문서 기반 llm"], "standalone_creation": "allowed"},
+    "workflow_call": {"description": "call another workflow", "planner_aliases": ["워크플로우 호출", "하위 워크플로우", "workflow call", "subworkflow"], "standalone_creation": "allowed"},
+    "code_execution": {"description": "run code in the sandbox", "planner_aliases": ["코드 실행", "코드", "파이썬", "code", "python"], "standalone_creation": "allowed"},
+    "condition": {"description": "branch on a condition", "planner_aliases": ["조건", "분기", "if/else", "condition"], "standalone_creation": "requires_context"},
+    "file_extraction": {"description": "extract text from a file", "planner_aliases": ["문서 추출", "파일 추출", "file extraction"], "standalone_creation": "requires_context"},
+    "variable_extraction": {"description": "extract structured variables", "planner_aliases": ["변수 추출", "json 추출", "variable extraction"], "standalone_creation": "requires_context"},
+    "answer": {"description": "return a result to the workflow caller or user", "planner_aliases": ["응답", "출력", "answer", "output"], "standalone_creation": "allowed"},
+    "loop": {"description": "iterate over values", "planner_aliases": ["반복", "루프", "loop"], "standalone_creation": "forbidden"},
+    "http_request": {"description": "call a REST or HTTP API", "planner_aliases": ["http 요청", "rest api", "api 호출", "http request"], "standalone_creation": "allowed"},
+    "slack_send": {"description": "send a Slack message", "planner_aliases": ["슬랙", "slack"], "standalone_creation": "allowed"},
+    "template_render": {"description": "render a template", "planner_aliases": ["템플릿", "template"], "standalone_creation": "allowed"},
+    "github_pr_read": {"description": "read a GitHub pull request", "planner_aliases": ["깃허브 pr 조회", "github pr read", "pr 조회", "diff 조회"], "standalone_creation": "allowed"},
+    "github_pr_comment": {"description": "write a comment to a GitHub pull request", "planner_aliases": ["깃허브 pr 댓글", "github pr comment", "pr 댓글", "리뷰 등록"], "standalone_creation": "allowed"},
+    "mail_search": {"description": "search or read email", "planner_aliases": ["메일 검색", "이메일 검색", "mail search", "email search"], "standalone_creation": "allowed"},
+    "gmail_reply_draft_create": {"description": "create a Gmail reply draft without sending it", "planner_aliases": ["gmail 답장 초안", "지메일 답장 초안", "gmail reply draft"], "standalone_creation": "requires_context"},
+    "mail_terminal_acknowledgement": {"description": "mark the source email handled after required effects succeed", "planner_aliases": ["메일 처리 완료", "mail acknowledge", "mail processing complete"], "standalone_creation": "requires_context"}
+  },
+  "nodes": [
+    {
+      "node_type": "startNode",
+      "implemented": true,
+      "agent_builder_supported": true,
+      "connection_policy": {"role": "entry", "incoming": "forbidden", "outgoing": "allowed", "outgoing_handles": "standard"},
+      "capabilities": ["start_input"],
+      "outputs": [{"capability": "start_input", "mode": "parameter_names", "parameter_key": "variables", "name_key": "name", "value_type": "unknown"}],
+      "side_effect": "none",
+      "required_configuration": [],
+      "parameters": [
+        {"key": "variables", "label": "입력 변수", "input_type": "json", "required": false, "defer_policy": "forbidden", "default": []}
+      ]
+    },
+    {
+      "node_type": "webhookTrigger",
+      "implemented": true,
+      "agent_builder_supported": true,
+      "connection_policy": {"role": "entry", "incoming": "forbidden", "outgoing": "allowed", "outgoing_handles": "standard"},
+      "capabilities": ["webhook_trigger"],
+      "outputs": [{"capability": "webhook_trigger", "mode": "parameter_names", "parameter_key": "variable_mappings", "name_key": "variable_name", "value_type": "unknown"}],
+      "side_effect": "none",
+      "required_configuration": [],
+      "parameters": [
+        {"key": "variable_mappings", "label": "Webhook 변수 매핑", "input_type": "json", "required": false, "defer_policy": "forbidden", "default": []}
+      ]
+    },
+    {
+      "node_type": "scheduleTrigger",
+      "implemented": true,
+      "agent_builder_supported": true,
+      "connection_policy": {"role": "entry", "incoming": "forbidden", "outgoing": "allowed", "outgoing_handles": "standard"},
+      "capabilities": ["schedule_trigger"],
+      "outputs": [{"capability": "schedule_trigger", "mode": "static", "keys": ["triggered_at", "schedule_id"], "value_type": "text"}],
+      "side_effect": "none",
+      "required_configuration": ["cron_expression", "timezone"],
+      "configuration_labels": {
+        "cron_expression": "실행 일정",
+        "timezone": "Timezone"
+      },
+      "parameters": [
+        {"key": "cron_expression", "label": "실행 일정", "input_type": "text", "required": true, "defer_policy": "forbidden", "validation": {"min_length": 1, "max_length": 255}},
+        {"key": "timezone", "label": "Timezone", "input_type": "text", "required": true, "defer_policy": "forbidden", "default": "UTC", "validation": {"min_length": 1, "max_length": 64}}
+      ]
+    },
+    {
+      "node_type": "llmNode",
+      "implemented": true,
+      "agent_builder_supported": true,
+      "connection_policy": {"role": "intermediate", "incoming": "allowed", "outgoing": "allowed", "outgoing_handles": "standard"},
+      "capabilities": ["llm", "knowledge_backed_llm"],
+      "outputs": [
+        {"capability": "llm", "mode": "static", "keys": ["text"], "value_type": "text"},
+        {"capability": "knowledge_backed_llm", "mode": "static", "keys": ["text"], "value_type": "text"}
+      ],
+      "side_effect": "external_read",
+      "required_configuration": ["model_id"],
+      "required_any_configuration": [
+        {"key": "prompt", "parameters": ["system_prompt", "user_prompt", "assistant_prompt"]}
+      ],
+      "configuration_labels": {"model_id": "LLM model", "prompt": "LLM prompt"},
+      "parameters": [
+        {"key": "model_id", "label": "LLM model", "input_type": "resource_ref", "required": true, "defer_policy": "allow_unresolved"},
+        {"key": "output_format_type", "label": "출력 형식", "input_type": "select", "required": false, "defer_policy": "forbidden", "default": "text", "validation": {"options": ["text", "json"], "option_labels": {"text": "Text", "json": "JSON"}}, "reason": "LLM 응답 형식을 선택합니다.", "input_guidance": "일반 텍스트 또는 JSON 형식을 선택하세요."},
+        {"key": "output_json_schema", "label": "JSON Schema", "input_type": "json", "required": false, "defer_policy": "forbidden", "default": {}, "validation": {"visible_when": {"parameter_key": "output_format_type", "equals": "json"}}, "reason": "JSON 응답 구조를 제한할 때 Schema를 사용할 수 있습니다.", "input_guidance": "필요한 경우 JSON Schema를 입력하세요. 비워두어도 JSON object로 응답합니다."},
+        {"key": "system_prompt", "label": "시스템 프롬프트", "input_type": "textarea", "required": false, "defer_policy": "forbidden", "default": "", "reason": "LLM의 역할과 응답 원칙을 지정합니다.", "input_guidance": "시스템 지침을 입력하거나 현재 추천값을 유지하세요."},
+        {"key": "user_prompt", "label": "사용자 프롬프트", "input_type": "textarea", "required": false, "defer_policy": "forbidden", "default": "", "reason": "LLM에 전달할 사용자 요청 템플릿을 지정합니다.", "input_guidance": "사용자 프롬프트를 입력하거나 이전 node 출력 연결을 사용하세요."},
+        {"key": "assistant_prompt", "label": "어시스턴트 프롬프트", "input_type": "textarea", "required": false, "defer_policy": "forbidden", "default": "", "reason": "이전 assistant 응답 문맥이 필요할 때 사용합니다.", "input_guidance": "필요한 경우 assistant 프롬프트를 입력하세요."},
+        {"key": "referenced_variables", "label": "이전 node 출력 연결", "input_type": "variable_selector_list", "required": false, "defer_policy": "forbidden", "default": [], "reason": "이전 node의 출력을 LLM 프롬프트 변수로 연결합니다.", "input_guidance": "사용할 이전 node 출력이 있으면 선택하세요."},
+        {"key": "citationDisplayMode", "label": "인용 표시", "input_type": "select", "required": false, "defer_policy": "forbidden", "default": "detailed", "apply_default_to_existing": false, "validation": {"options": ["hidden", "basic", "detailed"], "option_labels": {"hidden": "표시 안 함", "basic": "기본", "detailed": "상세"}}, "reason": "사용자 응답에 근거 문서 인용을 어느 수준으로 표시할지 정합니다.", "input_guidance": "표시 안 함, 기본, 상세 중에서 선택하세요."},
+        {"key": "auto_model_routing", "label": "자동 모델 라우팅", "input_type": "boolean", "required": false, "defer_policy": "forbidden", "default": false, "reason": "요청마다 사용할 모델을 자동으로 선택할지 결정합니다.", "input_guidance": "자동 모델 라우팅 사용 여부를 확인하세요."},
+        {"key": "fallback_model_id", "label": "Fallback model", "input_type": "resource_ref", "required": false, "defer_policy": "forbidden", "agent_builder_task": false, "reason": "기본 모델을 사용할 수 없을 때 대체할 모델을 지정합니다.", "input_guidance": "기본 모델과 다른 대체 모델을 선택하거나 건너뛰세요."},
+        {"key": "model_routing_refresh_every_runs", "label": "Routing 갱신 주기", "input_type": "number", "required": false, "defer_policy": "forbidden", "agent_builder_task": false, "default": 20, "validation": {"integer": true, "min": 5, "max": 100}, "reason": "모델 라우팅 정책을 다시 평가할 실행 횟수를 정합니다.", "input_guidance": "5회에서 100회 사이의 실행 횟수를 입력하세요."},
+        {"key": "model_routing_validation_budget_usd", "label": "Routing 검증 예산", "input_type": "number", "required": false, "defer_policy": "forbidden", "agent_builder_task": false, "default": 3.0, "validation": {"min": 0.5, "max": 10.0}, "reason": "라우팅 후보를 검증할 최대 비용을 정합니다.", "input_guidance": "0.5달러에서 10달러 사이의 예산을 입력하세요."},
+        {"key": "model_routing_max_cohorts", "label": "Routing 최대 cohort", "input_type": "number", "required": false, "defer_policy": "forbidden", "agent_builder_task": false, "default": 6, "validation": {"integer": true, "min": 1, "max": 12}, "reason": "라우팅 검증에서 비교할 최대 cohort 수를 정합니다.", "input_guidance": "1개에서 12개 사이의 cohort 수를 입력하세요."},
+        {"key": "knowledgeBases", "label": "Knowledge Bases", "input_type": "resource_ref", "required": false, "defer_policy": "forbidden"}
+      ]
+    },
+    {
+      "node_type": "workflowNode",
+      "implemented": true,
+      "agent_builder_supported": true,
+      "connection_policy": {"role": "intermediate", "incoming": "allowed", "outgoing": "allowed", "outgoing_handles": "standard"},
+      "capabilities": ["workflow_call"],
+      "outputs": [{"capability": "workflow_call", "mode": "static", "keys": ["result"], "value_type": "unknown"}],
+      "side_effect": "local_execution",
+      "required_configuration": ["appId"],
+      "configuration_labels": {
+        "workflowId": "Target workflow",
+        "appId": "Target app"
+      },
+      "parameters": [
+        {"key": "workflowId", "label": "Target workflow", "input_type": "resource_ref", "required": false, "defer_policy": "allow_unresolved"},
+        {"key": "appId", "label": "Target app", "input_type": "resource_ref", "required": true, "defer_policy": "allow_unresolved"}
+      ]
+    },
+    {
+      "node_type": "codeNode",
+      "implemented": true,
+      "agent_builder_supported": true,
+      "connection_policy": {"role": "intermediate", "incoming": "allowed", "outgoing": "allowed", "outgoing_handles": "standard"},
+      "capabilities": ["code_execution"],
+      "outputs": [{"capability": "code_execution", "mode": "static", "keys": ["result"], "value_type": "unknown"}],
+      "side_effect": "local_execution",
+      "required_configuration": ["code"],
+      "configuration_labels": {"code": "실행 코드"},
+      "parameters": [
+        {"key": "code", "label": "실행 코드", "input_type": "code", "required": true, "defer_policy": "forbidden", "validation": {"min_length": 1, "max_length": 100000}}
+      ]
+    },
+    {
+      "node_type": "conditionNode",
+      "implemented": true,
+      "agent_builder_supported": true,
+      "connection_policy": {"role": "branch", "incoming": "allowed", "outgoing": "allowed", "outgoing_handles": "condition_cases"},
+      "capabilities": ["condition"],
+      "outputs": [{"capability": "condition", "mode": "static", "keys": ["selected_handle", "matched_case_id"], "value_type": "unknown"}],
+      "side_effect": "none",
+      "required_configuration": ["cases"],
+      "configuration_labels": {"cases": "분기 조건"},
+      "parameters": [
+        {"key": "cases", "label": "분기 조건", "input_type": "json", "required": true, "defer_policy": "forbidden"}
+      ]
+    },
+    {
+      "node_type": "fileExtractionNode",
+      "implemented": true,
+      "agent_builder_supported": true,
+      "connection_policy": {"role": "intermediate", "incoming": "allowed", "outgoing": "allowed", "outgoing_handles": "standard"},
+      "capabilities": ["file_extraction"],
+      "outputs": [{"capability": "file_extraction", "mode": "parameter_names", "parameter_key": "referenced_variables", "name_key": "name", "value_type": "text"}],
+      "side_effect": "none",
+      "required_configuration": ["referenced_variables"],
+      "configuration_labels": {"referenced_variables": "입력 파일"},
+      "parameters": [
+        {"key": "referenced_variables", "label": "입력 파일", "input_type": "variable_selector", "required": true, "defer_policy": "forbidden"}
+      ]
+    },
+    {
+      "node_type": "variableExtractionNode",
+      "implemented": true,
+      "agent_builder_supported": true,
+      "connection_policy": {"role": "intermediate", "incoming": "allowed", "outgoing": "allowed", "outgoing_handles": "standard"},
+      "capabilities": ["variable_extraction"],
+      "outputs": [{"capability": "variable_extraction", "mode": "parameter_names", "parameter_key": "mappings", "name_key": "name", "value_type": "unknown"}],
+      "side_effect": "none",
+      "required_configuration": ["source_selector", "mappings"],
+      "configuration_labels": {
+        "source_selector": "입력 변수",
+        "mappings": "추출 규칙"
+      },
+      "parameters": [
+        {"key": "source_selector", "label": "입력 변수", "input_type": "variable_selector", "required": true, "defer_policy": "forbidden"},
+        {"key": "mappings", "label": "추출 규칙", "input_type": "json", "required": true, "defer_policy": "forbidden"}
+      ]
+    },
+    {
+      "node_type": "answerNode",
+      "implemented": true,
+      "agent_builder_supported": true,
+      "connection_policy": {"role": "terminal", "incoming": "allowed", "outgoing": "forbidden", "outgoing_handles": "standard"},
+      "capabilities": ["answer"],
+      "outputs": [{"capability": "answer", "mode": "parameter_names", "parameter_key": "outputs", "name_key": "variable", "value_type": "unknown"}],
+      "side_effect": "none",
+      "required_configuration": ["outputs"],
+      "configuration_labels": {"outputs": "응답 출력"},
+      "parameters": [
+        {"key": "outputs", "label": "응답 출력", "input_type": "json", "required": true, "defer_policy": "forbidden"}
+      ]
+    },
+    {
+      "node_type": "loopNode",
+      "implemented": true,
+      "agent_builder_supported": false,
+      "connection_policy": {"role": "branch", "incoming": "allowed", "outgoing": "allowed", "outgoing_handles": "unrestricted"},
+      "capabilities": ["loop"],
+      "outputs": [{"capability": "loop", "mode": "static", "keys": ["results"], "value_type": "array"}],
+      "side_effect": "local_execution",
+      "required_configuration": ["subGraph"],
+      "configuration_labels": {
+        "loop_key": "반복 대상",
+        "subGraph": "반복 내부 workflow"
+      },
+      "parameters": [
+        {"key": "loop_key", "label": "반복 대상", "input_type": "text", "required": false, "defer_policy": "forbidden"},
+        {"key": "subGraph", "label": "반복 내부 workflow", "input_type": "json", "required": true, "defer_policy": "forbidden"}
+      ]
+    },
+    {
+      "node_type": "httpRequestNode",
+      "implemented": true,
+      "agent_builder_supported": true,
+      "connection_policy": {"role": "intermediate", "incoming": "allowed", "outgoing": "allowed", "outgoing_handles": "standard"},
+      "capabilities": ["http_request"],
+      "outputs": [{"capability": "http_request", "mode": "static", "keys": ["status", "headers", "data"], "value_type": "unknown"}],
+      "side_effect": "external_write",
+      "required_configuration": ["url"],
+      "configuration_labels": {"url": "Request URL"},
+      "parameters": [
+        {"key": "url", "label": "Request URL", "input_type": "text", "required": true, "defer_policy": "allow_unresolved", "sensitivity": "secret_forbidden", "validation": {"min_length": 8, "max_length": 2048, "pattern": "https?://.+"}}
+      ]
+    },
+    {
+      "node_type": "slackPostNode",
+      "implemented": true,
+      "agent_builder_supported": true,
+      "connection_policy": {"role": "intermediate", "incoming": "allowed", "outgoing": "allowed", "outgoing_handles": "standard"},
+      "capabilities": ["slack_send"],
+      "outputs": [{"capability": "slack_send", "mode": "static", "keys": ["status", "headers", "data"], "value_type": "unknown"}],
+      "side_effect": "external_write",
+      "required_configuration": [],
+      "required_any_configuration": [
+        {"key": "payload", "parameters": ["message", "blocks", "attachments"]}
+      ],
+      "configuration_labels": {
+        "bot_token": "Bot Token",
+        "url": "Webhook URL",
+        "channel": "Slack channel",
+        "payload": "Slack message payload"
+      },
+      "parameters": [
+        {"key": "slackMode", "label": "Slack 전송 방식", "input_type": "select", "required": false, "defer_policy": "forbidden", "default": "api", "reason": "Slack 메시지를 보낼 방식을 선택합니다.", "input_guidance": "Bot Token으로 전송하려면 Slack API, Incoming Webhook URL로 전송하려면 Incoming Webhook을 선택하세요.", "validation": {"options": ["api", "webhook"], "option_labels": {"api": "Slack API", "webhook": "Incoming Webhook"}}},
+        {"key": "bot_token", "label": "Bot Token", "input_type": "secret", "required": false, "defer_policy": "allow_unresolved", "sensitivity": "secret_forbidden", "reason": "Slack API 방식에 사용할 Bot Token을 설정합니다.", "input_guidance": "Slack API 방식을 선택한 경우에만 입력하세요. 기존 값은 표시되지 않으며 새 입력으로 교체됩니다.", "validation": {"min_length": 1, "max_length": 4096, "visible_when": {"parameter_key": "slackMode", "equals": "api"}, "required_when": {"parameter_key": "slackMode", "equals": "api"}}},
+        {"key": "url", "label": "Webhook URL", "input_type": "secret", "required": false, "defer_policy": "allow_unresolved", "sensitivity": "secret_forbidden", "reason": "Incoming Webhook 방식에 사용할 URL을 설정합니다.", "input_guidance": "Incoming Webhook 방식을 선택한 경우에만 입력하세요. 기존 값은 표시되지 않으며 새 입력으로 교체됩니다.", "validation": {"min_length": 8, "max_length": 2048, "pattern": "https?://.+", "visible_when": {"parameter_key": "slackMode", "equals": "webhook"}, "required_when": {"parameter_key": "slackMode", "equals": "webhook"}}},
+        {"key": "channel", "label": "Slack channel", "input_type": "text", "required": false, "defer_policy": "allow_unresolved", "reason": "Slack API 방식으로 메시지를 보낼 대상 채널을 설정합니다.", "input_guidance": "Slack API 방식을 선택한 경우 채널 이름 또는 채널 ID를 입력하세요.", "validation": {"min_length": 1, "max_length": 255, "visible_when": {"parameter_key": "slackMode", "equals": "api"}, "required_when": {"parameter_key": "slackMode", "equals": "api"}}},
+        {"key": "message", "label": "메시지", "input_type": "textarea", "required": false, "defer_policy": "forbidden", "reason": "Slack으로 보낼 메시지 내용을 확인합니다.", "input_guidance": "이전 노드 출력은 생성된 {{result}} 같은 변수를 메시지에 넣어 사용합니다. {{result}}는 해당 노드의 referenced_variables에 연결된 이전 노드 출력을 의미합니다.", "validation": {"max_length": 40000}},
+        {"key": "blocks", "label": "Blocks", "input_type": "json", "required": false, "defer_policy": "forbidden", "reason": "선택적으로 Slack Block Kit JSON 배열을 설정합니다.", "input_guidance": "사용하지 않으면 빈 상태로 적용하거나 건너뛰세요. 입력할 때는 JSON 배열을 사용하세요."},
+        {"key": "attachments", "label": "Attachments", "input_type": "json", "required": false, "defer_policy": "forbidden", "reason": "선택적으로 Slack attachment JSON 배열을 설정합니다.", "input_guidance": "사용하지 않으면 빈 상태로 적용하거나 건너뛰세요. 입력할 때는 JSON 배열을 사용하세요."},
+        {"key": "thread_ts", "label": "Thread timestamp", "input_type": "text", "required": false, "defer_policy": "forbidden", "validation": {"max_length": 64}},
+        {"key": "username", "label": "표시 이름", "input_type": "text", "required": false, "defer_policy": "forbidden", "validation": {"max_length": 80}},
+        {"key": "icon_emoji", "label": "아이콘 이모지", "input_type": "text", "required": false, "defer_policy": "forbidden", "validation": {"max_length": 80}}
+      ]
+    },
+    {
+      "node_type": "templateNode",
+      "implemented": true,
+      "agent_builder_supported": true,
+      "connection_policy": {"role": "intermediate", "incoming": "allowed", "outgoing": "allowed", "outgoing_handles": "standard"},
+      "capabilities": ["template_render"],
+      "outputs": [{"capability": "template_render", "mode": "static", "keys": ["text"], "value_type": "text"}],
+      "side_effect": "none",
+      "required_configuration": ["template"],
+      "configuration_labels": {"template": "Template"},
+      "parameters": [
+        {"key": "template", "label": "Template", "input_type": "textarea", "required": true, "defer_policy": "forbidden"}
+      ]
+    },
+    {
+      "node_type": "githubNode",
+      "implemented": true,
+      "agent_builder_supported": true,
+      "connection_policy": {"role": "intermediate", "incoming": "allowed", "outgoing": "allowed", "outgoing_handles": "standard"},
+      "capabilities": ["github_pr_read", "github_pr_comment"],
+      "outputs": [
+        {"capability": "github_pr_read", "mode": "static", "keys": ["pr_title", "pr_body", "pr_state", "pr_number", "files_count", "files", "diff_url"], "value_type": "unknown"},
+        {"capability": "github_pr_comment", "mode": "static", "keys": ["comment_id", "comment_url", "comment_body"], "value_type": "unknown"}
+      ],
+      "side_effect": "external_write",
+      "required_configuration": ["action", "api_token", "repo_owner", "repo_name", "pr_number"],
+      "configuration_labels": {
+        "action": "GitHub 작업",
+        "api_token": "GitHub API Token",
+        "repo_owner": "Repository owner",
+        "repo_name": "Repository name",
+        "pr_number": "PR 번호",
+        "comment_body": "댓글 내용"
+      },
+      "parameters": [
+        {"key": "action", "label": "GitHub 작업", "input_type": "select", "required": true, "defer_policy": "forbidden", "default": "get_pr", "validation": {"options": ["get_pr", "comment_pr"], "option_labels": {"get_pr": "PR 조회", "comment_pr": "PR 댓글 등록"}}},
+        {"key": "api_token", "label": "GitHub API Token", "input_type": "secret", "required": true, "defer_policy": "allow_unresolved", "sensitivity": "secret_forbidden", "reason": "GitHub API 요청에 사용할 Token을 설정합니다.", "input_guidance": "기존 값은 표시되지 않으며 새 입력으로 교체됩니다.", "validation": {"min_length": 1, "max_length": 4096}},
+        {"key": "repo_owner", "label": "Repository owner", "input_type": "text", "required": true, "defer_policy": "allow_unresolved"},
+        {"key": "repo_name", "label": "Repository name", "input_type": "text", "required": true, "defer_policy": "allow_unresolved"},
+        {"key": "pr_number", "label": "PR 번호", "input_type": "number", "required": true, "defer_policy": "allow_unresolved", "reason": "조회하거나 댓글을 등록할 Pull Request 번호를 설정합니다.", "input_guidance": "PR 번호를 1 이상의 정수로 입력하세요.", "validation": {"min": 1, "integer": true}},
+        {"key": "comment_body", "label": "댓글 내용", "input_type": "textarea", "required": false, "defer_policy": "forbidden", "validation": {"min_length": 1, "max_length": 65536, "visible_when": {"parameter_key": "action", "equals": "comment_pr"}, "required_when": {"parameter_key": "action", "equals": "comment_pr"}}}
+      ]
+    },
+    {
+      "node_type": "mailNode",
+      "implemented": true,
+      "agent_builder_supported": true,
+      "connection_policy": {"role": "intermediate", "incoming": "allowed", "outgoing": "allowed", "outgoing_handles": "standard"},
+      "capabilities": ["mail_search"],
+      "outputs": [{"capability": "mail_search", "mode": "static", "keys": ["emails", "processing_ref", "processing_refs"], "value_type": "unknown"}],
+      "side_effect": "external_read",
+      "required_configuration": ["credential_id"],
+      "configuration_labels": {
+        "credential_id": "Mail credential"
+      },
+      "parameters": [
+        {"key": "credential_id", "label": "Mail credential", "input_type": "credential_ref", "required": true, "defer_policy": "allow_unresolved"},
+        {"key": "keyword", "label": "검색 키워드", "input_type": "text", "required": false, "defer_policy": "forbidden", "validation": {"max_length": 1000}},
+        {"key": "sender", "label": "발신자", "input_type": "text", "required": false, "defer_policy": "forbidden", "validation": {"max_length": 320}},
+        {"key": "subject", "label": "제목", "input_type": "text", "required": false, "defer_policy": "forbidden", "validation": {"max_length": 1000}},
+        {"key": "start_date", "label": "시작일", "input_type": "text", "required": false, "defer_policy": "forbidden", "validation": {"max_length": 10, "pattern": "^\\d{4}-\\d{2}-\\d{2}$"}},
+        {"key": "end_date", "label": "종료일", "input_type": "text", "required": false, "defer_policy": "forbidden", "validation": {"max_length": 10, "pattern": "^\\d{4}-\\d{2}-\\d{2}$"}},
+        {"key": "folder", "label": "메일함", "input_type": "select", "required": false, "defer_policy": "forbidden", "validation": {"options": ["INBOX", "SENT", "DRAFTS", "SPAM", "TRASH"]}},
+        {"key": "max_results", "label": "최대 결과 수", "input_type": "number", "required": false, "defer_policy": "forbidden", "validation": {"min": 1, "max": 100}},
+        {"key": "unread_only", "label": "읽지 않은 메일만", "input_type": "boolean", "required": false, "defer_policy": "forbidden"},
+        {"key": "mark_as_read", "label": "검색 후 읽음 처리", "input_type": "boolean", "required": false, "defer_policy": "forbidden"},
+        {"key": "processing_mode", "label": "처리 모드", "input_type": "select", "required": false, "defer_policy": "forbidden", "validation": {"options": ["search_only", "durable"], "option_labels": {"search_only": "검색만", "durable": "후속 처리 추적"}}}
+      ]
+    },
+    {
+      "node_type": "gmailDraftNode",
+      "implemented": true,
+      "agent_builder_supported": true,
+      "connection_policy": {"role": "intermediate", "incoming": "allowed", "outgoing": "allowed", "outgoing_handles": "standard"},
+      "capabilities": ["gmail_reply_draft_create"],
+      "outputs": [{"capability": "gmail_reply_draft_create", "mode": "static", "keys": ["draft_ref", "processing_ref"], "value_type": "text"}],
+      "side_effect": "external_write",
+      "required_configuration": ["credential_id", "processing_ref_selector", "reply_body_selector"],
+      "configuration_labels": {
+        "credential_id": "Gmail credential",
+        "processing_ref_selector": "Mail processing",
+        "reply_body_selector": "Reply body"
+      },
+      "parameters": [
+        {"key": "credential_id", "label": "Gmail credential", "input_type": "credential_ref", "required": true, "defer_policy": "allow_unresolved"},
+        {"key": "processing_ref_selector", "label": "Mail processing", "input_type": "variable_selector", "required": true, "defer_policy": "forbidden"},
+        {"key": "reply_body_selector", "label": "Reply body", "input_type": "variable_selector", "required": true, "defer_policy": "forbidden"}
+      ]
+    },
+    {
+      "node_type": "mailAcknowledgeNode",
+      "implemented": true,
+      "agent_builder_supported": true,
+      "connection_policy": {"role": "terminal", "incoming": "allowed", "outgoing": "forbidden", "outgoing_handles": "standard"},
+      "capabilities": ["mail_terminal_acknowledgement"],
+      "outputs": [{"capability": "mail_terminal_acknowledgement", "mode": "static", "keys": ["processing_ref", "status"], "value_type": "text"}],
+      "side_effect": "external_write",
+      "required_configuration": ["processing_ref_selector", "required_effect_ref_selectors"],
+      "configuration_labels": {
+        "processing_ref_selector": "Mail processing",
+        "required_effect_ref_selectors": "Required effects"
+      },
+      "parameters": [
+        {"key": "processing_ref_selector", "label": "Mail processing", "input_type": "variable_selector", "required": true, "defer_policy": "forbidden"},
+        {"key": "required_effect_ref_selectors", "label": "Required effects", "input_type": "variable_selector_list", "required": true, "defer_policy": "forbidden"}
+      ]
+    },
+    {
+      "node_type": "pluginNode",
+      "implemented": false,
+      "agent_builder_supported": false,
+      "connection_policy": {"role": "intermediate", "incoming": "allowed", "outgoing": "allowed", "outgoing_handles": "standard"},
+      "capabilities": [],
+      "outputs": [],
+      "side_effect": "external_write",
+      "required_configuration": ["pluginId"],
+      "configuration_labels": {"pluginId": "Plugin"},
+      "parameters": [
+        {"key": "pluginId", "label": "Plugin", "input_type": "resource_ref", "required": true, "defer_policy": "allow_unresolved"}
+      ]
+    }
+  ]
+}

@@ -1,7 +1,8 @@
 'use client';
 
 import {
-  Sliders,
+  BarChart3,
+  Loader2,
   Plus,
   StickyNote,
   Play,
@@ -9,22 +10,9 @@ import {
   Settings,
 } from 'lucide-react';
 import { NodeSelector } from './NodeSelector';
-import { LogTab } from './tabs/LogTab';
-import { MonitoringTab } from './tabs/MonitoringTab';
 import NodeLibrarySidebar from './NodeLibrarySidebar';
-import { ViewMode } from './EditorViewSwitcher';
-import {
-  type NodeDefinition,
-  getNodeDefinition,
-} from '../../config/nodeRegistry';
-import { NoteNode, AppNode } from '../../types/Nodes';
-import {
-  findFirstAvailableHandle,
-  createNewCaseForConnection,
-} from '../../utils/conditionNodeHelpers';
 import { calculateAutoLayout } from '../../utils/layoutHelpers';
 import { useDeployment } from '../../hooks/useDeployment';
-import { arrangeConditionNodeChildren } from '../../utils/arrangeConditionNodes';
 import { useContextMenu } from '../../hooks/useContextMenu';
 import { useNodeCreation } from '../../hooks/useNodeCreation';
 import { MemoryModeToggle, useMemoryMode } from './memory/MemoryModeControls';
@@ -34,6 +22,7 @@ import { ClockIcon } from '@/app/features/workflow/components/nodes/icons';
 import { DeploymentFlowModal } from '../deployment/DeploymentFlowModal';
 
 import { useCallback, useMemo, useEffect, useState, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useSearchParams } from 'next/navigation';
 import {
   ReactFlow,
@@ -47,51 +36,34 @@ import {
 import '@xyflow/react/dist/style.css';
 
 import { useWorkflowStore } from '@/app/features/workflow/store/useWorkflowStore';
-import { WorkflowNodeData, Node } from '../../types/Nodes';
+import { Node, WorkflowNodeData } from '../../types/Nodes';
 import { nodeTypes as coreNodeTypes } from '../nodes';
 import { PuzzleEdge } from '../nodes/edges/PuzzleEdge';
 import { CustomConnectionLine } from '../nodes/edges/CustomConnectionLine';
 import NotePost from './NotePost';
 import BottomPanel from './BottomPanel';
-import NodeDetailsPanel from './NodeDetailsPanel';
-import { getNodeDefinitionByType } from '../../config/nodeRegistry';
-import { StartNodePanel } from '../nodes/start/components/StartNodePanel';
-import { AnswerNodePanel } from '../nodes/answer/components/AnswerNodePanel';
-import { HttpRequestNodePanel } from '../nodes/http/components/HttpRequestNodePanel';
-import { SlackPostNodePanel } from '../nodes/slack/components/SlackPostNodePanel';
-import { CodeNodePanel } from '../nodes/code/components/CodeNodePanel';
-import { ConditionNodePanel } from '../nodes/condition/components/ConditionNodePanel';
-import { LLMNodePanel } from '../nodes/llm/components/LLMNodePanel';
-import { TemplateNodePanel } from '../nodes/template/components/TemplateNodePanel';
-import { WorkflowNodePanel } from '../nodes/workflow/components/WorkflowNodePanel';
-import { GithubNodePanel } from '../nodes/github/components/GithubNodePanel';
-import { MailNodePanel } from '../nodes/mail/components/MailNodePanel';
-import { LoopNodePanel } from '../nodes/loop/components/LoopNodePanel';
 import { AppSearchModal } from '../modals/AppSearchModal';
 import { useKeyboardShortcut } from '../../hooks/useKeyboardShortcut';
+import { useCanvasKeyboardShortcuts } from '../../hooks/useCanvasKeyboardShortcuts';
 import { App } from '@/app/features/app/api/appApi';
 import { workflowApi } from '@/app/features/workflow/api/workflowApi';
-import { FileExtractionNodePanel } from '../nodes/file_extraction/components/FileExtractionNodePanel';
-import { VariableExtractionNodePanel } from '../nodes/variable_extraction/components/VariableExtractionNodePanel';
-import { WebhookTriggerNodePanel } from '../nodes/webhook/components/WebhookTriggerNodePanel';
-import { ScheduleTriggerNodePanel } from '../nodes/schedule/components/ScheduleTriggerNodePanel';
-import { LLMParameterSidePanel } from '../nodes/llm/components/LLMParameterSidePanel';
-import { LLMReferenceSidePanel } from '../nodes/llm/components/LLMReferenceSidePanel';
 import { useDragConnectionPreview } from '../../hooks/useDragConnectionPreview';
 import { DragConnectionOverlay } from './DragConnectionOverlay';
 import { SettingsSidebar } from './SettingsSidebar';
 import { VersionHistorySidebar } from './VersionHistorySidebar';
 import { TestSidebar } from './TestSidebar';
+import { NodeFullscreenEditor } from './NodeFullscreenEditor';
+import { getSnapBackgroundGap } from '../../utils/gridSnap';
+import { hasIncomingHandle } from '../../utils/validateWorkflowGraph';
+import { WORKFLOW_NODE_SIZE } from '../../utils/workflowCanvasGeometry';
+import { AgentBuilderPanel } from '../agentBuilder/AgentBuilderPanel';
+import { copyTestExecutionLocationQueryParams } from '../../utils/testExecutionLocation';
+import { collectDeploymentLlmNodes } from '../../utils/publicChatConversationConsumers';
 
-interface NodeCanvasProps {
-  viewMode: ViewMode;
-  onViewModeChange: (mode: ViewMode) => void;
-}
+const MIN_ZOOM = 0.4;
+const MAX_ZOOM = 1.6;
 
-export default function NodeCanvas({
-  viewMode,
-  onViewModeChange,
-}: NodeCanvasProps) {
+export default function NodeCanvas() {
   const {
     nodes,
     edges,
@@ -104,12 +76,11 @@ export default function NodeCanvas({
     updateWorkflowViewport,
     setNodes,
     updateNodeData,
+    addNode,
     isVersionHistoryOpen,
     toggleVersionHistory,
-    projectName,
-    projectIcon,
-    projectDescription,
     isFullscreen,
+    workflowAccess,
     setEdges,
     isSettingsOpen,
     toggleSettings,
@@ -117,6 +88,19 @@ export default function NodeCanvas({
     toggleTestPanel,
     clearInnerNodeSelection,
     selectedInnerNode,
+    snapGridSize,
+    setSnapTemporarilyDisabled,
+    numberConnection,
+    updateNumberConnectionInput,
+    cancelNumberConnection,
+    fullscreenNodeId,
+    openNodeFullscreen,
+    syncNodeFullscreenFromUrl,
+    testExecutionStatus,
+    testExecutionRunId,
+    testSelectedNodeId,
+    isTestUploading,
+    hasUnsavedChanges,
   } = useWorkflowStore();
 
   const {
@@ -127,7 +111,7 @@ export default function NodeCanvas({
     deleteElements,
   } = useReactFlow();
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
-  const [selectedNodeType, setSelectedNodeType] = useState<string | null>(null);
+  const [, setSelectedNodeType] = useState<string | null>(null);
   const [searchModalContext, setSearchModalContext] = useState<{
     isOpen: boolean;
     position?: { x: number; y: number };
@@ -135,6 +119,42 @@ export default function NodeCanvas({
   const [isParamPanelOpen, setIsParamPanelOpen] = useState(false);
   const [isRefPanelOpen, setIsRefPanelOpen] = useState(false);
   const [isNodeLibraryOpen, setIsNodeLibraryOpen] = useState(true);
+  const reactFlowWrapperRef = useRef<HTMLDivElement>(null);
+  const hoveredNodeIdRef = useRef<string | null>(null);
+  const backgroundGap = getSnapBackgroundGap(snapGridSize);
+  const numberConnectionCandidates = useMemo(() => {
+    if (!numberConnection) return [];
+    return nodes
+      .filter(
+        (node) =>
+          node.id !== numberConnection.sourceNodeId &&
+          hasIncomingHandle(node) &&
+          typeof node.data?.displayNumber === 'number',
+      )
+      .map((node) => ({
+        node,
+        displayNumber: String(node.data.displayNumber),
+      }));
+  }, [nodes, numberConnection]);
+  const currentNumberMatches = useMemo(() => {
+    if (!numberConnection?.input) return [];
+    return numberConnectionCandidates.filter((candidate) =>
+      candidate.displayNumber.startsWith(numberConnection.input),
+    );
+  }, [numberConnection?.input, numberConnectionCandidates]);
+
+  const connectNumberTarget = useCallback(
+    (targetNodeId: string) => {
+      if (!numberConnection) return;
+      onConnect({
+        source: numberConnection.sourceNodeId,
+        sourceHandle: numberConnection.sourceHandleId,
+        target: targetNodeId,
+        targetHandle: 'target',
+      });
+    },
+    [numberConnection, onConnect],
+  );
 
   // Drag connection preview
   const {
@@ -148,6 +168,7 @@ export default function NodeCanvas({
   const {
     isMemoryModeEnabled,
     hasProviderKey,
+    providerKeyStatus,
     memoryModeDescription,
     toggleMemoryMode,
     appendMemoryFlag,
@@ -155,7 +176,81 @@ export default function NodeCanvas({
   } = useMemoryMode(router, toast);
 
   // Publish state
-  const canPublish = useWorkflowStore((state) => state.canPublish());
+  const rawCanPublish = useWorkflowStore((state) => state.canPublish());
+  const isReadOnly = workflowAccess?.can_write === false;
+  const canExecute = workflowAccess?.can_execute !== false;
+  const canPublish = rawCanPublish;
+
+  useEffect(() => {
+    if (!numberConnection) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target;
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
+        (target instanceof HTMLElement && target.isContentEditable)
+      ) {
+        return;
+      }
+
+      if (/^\d$/.test(event.key)) {
+        event.preventDefault();
+        const nextInput = `${numberConnection.input}${event.key}`;
+        const matches = numberConnectionCandidates.filter((candidate) =>
+          candidate.displayNumber.startsWith(nextInput),
+        );
+        const exactMatches = matches.filter(
+          (candidate) => candidate.displayNumber === nextInput,
+        );
+        const prefixMatches = matches.filter(
+          (candidate) => candidate.displayNumber !== nextInput,
+        );
+
+        if (exactMatches.length === 1 && prefixMatches.length === 0) {
+          connectNumberTarget(exactMatches[0].node.id);
+          return;
+        }
+
+        updateNumberConnectionInput(nextInput);
+        return;
+      }
+
+      if (event.key === 'Backspace') {
+        event.preventDefault();
+        updateNumberConnectionInput(numberConnection.input.slice(0, -1));
+        return;
+      }
+
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        cancelNumberConnection();
+        return;
+      }
+
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        const exactMatches = numberConnectionCandidates.filter(
+          (candidate) => candidate.displayNumber === numberConnection.input,
+        );
+        if (exactMatches.length === 1) {
+          connectNumberTarget(exactMatches[0].node.id);
+          return;
+        }
+        cancelNumberConnection();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [
+    cancelNumberConnection,
+    connectNumberTarget,
+    numberConnection,
+    numberConnectionCandidates,
+    updateNumberConnectionInput,
+  ]);
 
   // Deployment logic (extracted to hook)
   const {
@@ -168,12 +263,15 @@ export default function NodeCanvas({
     handlePublishAsRestAPI,
     handlePublishAsWebApp,
     handlePublishAsWidget,
+    handlePublishAsChatbot,
+    handlePublishAsInternalChatbot,
     handlePublishAsWorkflowNode,
     handlePublishAsSchedule,
     handlePublishAsWebhook,
     handleDeploy,
   } = useDeployment({
     nodes,
+    edges,
     isSettingsOpen,
     toggleSettings,
     isVersionHistoryOpen,
@@ -183,6 +281,11 @@ export default function NodeCanvas({
     setSelectedNodeId,
     setSelectedNodeType,
   });
+
+  const deploymentLlmNodes = useMemo(
+    () => collectDeploymentLlmNodes(nodes),
+    [nodes],
+  );
 
   // Start node detection for deployment options
   const startNode = useMemo(() => {
@@ -212,16 +315,16 @@ export default function NodeCanvas({
     handleTestRunFromContext,
     handleSelectNodeFromContext,
   } = useContextMenu({
-    nodes,
-    setNodes,
     triggerWorkflowRun: useWorkflowStore.getState().triggerWorkflowRun,
     setSearchModalContext,
   });
 
   // Node creation hook
-  const { onDrop, handleAddNodeFromLibrary } = useNodeCreation({
-    nodes,
-    setNodes,
+  const {
+    onDrop,
+    handleAddNodeFromLibrary,
+    handleAddNodeAfterSelected,
+  } = useNodeCreation({
     edges,
     setEdges,
     previewState,
@@ -229,15 +332,42 @@ export default function NodeCanvas({
     setSearchModalContext,
   });
 
-  // 전체화면 모드 변경 시 사이드바 자동 토글
-  // 전체화면 모드 변경 시 사이드바 자동 토글
   useEffect(() => {
-    if (isFullscreen || viewMode !== 'edit') {
+    if (isFullscreen || isReadOnly) {
       setIsNodeLibraryOpen(false);
     } else {
       setIsNodeLibraryOpen(true);
     }
-  }, [isFullscreen, viewMode]);
+  }, [isFullscreen, isReadOnly]);
+
+  useEffect(() => {
+    if (!reactFlowWrapperRef.current) {
+      setSnapTemporarilyDisabled(false);
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Alt') {
+        setSnapTemporarilyDisabled(true);
+      }
+    };
+    const handleKeyUp = (event: KeyboardEvent) => {
+      if (event.key === 'Alt') {
+        setSnapTemporarilyDisabled(false);
+      }
+    };
+    const handleBlur = () => setSnapTemporarilyDisabled(false);
+
+    window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('blur', handleBlur);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('blur', handleBlur);
+      setSnapTemporarilyDisabled(false);
+    };
+  }, [setSnapTemporarilyDisabled]);
 
   useKeyboardShortcut(
     ['Meta', 'k'],
@@ -246,19 +376,6 @@ export default function NodeCanvas({
     },
     { preventDefault: true },
   );
-
-  useEffect(() => {
-    const handleOpenRefPanel = (e: Event) => {
-      const detail = (e as CustomEvent).detail;
-      if (detail?.nodeId === selectedNodeId) {
-        setIsRefPanelOpen((prev) => !prev);
-        setIsParamPanelOpen(false);
-      }
-    };
-    window.addEventListener('openLLMReferencePanel', handleOpenRefPanel);
-    return () =>
-      window.removeEventListener('openLLMReferencePanel', handleOpenRefPanel);
-  }, [selectedNodeId]);
 
   // 설정, 버전 기록, 테스트 패널이 열리면 노드 상세 패널과 배포 드롭다운 닫기
   useEffect(() => {
@@ -278,7 +395,8 @@ export default function NodeCanvas({
 
   const handleSelectApp = useCallback(
     async (app: App & { active_deployment_id?: string; version?: number }) => {
-      const newNode: Node = {
+      if (isReadOnly) return;
+      const baseNode: Node = {
         id: `workflow-${Date.now()}`,
         type: 'workflowNode',
         position:
@@ -301,8 +419,7 @@ export default function NodeCanvas({
           outputs: [],
         } as WorkflowNodeData,
       };
-
-      setNodes([...nodes, newNode]);
+      const newNode = addNode(baseNode);
       setSearchModalContext({ isOpen: false });
 
       if (app.active_deployment_id) {
@@ -321,23 +438,76 @@ export default function NodeCanvas({
       }
     },
     [
-      nodes,
-      setNodes,
       screenToFlowPosition,
       updateNodeData,
       searchModalContext.position,
+      addNode,
+      isReadOnly,
     ],
   );
 
+  const handleCanvasNodesChange = useCallback(
+    (changes: Parameters<typeof onNodesChange>[0]) => {
+      if (isReadOnly) {
+        const selectionChanges = changes.filter(
+          (change) => change.type === 'select',
+        );
+        if (selectionChanges.length > 0) {
+          onNodesChange(selectionChanges);
+        }
+        return;
+      }
+      onNodesChange(changes);
+    },
+    [isReadOnly, onNodesChange],
+  );
+
+  const handleCanvasEdgesChange = useCallback(
+    (changes: Parameters<typeof onEdgesChange>[0]) => {
+      if (isReadOnly) {
+        const selectionChanges = changes.filter(
+          (change) => change.type === 'select',
+        );
+        if (selectionChanges.length > 0) {
+          onEdgesChange(selectionChanges);
+        }
+        return;
+      }
+      onEdgesChange(changes);
+    },
+    [isReadOnly, onEdgesChange],
+  );
+
+  const handleCanvasConnect = useCallback(
+    (...args: Parameters<typeof onConnect>) => {
+      if (isReadOnly) return;
+      onConnect(...args);
+    },
+    [isReadOnly, onConnect],
+  );
+
+  const handleCanvasDrop = useCallback(
+    (event: React.DragEvent) => {
+      if (isReadOnly) return;
+      onDrop(event);
+    },
+    [isReadOnly, onDrop],
+  );
+
   const nodeTypes = useMemo(
-    () => ({
-      ...coreNodeTypes,
-      note: NotePost,
-    }),
+    () =>
+      ({
+        ...coreNodeTypes,
+        note: NotePost,
+      }) as unknown as NodeTypes,
     [],
-  ) as unknown as NodeTypes;
+  );
 
   const edgeTypes = useMemo(() => ({ puzzle: PuzzleEdge }), []);
+  const selectedEdgeId = useMemo(
+    () => edges.find((edge) => edge.selected)?.id ?? null,
+    [edges],
+  );
   const defaultEdgeOptions = useMemo(
     () => ({
       type: 'puzzle',
@@ -367,6 +537,90 @@ export default function NodeCanvas({
     [activeWorkflowId, updateWorkflowViewport],
   );
 
+  const handleNodeMouseEnter = useCallback(
+    (_event: React.MouseEvent, node: Node) => {
+      hoveredNodeIdRef.current = node.id;
+    },
+    [],
+  );
+
+  const handleNodeMouseLeave = useCallback(
+    (_event: React.MouseEvent, node: Node) => {
+      if (hoveredNodeIdRef.current === node.id) {
+        hoveredNodeIdRef.current = null;
+      }
+    },
+    [],
+  );
+
+  const handleNodeWheelZoom = useCallback(
+    (event: React.WheelEvent<HTMLDivElement>) => {
+      const hoveredNodeId = hoveredNodeIdRef.current;
+      if (!hoveredNodeId) return;
+
+      const target = event.target as HTMLElement | null;
+      if (
+        target?.closest(
+          'input, textarea, select, [contenteditable="true"], .nowheel',
+        )
+      ) {
+        return;
+      }
+
+      const hoveredNode = nodes.find((node) => node.id === hoveredNodeId);
+      if (!hoveredNode) return;
+
+      event.preventDefault();
+      event.stopPropagation();
+
+      const viewport = getViewport();
+      const measuredNode = hoveredNode as Node & {
+        measured?: { width?: number; height?: number };
+        width?: number;
+        height?: number;
+      };
+      const nodeWidth =
+        measuredNode.measured?.width ??
+        measuredNode.width ??
+        WORKFLOW_NODE_SIZE.width;
+      const nodeHeight =
+        measuredNode.measured?.height ??
+        measuredNode.height ??
+        WORKFLOW_NODE_SIZE.height;
+      const nodeCenter = {
+        x: hoveredNode.position.x + nodeWidth / 2,
+        y: hoveredNode.position.y + nodeHeight / 2,
+      };
+      const screenCenter = {
+        x: nodeCenter.x * viewport.zoom + viewport.x,
+        y: nodeCenter.y * viewport.zoom + viewport.y,
+      };
+      const zoomFactor = Math.exp(-event.deltaY * 0.0015);
+      const nextZoom = Math.min(
+        MAX_ZOOM,
+        Math.max(MIN_ZOOM, viewport.zoom * zoomFactor),
+      );
+
+      if (nextZoom === viewport.zoom) return;
+
+      const nextViewport = {
+        x: screenCenter.x - nodeCenter.x * nextZoom,
+        y: screenCenter.y - nodeCenter.y * nextZoom,
+        zoom: nextZoom,
+      };
+
+      setViewport(nextViewport, { duration: 80 });
+      updateWorkflowViewport(activeWorkflowId, nextViewport);
+    },
+    [
+      activeWorkflowId,
+      getViewport,
+      nodes,
+      setViewport,
+      updateWorkflowViewport,
+    ],
+  );
+
   useEffect(() => {
     if (isVersionHistoryOpen || isSettingsOpen) {
       setSelectedNodeId(null);
@@ -388,18 +642,15 @@ export default function NodeCanvas({
           toggleTestPanel();
         }
 
-        if (selectedNodeId !== node.id) {
-          setIsParamPanelOpen(false);
-          setIsRefPanelOpen(false);
-        }
         // 메인 노드 클릭 시 내부 노드 선택 해제
         clearInnerNodeSelection();
         setSelectedNodeId(node.id);
-        setSelectedNodeType(node.type);
+        setSelectedNodeType(null);
+        setIsParamPanelOpen(false);
+        setIsRefPanelOpen(false);
       }
     },
     [
-      selectedNodeId,
       isVersionHistoryOpen,
       toggleVersionHistory,
       isSettingsOpen,
@@ -410,6 +661,55 @@ export default function NodeCanvas({
     ],
   );
 
+  useEffect(() => {
+    const handleAgentBuilderOpenNodeSettings = (event: Event) => {
+      const detail = (
+        event as CustomEvent<{
+          nodeId?: unknown;
+          section?: 'routing' | 'connection';
+        }>
+      ).detail;
+      const nodeId = detail?.nodeId;
+      if (
+        typeof nodeId !== 'string' ||
+        !nodes.some((node) => node.id === nodeId && node.type !== 'note')
+      ) {
+        return;
+      }
+      if (isVersionHistoryOpen) {
+        toggleVersionHistory();
+      }
+      if (isSettingsOpen) {
+        toggleSettings();
+      }
+      if (isTestPanelOpen) {
+        toggleTestPanel();
+      }
+      clearInnerNodeSelection();
+      openNodeFullscreen(nodeId, detail?.section);
+    };
+
+    window.addEventListener(
+      'agent-builder:open-node-settings',
+      handleAgentBuilderOpenNodeSettings,
+    );
+    return () =>
+      window.removeEventListener(
+        'agent-builder:open-node-settings',
+        handleAgentBuilderOpenNodeSettings,
+      );
+  }, [
+    clearInnerNodeSelection,
+    isSettingsOpen,
+    isTestPanelOpen,
+    isVersionHistoryOpen,
+    nodes,
+    openNodeFullscreen,
+    toggleSettings,
+    toggleTestPanel,
+    toggleVersionHistory,
+  ]);
+
   const handleClosePanel = useCallback(() => {
     setSelectedNodeId(null);
     setSelectedNodeType(null);
@@ -417,30 +717,96 @@ export default function NodeCanvas({
     setIsRefPanelOpen(false);
   }, []);
 
-  const selectedNode = useMemo(() => {
-    if (!selectedNodeId) return null;
-    return nodes.find((n) => n.id === selectedNodeId);
-  }, [selectedNodeId, nodes]);
-
-  const panelHeader = useMemo(() => {
-    if (!selectedNodeType) return undefined;
-    const def = getNodeDefinitionByType(selectedNodeType);
-    if (selectedNodeType === 'workflowNode' && selectedNode) {
-      return {
-        icon: (selectedNode.data as unknown as WorkflowNodeData).icon || '🔄',
-        title:
-          (selectedNode.data as unknown as WorkflowNodeData).title ||
-          'Workflow Module',
-        description: 'Imported Workflow Module',
-      };
+  const closeCanvasMenus = useCallback(() => {
+    if (searchModalContext.isOpen) {
+      setSearchModalContext({ isOpen: false });
+      return true;
     }
+    if (showDeployDropdown) {
+      setShowDeployDropdown(false);
+      return true;
+    }
+    if (
+      contextMenu ||
+      nodeContextMenu ||
+      edgeContextMenu ||
+      isContextNodeSelectorOpen
+    ) {
+      handleCloseContextMenu();
+      setIsContextNodeSelectorOpen(false);
+      return true;
+    }
+    return false;
+  }, [
+    searchModalContext.isOpen,
+    showDeployDropdown,
+    setShowDeployDropdown,
+    contextMenu,
+    nodeContextMenu,
+    edgeContextMenu,
+    isContextNodeSelectorOpen,
+    handleCloseContextMenu,
+    setIsContextNodeSelectorOpen,
+  ]);
 
-    return {
-      icon: def?.icon || '⬜️',
-      title: def?.name || 'Node',
-      description: def?.description,
-    };
-  }, [selectedNodeType, selectedNode]);
+  const closeCanvasPanels = useCallback(() => {
+    if (isParamPanelOpen || isRefPanelOpen || selectedNodeId) {
+      handleClosePanel();
+      return true;
+    }
+    if (selectedInnerNode) {
+      clearInnerNodeSelection();
+      return true;
+    }
+    if (isSettingsOpen) {
+      toggleSettings();
+      return true;
+    }
+    if (isVersionHistoryOpen) {
+      toggleVersionHistory();
+      return true;
+    }
+    if (isTestPanelOpen) {
+      toggleTestPanel();
+      return true;
+    }
+    return false;
+  }, [
+    isParamPanelOpen,
+    isRefPanelOpen,
+    selectedNodeId,
+    handleClosePanel,
+    selectedInnerNode,
+    clearInnerNodeSelection,
+    isSettingsOpen,
+    toggleSettings,
+    isVersionHistoryOpen,
+    toggleVersionHistory,
+    isTestPanelOpen,
+    toggleTestPanel,
+  ]);
+
+  const isCanvasShortcutScopeBlocked = useCallback(
+    () =>
+      searchModalContext.isOpen ||
+      showDeployFlowModal ||
+      showDeployDropdown ||
+      Boolean(
+        contextMenu ||
+        nodeContextMenu ||
+        edgeContextMenu ||
+        isContextNodeSelectorOpen,
+      ),
+    [
+      searchModalContext.isOpen,
+      showDeployFlowModal,
+      showDeployDropdown,
+      contextMenu,
+      nodeContextMenu,
+      edgeContextMenu,
+      isContextNodeSelectorOpen,
+    ],
+  );
 
   const reactFlowConfig = useMemo(() => {
     if (interactiveMode === 'touchpad') {
@@ -465,6 +831,7 @@ export default function NodeCanvas({
   }, [interactiveMode]);
 
   const handleAutoLayout = useCallback(() => {
+    if (isReadOnly) return;
     const layoutedNodes = calculateAutoLayout(nodes, edges);
     setNodes(layoutedNodes);
 
@@ -481,7 +848,16 @@ export default function NodeCanvas({
     getViewport,
     updateWorkflowViewport,
     activeWorkflowId,
+    isReadOnly,
   ]);
+
+  useCanvasKeyboardShortcuts({
+    isEnabled: !isReadOnly,
+    isShortcutScopeBlocked: isCanvasShortcutScopeBlocked,
+    closeMenus: closeCanvasMenus,
+    closePanels: closeCanvasPanels,
+    toggleNodeLibrary: () => setIsNodeLibraryOpen((prev) => !prev),
+  });
 
   const currentAppId = useMemo(() => {
     const activeWorkflow = workflows.find((w) => w.id === activeWorkflowId);
@@ -491,6 +867,7 @@ export default function NodeCanvas({
   // 노드 우클릭 핸들러
   const onNodeContextMenu = useCallback(
     (event: React.MouseEvent, node: Node) => {
+      if (isReadOnly) return;
       event.preventDefault();
       event.stopPropagation();
       setNodeContextMenu({
@@ -501,12 +878,13 @@ export default function NodeCanvas({
       setEdgeContextMenu(null);
       setContextMenu(null);
     },
-    [],
+    [isReadOnly, setContextMenu, setEdgeContextMenu, setNodeContextMenu],
   );
 
   // Edge 우클릭 핸들러
   const onEdgeContextMenu = useCallback(
     (event: React.MouseEvent, edge: { id: string }) => {
+      if (isReadOnly) return;
       event.preventDefault();
       event.stopPropagation();
       setEdgeContextMenu({
@@ -517,52 +895,24 @@ export default function NodeCanvas({
       setNodeContextMenu(null);
       setContextMenu(null);
     },
-    [],
+    [isReadOnly, setContextMenu, setEdgeContextMenu, setNodeContextMenu],
   );
 
   // 노드 삭제 핸들러 (React Flow 내부 로직 사용)
   const handleDeleteNode = useCallback(() => {
+    if (isReadOnly) return;
     if (!nodeContextMenu) return;
     deleteElements({ nodes: [{ id: nodeContextMenu.nodeId }] });
     setNodeContextMenu(null);
-  }, [nodeContextMenu, deleteElements]);
+  }, [isReadOnly, nodeContextMenu, deleteElements, setNodeContextMenu]);
 
   // Edge 삭제 핸들러 (React Flow 내부 로직 사용)
   const handleDeleteEdge = useCallback(() => {
+    if (isReadOnly) return;
     if (!edgeContextMenu) return;
     deleteElements({ edges: [{ id: edgeContextMenu.edgeId }] });
     setEdgeContextMenu(null);
-  }, [edgeContextMenu, deleteElements]);
-
-  // Delete 키 핸들러 (React Flow 내부 로직 사용)
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      // input/textarea에서는 무시
-      if (
-        event.target instanceof HTMLInputElement ||
-        event.target instanceof HTMLTextAreaElement
-      ) {
-        return;
-      }
-
-      if (event.key === 'Delete') {
-        // 선택된 노드/엣지가 있으면 삭제
-        const selectedNodes = nodes.filter((n) => n.selected);
-        const selectedEdges = edges.filter((e) => e.selected);
-
-        if (selectedNodes.length > 0 || selectedEdges.length > 0) {
-          event.preventDefault();
-          deleteElements({
-            nodes: selectedNodes.map((n) => ({ id: n.id })),
-            edges: selectedEdges.map((e) => ({ id: e.id })),
-          });
-        }
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [nodes, edges, deleteElements]);
+  }, [isReadOnly, edgeContextMenu, deleteElements, setEdgeContextMenu]);
 
   useEffect(() => {
     const handleClick = () => handleCloseContextMenu();
@@ -570,40 +920,309 @@ export default function NodeCanvas({
     return () => window.removeEventListener('click', handleClick);
   }, [handleCloseContextMenu]);
 
-  // [NEW] 탭 상태 (Deleted internal logic)
-  const [initialLogRunId, setInitialLogRunId] = useState<string | null>(null);
+  const [headerActionsRoot, setHeaderActionsRoot] =
+    useState<HTMLElement | null>(null);
   const searchParams = useSearchParams();
-  // const tabParam = searchParams.get('tab'); // Moved to parent
-  const runIdParam = searchParams.get('runId');
+  const ndvNodeParam = searchParams.get('node');
 
   // useEffect for tabParam removed
 
   useEffect(() => {
-    if (runIdParam) {
-      setInitialLogRunId(runIdParam);
+    const currentNodeParam =
+      typeof window !== 'undefined'
+        ? new URLSearchParams(window.location.search).get('node')
+        : ndvNodeParam;
+
+    if (!currentNodeParam) {
+      if (fullscreenNodeId) {
+        syncNodeFullscreenFromUrl(null);
+      }
+      return;
     }
-  }, [runIdParam]);
+
+    const hasTargetNode = nodes.some((node) => node.id === currentNodeParam);
+    if (hasTargetNode && fullscreenNodeId !== currentNodeParam) {
+      syncNodeFullscreenFromUrl(currentNodeParam);
+    }
+  }, [
+    fullscreenNodeId,
+    ndvNodeParam,
+    nodes,
+    syncNodeFullscreenFromUrl,
+  ]);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const nodeId = new URLSearchParams(window.location.search).get('node');
+      if (!nodeId) {
+        syncNodeFullscreenFromUrl(null);
+        return;
+      }
+
+      if (nodes.some((node) => node.id === nodeId)) {
+        syncNodeFullscreenFromUrl(nodeId);
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [nodes, syncNodeFullscreenFromUrl]);
+
+  useEffect(() => {
+    setHeaderActionsRoot(
+      document.getElementById('workflow-editor-header-actions'),
+    );
+  }, []);
+
+  const workflowHeaderActions = (
+    <>
+      <div className="flex h-9 items-center rounded-lg border border-slate-200 bg-white p-0.5 shadow-sm">
+        <div className="flex h-full items-center px-2">
+          <MemoryModeToggle
+            isEnabled={isMemoryModeEnabled}
+            hasProviderKey={hasProviderKey}
+            providerKeyStatus={providerKeyStatus}
+            description={memoryModeDescription}
+            onToggle={toggleMemoryMode}
+          />
+        </div>
+        <div className="mx-1 h-4 w-px bg-slate-200" />
+        <button
+          onClick={toggleSettings}
+          className="flex h-full items-center gap-1.5 rounded-md px-3 text-[13px] font-semibold text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-950"
+        >
+          <Settings className="h-4 w-4" />
+          <span>설정</span>
+        </button>
+        <div className="mx-1 h-4 w-px bg-slate-200" />
+        <button
+          onClick={toggleVersionHistory}
+          className="flex h-full items-center gap-1.5 rounded-md px-3 text-[13px] font-semibold text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-950"
+        >
+          <ClockIcon className="h-4 w-4" />
+          <span>버전</span>
+        </button>
+        <div className="mx-1 h-4 w-px bg-slate-200" />
+        <button
+          onClick={() => {
+            const query = new URLSearchParams({ tab: 'logs' });
+            const testExecutionQuery = new URLSearchParams(
+              window.location.search,
+            );
+            if (testExecutionRunId) {
+              testExecutionQuery.set('testRun', testExecutionRunId);
+            }
+            if (testSelectedNodeId) {
+              testExecutionQuery.set('testNode', testSelectedNodeId);
+            }
+            copyTestExecutionLocationQueryParams(testExecutionQuery, query);
+            router.push(`/modules/${activeWorkflowId}/report?${query.toString()}`);
+          }}
+          className="flex h-full items-center gap-1.5 rounded-md px-3 text-[13px] font-semibold text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-950"
+        >
+          <BarChart3 className="h-4 w-4" />
+          <span>보고</span>
+        </button>
+        <div className="mx-1 h-4 w-px bg-slate-200" />
+        <div className="relative h-full">
+          <button
+            disabled={!canPublish}
+            onClick={toggleDeployDropdown}
+            className={`flex h-full items-center gap-1.5 rounded-md px-3 text-[13px] font-medium transition-colors ${
+              !canPublish
+                ? 'cursor-not-allowed text-gray-400'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-950'
+            }`}
+          >
+            <span>게시하기</span>
+            <svg
+              className={`h-3.5 w-3.5 transition-transform ${
+                showDeployDropdown ? 'rotate-180' : ''
+              }`}
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M19 9l-7 7-7-7"
+              />
+            </svg>
+          </button>
+
+          {showDeployDropdown && canPublish && (
+            <>
+              <div
+                className="fixed inset-0 z-10"
+                onClick={() => setShowDeployDropdown(false)}
+              />
+              <div className="absolute right-0 z-20 mt-2 w-64 rounded-lg border border-slate-200 bg-white py-2 text-left shadow-lg">
+                {startNode?.type === 'webhookTrigger' && (
+                  <button
+                    onClick={handlePublishAsWebhook}
+                    className="w-full px-4 py-3 text-left transition-colors hover:bg-gray-50"
+                  >
+                    <div className="font-medium text-gray-900">
+                      웹훅으로 개시하기
+                    </div>
+                    <div className="mt-1 text-sm text-gray-500">
+                      URL 호출로 실행
+                    </div>
+                  </button>
+                )}
+
+                {startNode?.type === 'scheduleTrigger' && (
+                  <button
+                    onClick={handlePublishAsSchedule}
+                    className="w-full px-4 py-3 text-left transition-colors hover:bg-gray-50"
+                  >
+                    <div className="font-medium text-gray-900">
+                      알람으로 개시하기
+                    </div>
+                    <div className="mt-1 text-sm text-gray-500">
+                      설정된 주기에 따라 실행
+                    </div>
+                  </button>
+                )}
+
+                {(startNode?.type === 'startNode' || !startNode) && (
+                  <>
+                    <button
+                      onClick={handlePublishAsRestAPI}
+                      className="w-full px-4 py-3 text-left transition-colors hover:bg-gray-50"
+                    >
+                      <div className="font-medium text-gray-900">
+                        REST API로 배포
+                      </div>
+                      <div className="mt-1 text-sm text-gray-500">
+                        내 서비스나 백엔드 서버에서 호출
+                      </div>
+                    </button>
+                    <div className="my-1 border-t border-gray-100" />
+                    <button
+                      onClick={handlePublishAsWebApp}
+                      className="w-full px-4 py-3 text-left transition-colors hover:bg-gray-50"
+                    >
+                      <div className="font-medium text-gray-900">
+                        공개 웹페이지 생성
+                      </div>
+                      <div className="mt-1 text-sm text-gray-500">
+                        설치 없이 바로 쓸 수 있는 페이지 제공
+                      </div>
+                    </button>
+                    <div className="my-1 border-t border-gray-100" />
+                    <button
+                      onClick={handlePublishAsChatbot}
+                      className="w-full px-4 py-3 text-left transition-colors hover:bg-gray-50"
+                    >
+                      <div className="font-medium text-gray-900">
+                        공개 챗봇 배포
+                      </div>
+                      <div className="mt-1 text-sm text-gray-500">
+                        대화 맥락을 기억하는 공개 채팅 페이지 제공
+                      </div>
+                    </button>
+                    <div className="my-1 border-t border-gray-100" />
+                    <button
+                      onClick={handlePublishAsInternalChatbot}
+                      className="w-full px-4 py-3 text-left transition-colors hover:bg-gray-50"
+                    >
+                      <div className="font-medium text-gray-900">
+                        내부 챗봇 배포
+                      </div>
+                      <div className="mt-1 text-sm text-gray-500">
+                        로그인 사용자 권한으로 사내 Knowledge 실행
+                      </div>
+                    </button>
+                    <div className="my-1 border-t border-gray-100" />
+                    <button
+                      onClick={handlePublishAsWidget}
+                      className="w-full px-4 py-3 text-left transition-colors hover:bg-gray-50"
+                    >
+                      <div className="font-medium text-gray-900">
+                        사이트에 임베드
+                      </div>
+                      <div className="mt-1 text-sm text-gray-500">
+                        스크립트 코드로 내 웹사이트에 삽입
+                      </div>
+                    </button>
+                    <div className="my-1 border-t border-gray-100" />
+                    <button
+                      onClick={handlePublishAsWorkflowNode}
+                      className="w-full px-4 py-3 text-left transition-colors hover:bg-gray-50"
+                    >
+                      <div className="font-medium text-gray-900">
+                        서브 모듈로 배포
+                      </div>
+                      <div className="mt-1 text-sm text-gray-500">
+                        다른 모듈에서 재사용
+                      </div>
+                    </button>
+                  </>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+
+      <button
+        onClick={canExecute ? toggleTestPanel : undefined}
+        disabled={!canExecute}
+        title={canExecute ? '테스트 실행' : '현재 권한으로는 실행할 수 없습니다'}
+        className={`flex h-9 items-center gap-1.5 rounded-lg px-4 text-[13px] font-semibold text-white shadow-sm transition-colors ${
+          !canExecute
+            ? 'cursor-not-allowed bg-gray-300 text-gray-500'
+            : testExecutionStatus === 'running'
+              ? 'bg-blue-600 hover:bg-blue-700'
+              : testExecutionStatus === 'success'
+                ? 'bg-emerald-600 hover:bg-emerald-700'
+                : testExecutionStatus === 'failure'
+                  ? 'bg-red-600 hover:bg-red-700'
+                  : 'bg-slate-950 hover:bg-slate-800'
+        }`}
+      >
+        {testExecutionStatus === 'running' ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        ) : (
+          <Play className="h-3.5 w-3.5 fill-current" />
+        )}
+        {testExecutionStatus === 'running'
+          ? isTestUploading
+            ? '업로드 중'
+            : '실행 중'
+          : testExecutionStatus === 'success'
+            ? '결과'
+            : testExecutionStatus === 'failure'
+              ? '실패'
+              : '테스트 실행'}
+      </button>
+    </>
+  );
 
   return (
-    <div className="flex-1 bg-white p-2 relative flex flex-col overflow-hidden">
+    <div className="relative flex flex-1 flex-col overflow-hidden bg-slate-50 p-3">
+      {headerActionsRoot
+        ? createPortal(workflowHeaderActions, headerActionsRoot)
+        : null}
       {/* Main Content Area Container */}
-      <div className="flex-1 h-full rounded-xl bg-gray-100 flex flex-col overflow-hidden">
+      <div className="flex h-full flex-1 flex-col overflow-hidden rounded-lg border border-slate-200 bg-slate-100">
         {/* Tab Header Removed */}
 
         {/* Content Area */}
         <div className="flex-1 relative overflow-hidden">
           {/* 1. Editor Tab Content */}
           <div
-            className={`w-full h-full relative flex flex-row gap-2 ${
-              viewMode === 'edit' ? 'flex' : 'hidden'
-            }`}
+            className="relative flex h-full w-full flex-row gap-2"
           >
             {/* Node Library Sidebar */}
-            <div className="pl-2 pt-2 h-full flex flex-col">
+            <div className="flex h-full flex-col py-3 pl-3">
               <div
-                className={`flex-1 rounded-xl bg-white transition-all duration-300 ease-in-out z-20 ${
+                className={`z-20 flex-1 rounded-lg bg-white transition-all duration-300 ease-in-out ${
                   isNodeLibraryOpen
-                    ? 'w-64 border border-gray-200'
+                    ? 'w-64 border border-slate-200 shadow-sm'
                     : 'w-0 border-none'
                 }`}
               >
@@ -611,6 +1230,7 @@ export default function NodeCanvas({
                   isOpen={isNodeLibraryOpen}
                   onToggle={() => setIsNodeLibraryOpen(!isNodeLibraryOpen)}
                   onAddNode={handleAddNodeFromLibrary}
+                  onAddNodeAfterSelected={handleAddNodeAfterSelected}
                   onOpenAppSearch={() =>
                     setSearchModalContext({ isOpen: true })
                   }
@@ -630,40 +1250,72 @@ export default function NodeCanvas({
 
               {/* ReactFlow 캔버스 */}
               <div
+                ref={reactFlowWrapperRef}
                 className="w-full h-full relative"
                 onContextMenu={(e) => e.preventDefault()}
                 onDragOver={handleDragOver}
-                onDrop={onDrop}
+                onDrop={handleCanvasDrop}
+                onWheelCapture={handleNodeWheelZoom}
               >
                 <ReactFlow
                   nodes={nodes}
                   edges={edges}
-                  onNodesChange={onNodesChange}
-                  onEdgesChange={onEdgesChange}
-                  onConnect={onConnect}
+                  onNodesChange={handleCanvasNodesChange}
+                  onEdgesChange={handleCanvasEdgesChange}
+                  onConnect={handleCanvasConnect}
                   onMoveEnd={handleMoveEnd}
                   onNodeClick={handleNodeClick}
-                  onPaneContextMenu={onPaneContextMenu}
+                  onNodeMouseEnter={handleNodeMouseEnter}
+                  onNodeMouseLeave={handleNodeMouseLeave}
+                  onPaneContextMenu={isReadOnly ? undefined : onPaneContextMenu}
                   onNodeContextMenu={onNodeContextMenu}
                   onEdgeContextMenu={onEdgeContextMenu}
+                  nodesDraggable={!isReadOnly}
+                  nodesConnectable={!isReadOnly}
                   nodeTypes={nodeTypes}
                   edgeTypes={edgeTypes}
                   defaultEdgeOptions={defaultEdgeOptions}
                   connectionLineComponent={CustomConnectionLine}
                   defaultViewport={{ x: 0, y: 0, zoom: 0.8 }}
-                  minZoom={0.4}
-                  maxZoom={1.6}
+                  minZoom={MIN_ZOOM}
+                  maxZoom={MAX_ZOOM}
+                  deleteKeyCode={null}
                   attributionPosition="bottom-right"
-                  className="bg-gray-100"
+                  className="bg-slate-50"
                   {...reactFlowConfig}
                 >
                   <Background
                     variant={BackgroundVariant.Dots}
-                    gap={16}
+                    gap={backgroundGap}
                     size={1}
-                    color="#d1d5db"
+                    color="#cbd5e1"
                   />
                 </ReactFlow>
+
+                {isReadOnly && (
+                  <div className="absolute left-4 top-4 z-30 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-medium text-amber-800 shadow-sm">
+                    {workflowAccess?.auth_state || 'viewer'} · 읽기 전용
+                  </div>
+                )}
+
+                {numberConnection && (
+                  <div className="pointer-events-none absolute left-1/2 top-4 z-40 flex -translate-x-1/2 flex-col items-center gap-1">
+                    <div className="rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-lg">
+                      <span className="text-blue-700">연결할 노드 번호</span>
+                      <span className="ml-2 inline-flex min-w-8 items-center justify-center rounded-md bg-blue-50 px-2 py-0.5 font-bold tabular-nums text-blue-700">
+                        {numberConnection.input || '-'}
+                      </span>
+                      <span className="ml-2 text-slate-400">
+                        숫자 입력 · Enter 확정 · Esc 취소
+                      </span>
+                    </div>
+                    {numberConnection.input && (
+                      <div className="rounded-md border border-slate-200 bg-white/95 px-2 py-1 text-[11px] font-medium text-slate-500 shadow-sm">
+                        후보 {currentNumberMatches.length}개
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Drag connection preview overlay */}
                 <DragConnectionOverlay
@@ -672,331 +1324,17 @@ export default function NodeCanvas({
                   isRight={previewState.isRight}
                 />
 
-                {/* Right: Action Buttons */}
-                <div className="absolute top-4 right-4 flex items-center gap-2 z-30">
-                  {/* Group: Memory | Settings | Version | Publish */}
-                  <div className="h-9 flex items-center p-0.5 bg-white border border-gray-200 rounded-lg shadow-sm">
-                    <div className="h-full flex items-center px-2">
-                      <MemoryModeToggle
-                        isEnabled={isMemoryModeEnabled}
-                        hasProviderKey={hasProviderKey}
-                        description={memoryModeDescription}
-                        onToggle={toggleMemoryMode}
-                      />
-                    </div>
-                    <div className="w-px h-4 bg-gray-200 mx-1" />
-                    <button
-                      onClick={toggleSettings}
-                      className="h-full px-3 flex items-center gap-1.5 rounded-md transition-colors hover:bg-gray-100 text-gray-600 text-[13px] font-medium"
-                    >
-                      <Settings className="w-4 h-4" />
-                      <span>설정</span>
-                    </button>
-                    <div className="w-px h-4 bg-gray-200 mx-1" />
-                    <button
-                      onClick={toggleVersionHistory}
-                      className="h-full px-3 flex items-center gap-1.5 rounded-md transition-colors hover:bg-gray-100 text-gray-600 text-[13px] font-medium"
-                    >
-                      <ClockIcon className="w-4 h-4" />
-                      <span>버전</span>
-                    </button>
-                    <div className="w-px h-4 bg-gray-200 mx-1" />
-                    {/* Publish Button (Inside Group) */}
-                    <div className="relative h-full">
-                      <button
-                        disabled={!canPublish}
-                        onClick={toggleDeployDropdown}
-                        className={`h-full px-3 flex items-center gap-1.5 rounded-md transition-colors text-[13px] font-medium ${
-                          !canPublish
-                            ? 'text-gray-400 cursor-not-allowed'
-                            : 'hover:bg-gray-100 text-gray-600'
-                        }`}
-                      >
-                        <span>게시하기</span>
-                        <svg
-                          className={`w-3.5 h-3.5 transition-transform ${
-                            showDeployDropdown ? 'rotate-180' : ''
-                          }`}
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M19 9l-7 7-7-7"
-                          />
-                        </svg>
-                      </button>
-
-                      {/* Deployment Dropdown Menu */}
-                      {showDeployDropdown && canPublish && (
-                        <>
-                          <div
-                            className="fixed inset-0 z-10"
-                            onClick={() => setShowDeployDropdown(false)}
-                          />
-                          <div className="absolute right-0 mt-2 w-64 bg-white rounded-lg shadow-lg border border-gray-200 py-2 z-20 text-left">
-                            {/* Webhook Trigger Deployment */}
-                            {startNode?.type === 'webhookTrigger' && (
-                              <button
-                                onClick={handlePublishAsWebhook}
-                                className="w-full px-4 py-3 text-left hover:bg-gray-50 transition-colors"
-                              >
-                                <div className="font-medium text-gray-900">
-                                  웹훅으로 개시하기
-                                </div>
-                                <div className="text-sm text-gray-500 mt-1">
-                                  URL 호출로 실행
-                                </div>
-                              </button>
-                            )}
-
-                            {/* Schedule Trigger Deployment */}
-                            {startNode?.type === 'scheduleTrigger' && (
-                              <button
-                                onClick={handlePublishAsSchedule}
-                                className="w-full px-4 py-3 text-left hover:bg-gray-50 transition-colors"
-                              >
-                                <div className="font-medium text-gray-900">
-                                  알람으로 개시하기
-                                </div>
-                                <div className="text-sm text-gray-500 mt-1">
-                                  설정된 주기에 따라 실행
-                                </div>
-                              </button>
-                            )}
-
-                            {/* Standard Start Node Deployment Options */}
-                            {(startNode?.type === 'startNode' ||
-                              !startNode) && (
-                              <>
-                                <button
-                                  onClick={handlePublishAsRestAPI}
-                                  className="w-full px-4 py-3 text-left hover:bg-gray-50 transition-colors"
-                                >
-                                  <div className="font-medium text-gray-900">
-                                    REST API로 배포
-                                  </div>
-                                  <div className="text-sm text-gray-500 mt-1">
-                                    내 서비스나 백엔드 서버에서 호출
-                                  </div>
-                                </button>
-                                <div className="border-t border-gray-100 my-1" />
-                                <button
-                                  onClick={handlePublishAsWebApp}
-                                  className="w-full px-4 py-3 text-left hover:bg-gray-50 transition-colors"
-                                >
-                                  <div className="font-medium text-gray-900">
-                                    공개 웹페이지 생성
-                                  </div>
-                                  <div className="text-sm text-gray-500 mt-1">
-                                    설치 없이 바로 쓸 수 있는 페이지 제공
-                                  </div>
-                                </button>
-                                <div className="border-t border-gray-100 my-1" />
-                                <button
-                                  onClick={handlePublishAsWidget}
-                                  className="w-full px-4 py-3 text-left hover:bg-gray-50 transition-colors"
-                                >
-                                  <div className="font-medium text-gray-900">
-                                    사이트에 임베드
-                                  </div>
-                                  <div className="text-sm text-gray-500 mt-1">
-                                    스크립트 코드로 내 웹사이트에 삽입
-                                  </div>
-                                </button>
-                                <div className="border-t border-gray-100 my-1" />
-                                <button
-                                  onClick={handlePublishAsWorkflowNode}
-                                  className="w-full px-4 py-3 text-left hover:bg-gray-50 transition-colors"
-                                >
-                                  <div className="font-medium text-gray-900">
-                                    서브 모듈로 배포
-                                  </div>
-                                  <div className="text-sm text-gray-500 mt-1">
-                                    다른 모듈에서 재사용
-                                  </div>
-                                </button>
-                              </>
-                            )}
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Standalone: Test Button (Primary) */}
-                  <button
-                    onClick={toggleTestPanel}
-                    className="h-9 px-4 font-medium rounded-lg transition-colors flex items-center gap-1.5 text-[13px] shadow-sm bg-blue-600 hover:bg-blue-700 text-white"
-                  >
-                    <Play className="w-3.5 h-3.5 fill-current" />
-                    테스트
-                  </button>
-                </div>
-
                 {/* 플로팅 하단 패널 */}
                 <BottomPanel
                   onCenterNodes={handleAutoLayout}
-                  isPanelOpen={!!selectedNodeId}
+                  isPanelOpen={false}
                   onOpenAppSearch={() =>
                     setSearchModalContext({ isOpen: true })
                   }
                 />
 
-                {/* [LLM] 파라미터 사이드 패널 */}
-                {isParamPanelOpen &&
-                  selectedNodeType === 'llmNode' &&
-                  selectedNode && (
-                    <LLMParameterSidePanel
-                      nodeId={selectedNode.id}
-                      data={selectedNode.data as any}
-                      onClose={() => setIsParamPanelOpen(false)}
-                    />
-                  )}
-
-                {/* 노드 상세 패널 */}
-                {(selectedNodeId || selectedInnerNode) && (
-                  <NodeDetailsPanel
-                    nodeId={selectedNodeId}
-                    onClose={handleClosePanel}
-                    header={panelHeader}
-                    headerActions={
-                      selectedNodeType === 'llmNode' ? (
-                        <button
-                          onClick={() => {
-                            setIsRefPanelOpen(false);
-                            setIsParamPanelOpen((prev) => !prev);
-                          }}
-                          className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-colors ${
-                            isParamPanelOpen
-                              ? 'bg-blue-100 text-blue-600'
-                              : 'bg-gray-100 hover:bg-gray-200 text-gray-600'
-                          }`}
-                          title="LLM 파라미터 설정"
-                        >
-                          <Sliders className="w-3.5 h-3.5" />
-                          <span>파라미터</span>
-                        </button>
-                      ) : undefined
-                    }
-                  >
-                    {selectedNode && selectedNodeType === 'startNode' && (
-                      <StartNodePanel
-                        nodeId={selectedNode.id}
-                        data={selectedNode.data as any}
-                      />
-                    )}
-                    {selectedNode && selectedNodeType === 'answerNode' && (
-                      <AnswerNodePanel
-                        nodeId={selectedNode.id}
-                        data={selectedNode.data as any}
-                      />
-                    )}
-                    {selectedNode && selectedNodeType === 'httpRequestNode' && (
-                      <HttpRequestNodePanel
-                        nodeId={selectedNode.id}
-                        data={selectedNode.data as any}
-                      />
-                    )}
-                    {selectedNode && selectedNodeType === 'slackPostNode' && (
-                      <SlackPostNodePanel
-                        nodeId={selectedNode.id}
-                        data={selectedNode.data as any}
-                      />
-                    )}
-                    {selectedNode && selectedNodeType === 'codeNode' && (
-                      <CodeNodePanel
-                        nodeId={selectedNode.id}
-                        data={selectedNode.data as any}
-                      />
-                    )}
-                    {selectedNode && selectedNodeType === 'conditionNode' && (
-                      <ConditionNodePanel
-                        nodeId={selectedNode.id}
-                        data={selectedNode.data as any}
-                      />
-                    )}
-                    {selectedNode && selectedNodeType === 'llmNode' && (
-                      <LLMNodePanel
-                        nodeId={selectedNode.id}
-                        data={selectedNode.data as any}
-                      />
-                    )}
-                    {selectedNode && selectedNodeType === 'templateNode' && (
-                      <TemplateNodePanel
-                        nodeId={selectedNode.id}
-                        data={selectedNode.data as any}
-                      />
-                    )}
-                    {selectedNode && selectedNodeType === 'workflowNode' && (
-                      <WorkflowNodePanel
-                        nodeId={selectedNode.id}
-                        data={selectedNode.data as any}
-                      />
-                    )}
-                    {selectedNode &&
-                      selectedNodeType === 'fileExtractionNode' && (
-                        <FileExtractionNodePanel
-                          nodeId={selectedNode.id}
-                          data={selectedNode.data as any}
-                        />
-                      )}
-                    {selectedNode &&
-                      selectedNodeType === 'variableExtractionNode' && (
-                        <VariableExtractionNodePanel
-                          nodeId={selectedNode.id}
-                          data={selectedNode.data as any}
-                        />
-                      )}
-                    {selectedNode && selectedNodeType === 'webhookTrigger' && (
-                      <WebhookTriggerNodePanel
-                        nodeId={selectedNode.id}
-                        data={selectedNode.data as any}
-                      />
-                    )}
-                    {selectedNode && selectedNodeType === 'scheduleTrigger' && (
-                      <ScheduleTriggerNodePanel
-                        nodeId={selectedNode.id}
-                        data={selectedNode.data as any}
-                      />
-                    )}
-                    {selectedNode && selectedNodeType === 'githubNode' && (
-                      <GithubNodePanel
-                        nodeId={selectedNode.id}
-                        data={selectedNode.data as any}
-                      />
-                    )}
-                    {selectedNode && selectedNodeType === 'mailNode' && (
-                      <MailNodePanel
-                        nodeId={selectedNode.id}
-                        data={selectedNode.data as any}
-                      />
-                    )}
-                    {selectedNode && selectedNodeType === 'loopNode' && (
-                      <LoopNodePanel
-                        nodeId={selectedNode.id}
-                        data={selectedNode.data as any}
-                      />
-                    )}
-                  </NodeDetailsPanel>
-                )}
-
-                {/* [LLM] Reference Side Panel */}
-                {isRefPanelOpen &&
-                  selectedNodeType === 'llmNode' &&
-                  selectedNode && (
-                    <LLMReferenceSidePanel
-                      nodeId={selectedNode.id}
-                      data={selectedNode.data as any}
-                      onClose={() => setIsRefPanelOpen(false)}
-                    />
-                  )}
-
                 {/* Context Menu UI */}
-                {contextMenu && (
+                {contextMenu && !isReadOnly && (
                   <div
                     className="fixed z-50 bg-white rounded-lg shadow-xl border border-gray-200 py-1 min-w-[180px]"
                     style={{ top: contextMenu.y, left: contextMenu.x }}
@@ -1028,7 +1366,7 @@ export default function NodeCanvas({
                 )}
 
                 {/* 노드 우클릭 삭제 메뉴 */}
-                {nodeContextMenu && (
+                {nodeContextMenu && !isReadOnly && (
                   <div
                     className="fixed z-50 bg-white rounded-lg shadow-xl border border-gray-200 py-1 min-w-[140px]"
                     style={{ top: nodeContextMenu.y, left: nodeContextMenu.x }}
@@ -1045,7 +1383,7 @@ export default function NodeCanvas({
                 )}
 
                 {/* Edge 우클릭 삭제 메뉴 */}
-                {edgeContextMenu && (
+                {edgeContextMenu && !isReadOnly && (
                   <div
                     className="fixed z-50 bg-white rounded-lg shadow-xl border border-gray-200 py-1 min-w-[140px]"
                     style={{ top: edgeContextMenu.y, left: edgeContextMenu.x }}
@@ -1062,7 +1400,7 @@ export default function NodeCanvas({
                 )}
 
                 {/* Context Menu Node Selector Modal */}
-                {isContextNodeSelectorOpen && (
+                {isContextNodeSelectorOpen && !isReadOnly && (
                   <div
                     className="fixed z-50"
                     style={{
@@ -1085,7 +1423,7 @@ export default function NodeCanvas({
                 )}
 
                 {/* Close Node Selector when clicking outside (overlay) */}
-                {isContextNodeSelectorOpen && (
+                {isContextNodeSelectorOpen && !isReadOnly && (
                   <div
                     className="fixed inset-0 z-40"
                     onClick={() => setIsContextNodeSelectorOpen(false)}
@@ -1095,24 +1433,6 @@ export default function NodeCanvas({
             </div>
           </div>
 
-          {/* 2. Logs Tab Content */}
-          {viewMode === 'log' && (
-            <LogTab
-              workflowId={String(activeWorkflowId)}
-              initialRunId={initialLogRunId}
-            />
-          )}
-
-          {/* 3. Monitoring Tab Content */}
-          {viewMode === 'monitoring' && (
-            <MonitoringTab
-              workflowId={String(activeWorkflowId)}
-              onNavigateToLog={(runId) => {
-                setInitialLogRunId(runId);
-                onViewModeChange('log');
-              }}
-            />
-          )}
         </div>
       </div>
       {/* Sidebars */}
@@ -1120,13 +1440,30 @@ export default function NodeCanvas({
       <VersionHistorySidebar />
       <TestSidebar appendMemoryFlag={appendMemoryFlag} />
 
+      {/* 노드 전체화면 설정(NDV) */}
+      <NodeFullscreenEditor />
+
       {/* Deployment Flow Modal */}
       <DeploymentFlowModal
         isOpen={showDeployFlowModal}
         onClose={() => setShowDeployFlowModal(false)}
+        appId={currentAppId}
         deploymentType={deploymentType}
+        llmNodes={deploymentLlmNodes}
         onDeploy={handleDeploy}
       />
+
+      {!isReadOnly && (
+        <AgentBuilderPanel
+          workflowId={activeWorkflowId}
+          appId={currentAppId}
+          nodes={nodes}
+          edges={edges}
+          hasUnsavedChanges={hasUnsavedChanges}
+          selectedNodeId={selectedNodeId}
+          selectedEdgeId={selectedEdgeId}
+        />
+      )}
 
       {/* Memory Mode Modals */}
       {memoryModeModals}

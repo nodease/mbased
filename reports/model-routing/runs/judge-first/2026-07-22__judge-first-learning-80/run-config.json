@@ -1,0 +1,65 @@
+{
+  "schema_version": 2,
+  "run_id": "2026-07-22__judge-first-learning-80",
+  "experiment": "judge-first-norag-blind-economics",
+  "strategy_id": "judge_bootstrap_incremental_v1",
+  "routing_judge_model": "gpt-5.4-mini",
+  "routing_judge_max_output_tokens": 768,
+  "quality_judge_model": "gpt-5-mini",
+  "candidate_model_ids": [
+    "gpt-4o-mini",
+    "gpt-4.1-mini",
+    "gpt-4.1",
+    "gpt-4o",
+    "gpt-5-mini",
+    "gpt-5.4-mini",
+    "gpt-5.4",
+    "gpt-5.6-sol",
+    "gpt-5.6-luna",
+    "gpt-5.6-terra",
+    "o3"
+  ],
+  "comparison_arms": {
+    "automatic": "automatic routing",
+    "mid_fixed": "gpt-5.4-mini",
+    "high_fixed": "gpt-5.6-sol"
+  },
+  "dataset": {
+    "name": "enterprise-norag-routing-two-stage-v3",
+    "total_case_count": 120
+  },
+  "phases": {
+    "learning": {
+      "case_count": 100,
+      "arms": [
+        "automatic"
+      ],
+      "quality_judge": false
+    },
+    "benchmark": {
+      "case_count": 20,
+      "arms": [
+        "automatic",
+        "mid_fixed",
+        "high_fixed"
+      ],
+      "quality_judge": true,
+      "requires_ready_learner": true
+    }
+  },
+  "batch_size": 10,
+  "artifact_files": {
+    "learning": {
+      "report": "learning/report.md",
+      "result": "learning/result.json",
+      "batches": "learning/batches/",
+      "append_only_events": "learning/execution-events.jsonl"
+    },
+    "benchmark": {
+      "report": "benchmark/report.md",
+      "result": "benchmark/result.json",
+      "batches": "benchmark/batches/",
+      "append_only_events": "benchmark/execution-events.jsonl"
+    }
+  }
+}

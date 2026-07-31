@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { toast } from 'sonner';
 import type { AxiosError } from 'axios';
 import { authApi } from '@/app/features/auth/api/authApi';
+import { resolveSafeAuthReturnPath } from '@/lib/authReturn';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -27,7 +28,10 @@ export default function LoginPage() {
         password: formData.password,
       });
 
-      router.push('/dashboard');
+      const returnPath = resolveSafeAuthReturnPath(
+        new URLSearchParams(window.location.search).get('next'),
+      );
+      router.push(returnPath);
     } catch (err) {
       const axiosError = err as AxiosError<{ detail: string | string[] }>;
       const status = axiosError.response?.status;
@@ -71,7 +75,10 @@ export default function LoginPage() {
   };
 
   const handleGoogleLogin = () => {
-    authApi.googleLogin();
+    const returnPath = resolveSafeAuthReturnPath(
+      new URLSearchParams(window.location.search).get('next'),
+    );
+    authApi.googleLogin(returnPath);
   };
 
   return (

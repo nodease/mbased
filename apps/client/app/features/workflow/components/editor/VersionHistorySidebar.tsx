@@ -8,6 +8,7 @@ import { ko } from 'date-fns/locale';
 import { toast } from 'sonner';
 import { Tag } from '@/app/features/app/components/Tag';
 import { getModuleTags } from '@/app/features/app/utils/tagUtils';
+import { deploymentApiErrorMessage } from '../../utils/deploymentPreflightMessage';
 
 export function VersionHistorySidebar() {
   const {
@@ -59,7 +60,7 @@ export function VersionHistorySidebar() {
       fetchHistory();
     } catch (error: any) {
       console.error('Toggle failed:', error);
-      toast.error(error.response?.data?.detail || '토글에 실패했습니다.');
+      toast.error(deploymentApiErrorMessage(error, '토글에 실패했습니다.'));
     }
   };
 
@@ -258,7 +259,13 @@ export function VersionHistorySidebar() {
 
       {/* 확인 모달 */}
       {confirmModal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="배포 변경 확인"
+          data-canvas-shortcut-scope="blocked"
+          className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
+        >
           <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
             <h3 className="text-lg font-semibold text-gray-900 mb-2">
               {confirmModal.type === 'toggle'

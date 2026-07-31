@@ -1,8 +1,22 @@
 'use client';
 
-import { useState, useEffect } from 'react';
-import { X, Sparkles, Copy, Check, Loader2, ArrowRight, Info, ChevronDown, Code } from 'lucide-react';
-
+import { useCallback, useEffect, useState } from 'react';
+import {
+  X,
+  Sparkles,
+  Copy,
+  Check,
+  Loader2,
+  ArrowRight,
+  Info,
+  ChevronDown,
+  Code,
+} from 'lucide-react';
+import {
+  activeOrganizationHeaders,
+  getStoredActiveOrganizationId,
+} from '@/lib/activeOrganization';
+import { csrfFetch } from '@/lib/csrfToken';
 
 // 템플릿 타입 정의
 type TemplateType = 'email' | 'message' | 'report' | 'custom';
@@ -11,15 +25,36 @@ interface TemplateWizardModalProps {
   isOpen: boolean;
   onClose: () => void;
   originalTemplate: string;
-  registeredVariables: string[];  // Template Node의 등록된 변수명
+  registeredVariables: string[]; // Template Node의 등록된 변수명
   onApply: (improvedTemplate: string) => void;
+  organizationId?: string | null;
 }
 
-const TEMPLATE_TYPE_OPTIONS: { value: TemplateType; label: string; description: string }[] = [
-  { value: 'email', label: '이메일/알림', description: '이메일, 뉴스레터, 알림 템플릿' },
-  { value: 'message', label: '챗봇/메시지', description: '챗봇 응답, 알림 메시지' },
-  { value: 'report', label: '보고서/문서', description: '보고서, 문서, 마크다운' },
-  { value: 'custom', label: '직접 설명', description: '원하는 개선 방향을 직접 설명' },
+const TEMPLATE_TYPE_OPTIONS: {
+  value: TemplateType;
+  label: string;
+  description: string;
+}[] = [
+  {
+    value: 'email',
+    label: '이메일/알림',
+    description: '이메일, 뉴스레터, 알림 템플릿',
+  },
+  {
+    value: 'message',
+    label: '챗봇/메시지',
+    description: '챗봇 응답, 알림 메시지',
+  },
+  {
+    value: 'report',
+    label: '보고서/문서',
+    description: '보고서, 문서, 마크다운',
+  },
+  {
+    value: 'custom',
+    label: '직접 설명',
+    description: '원하는 개선 방향을 직접 설명',
+  },
 ];
 
 export function TemplateWizardModal({
@@ -28,9 +63,8 @@ export function TemplateWizardModal({
   originalTemplate,
   registeredVariables,
   onApply,
+  organizationId,
 }: TemplateWizardModalProps) {
-
-  
   // 상태 관리
   const [currentTemplate, setCurrentTemplate] = useState(originalTemplate);
   const [improvedTemplate, setImprovedTemplate] = useState('');
@@ -41,6 +75,41 @@ export function TemplateWizardModal({
   const [hasCredentials, setHasCredentials] = useState<boolean | null>(null);
   const [copied, setCopied] = useState(false);
   const [showTypeDropdown, setShowTypeDropdown] = useState(false);
+  const isOrganizationScopePending = organizationId === null;
+
+  const getWizardOrganizationId = useCallback(
+    () =>
+      organizationId !== undefined
+        ? organizationId
+        : getStoredActiveOrganizationId(),
+    [organizationId],
+  );
+
+  // Credential 확인
+  const checkCredentials = useCallback(async () => {
+    setHasCredentials(null);
+    if (isOrganizationScopePending) return;
+
+    try {
+      const resolvedOrganizationId = getWizardOrganizationId();
+      const query = resolvedOrganizationId
+        ? `?organization_id=${encodeURIComponent(resolvedOrganizationId)}`
+        : '';
+      const res = await fetch(
+        `/api/v1/template-wizard/check-credentials${query}`,
+        {
+          method: 'GET',
+          credentials: 'include',
+        },
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setHasCredentials(data.has_credentials);
+      }
+    } catch {
+      setHasCredentials(false);
+    }
+  }, [getWizardOrganizationId, isOrganizationScopePending]);
 
   // 모달 열릴 때 상태 초기화
   useEffect(() => {
@@ -51,25 +120,9 @@ export function TemplateWizardModal({
       setCopied(false);
       setTemplateType('email');
       setCustomInstructions('');
-      checkCredentials();
+      void checkCredentials();
     }
-  }, [isOpen, originalTemplate]);
-
-  // Credential 확인
-  const checkCredentials = async () => {
-    try {
-      const res = await fetch('/api/v1/template-wizard/check-credentials', {
-        method: 'GET',
-        credentials: 'include',
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setHasCredentials(data.has_credentials);
-      }
-    } catch {
-      setHasCredentials(false);
-    }
-  };
+  }, [isOpen, originalTemplate, checkCredentials, setCurrentTemplate]);
 
   // 템플릿 개선 요청
   const handleImprove = async () => {
@@ -78,33 +131,53 @@ export function TemplateWizardModal({
       return;
     }
 
+    if (isOrganizationScopePending) {
+      setError(
+        '워크플로우 조직 정보를 불러오는 중입니다. 잠시 후 다시 시도해주세요.',
+      );
+      return;
+    }
+
     setIsLoading(true);
     setError(null);
     setImprovedTemplate('');
 
     try {
-      const res = await fetch('/api/v1/template-wizard/improve', {
+      const resolvedOrganizationId = getWizardOrganizationId();
+      const res = await csrfFetch('/api/v1/template-wizard/improve', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...activeOrganizationHeaders(resolvedOrganizationId),
+        },
         credentials: 'include',
         body: JSON.stringify({
           template_type: templateType,
           original_template: currentTemplate,
           registered_variables: registeredVariables,
-          custom_instructions: templateType === 'custom' ? customInstructions : null,
+          custom_instructions:
+            templateType === 'custom' ? customInstructions : null,
+          organization_id: resolvedOrganizationId ?? undefined,
         }),
       });
 
       if (!res.ok) {
         const errorData = await res.json();
-        const message = errorData.detail?.message || errorData.detail || '템플릿 개선에 실패했습니다.';
+        const message =
+          errorData.detail?.message ||
+          errorData.detail ||
+          '템플릿 개선에 실패했습니다.';
         throw new Error(message);
       }
 
       const data = await res.json();
       setImprovedTemplate(data.improved_template);
-    } catch (err: any) {
-      setError(err.message || '알 수 없는 오류가 발생했습니다.');
+    } catch (err) {
+      setError(
+        err instanceof Error && err.message
+          ? err.message
+          : '알 수 없는 오류가 발생했습니다.',
+      );
     } finally {
       setIsLoading(false);
     }
@@ -135,10 +208,18 @@ export function TemplateWizardModal({
 
   if (!isOpen) return null;
 
-  const selectedType = TEMPLATE_TYPE_OPTIONS.find(t => t.value === templateType);
+  const selectedType = TEMPLATE_TYPE_OPTIONS.find(
+    (t) => t.value === templateType,
+  );
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100]">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="템플릿 마법사"
+      data-canvas-shortcut-scope="blocked"
+      className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100]"
+    >
       <div className="bg-white rounded-xl shadow-2xl w-[90vw] max-w-5xl h-[70vh] min-h-[550px] flex flex-col overflow-hidden">
         {/* 헤더 */}
         <div className="px-6 py-4 border-b border-gray-200 flex justify-between items-center bg-gradient-to-r from-pink-50 to-purple-50">
@@ -147,12 +228,8 @@ export function TemplateWizardModal({
               <Sparkles className="w-5 h-5 text-pink-600" />
             </div>
             <div>
-              <h2 className="text-lg font-bold text-gray-800">
-                템플릿 마법사
-              </h2>
-              <p className="text-sm text-gray-500">
-                Jinja2 템플릿 개선
-              </p>
+              <h2 className="text-lg font-bold text-gray-800">템플릿 마법사</h2>
+              <p className="text-sm text-gray-500">Jinja2 템플릿 개선</p>
             </div>
           </div>
           <button
@@ -167,10 +244,13 @@ export function TemplateWizardModal({
         <div className="px-6 py-2.5 bg-amber-50 border-b border-amber-100 flex items-center gap-2">
           <Info className="w-4 h-4 text-amber-600 flex-shrink-0" />
           <p className="text-xs text-amber-700">
-            등록하신 Provider API Key를 통해 AI를 호출합니다. 
+            등록하신 Provider API Key를 통해 AI를 호출합니다.
             {registeredVariables.length > 0 && (
               <span className="ml-1">
-                등록된 변수: <code className="bg-amber-100 px-1 rounded">{registeredVariables.join(', ')}</code>
+                등록된 변수:{' '}
+                <code className="bg-amber-100 px-1 rounded">
+                  {registeredVariables.join(', ')}
+                </code>
               </span>
             )}
           </p>
@@ -179,16 +259,20 @@ export function TemplateWizardModal({
         {/* 템플릿 타입 선택 */}
         <div className="px-6 py-3 border-b border-gray-100 bg-gray-50">
           <div className="flex items-center gap-4">
-            <span className="text-sm font-medium text-gray-700">템플릿 유형:</span>
+            <span className="text-sm font-medium text-gray-700">
+              템플릿 유형:
+            </span>
             <div className="relative">
               <button
                 onClick={() => setShowTypeDropdown(!showTypeDropdown)}
                 className="flex items-center gap-2 px-3 py-2 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors min-w-[160px]"
               >
-                <span className="text-sm font-medium text-gray-800">{selectedType?.label}</span>
+                <span className="text-sm font-medium text-gray-800">
+                  {selectedType?.label}
+                </span>
                 <ChevronDown className="w-4 h-4 text-gray-400 ml-auto" />
               </button>
-              
+
               {showTypeDropdown && (
                 <div className="absolute top-full left-0 mt-1 w-64 bg-white border border-gray-200 rounded-lg shadow-lg z-10">
                   {TEMPLATE_TYPE_OPTIONS.map((option) => (
@@ -202,15 +286,19 @@ export function TemplateWizardModal({
                         templateType === option.value ? 'bg-pink-50' : ''
                       }`}
                     >
-                      <div className="font-medium text-sm text-gray-800">{option.label}</div>
-                      <div className="text-xs text-gray-500 mt-0.5">{option.description}</div>
+                      <div className="font-medium text-sm text-gray-800">
+                        {option.label}
+                      </div>
+                      <div className="text-xs text-gray-500 mt-0.5">
+                        {option.description}
+                      </div>
                     </button>
                   ))}
                 </div>
               )}
             </div>
           </div>
-          
+
           {/* custom 타입일 때 추가 설명 입력 */}
           {templateType === 'custom' && (
             <div className="mt-3">
@@ -258,7 +346,7 @@ export function TemplateWizardModal({
                 </div>
               </div>
             )}
-            
+
             {/* 왼쪽 하단 버튼 영역 */}
             <div className="mt-4">
               {hasCredentials === false ? (
@@ -272,7 +360,12 @@ export function TemplateWizardModal({
               ) : (
                 <button
                   onClick={handleImprove}
-                  disabled={isLoading || !currentTemplate.trim()}
+                  data-testid="template-wizard-submit"
+                  disabled={
+                    isLoading ||
+                    isOrganizationScopePending ||
+                    !currentTemplate.trim()
+                  }
                   className="w-full py-3 px-4 bg-pink-600 hover:bg-pink-700 text-white font-medium rounded-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-md hover:shadow-lg"
                 >
                   {isLoading ? (
@@ -296,7 +389,7 @@ export function TemplateWizardModal({
             <label className="text-sm font-semibold text-gray-700 mb-2">
               AI 개선 결과
             </label>
-            
+
             <div className="flex-1 w-full p-3 text-sm border border-gray-200 rounded-lg bg-white overflow-y-auto font-mono">
               {isLoading ? (
                 <div className="h-full flex flex-col items-center justify-center text-gray-400">
@@ -343,8 +436,7 @@ export function TemplateWizardModal({
                   onClick={handleApply}
                   className="flex-1 py-2.5 px-4 bg-pink-600 hover:bg-pink-700 text-white font-medium rounded-lg transition-colors flex items-center justify-center gap-2 shadow-md"
                 >
-                  <Check className="w-4 h-4" />
-                  이 템플릿 적용
+                  <Check className="w-4 h-4" />이 템플릿 적용
                 </button>
               </div>
             )}

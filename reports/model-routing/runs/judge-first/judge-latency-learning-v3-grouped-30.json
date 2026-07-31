@@ -1,0 +1,147 @@
+{
+  "started_at": "2026-07-21T08:09:30.548875+00:00",
+  "feature_strategy": "grouped_runtime_variables_v3",
+  "executions": 30,
+  "workflow_success_count": 30,
+  "schema_pass_count": 30,
+  "selected_models": {
+    "gpt-5-mini": 16,
+    "gpt-4.1-mini": 8,
+    "gpt-4o-mini": 6
+  },
+  "task_cost_usd": 0.035803,
+  "judge_cost_usd": 0.122187,
+  "judge_usage_log_count": 30,
+  "judge_latency_count": 30,
+  "judge_latency_ms": {
+    "min": 2590,
+    "mean": 3725.17,
+    "median": 3596.0,
+    "p95": 5341,
+    "max": 5499,
+    "stdev": 866.52
+  },
+  "labels_created": 30,
+  "labels_accepted": 30,
+  "labels_rejected": 0,
+  "learning_blocks": [
+    {
+      "runs": "1-10",
+      "count": 10,
+      "comparable": 10,
+      "exact_match_rate": 0.0,
+      "axis_mae": {
+        "task_complexity": 1.3,
+        "decision_impact": 1.6,
+        "evidence_synthesis": 1.3
+      },
+      "judge_diversity": 7,
+      "prediction_diversity": 1,
+      "contract_pass_rate": 1.0
+    },
+    {
+      "runs": "11-20",
+      "count": 10,
+      "comparable": 10,
+      "exact_match_rate": 0.2,
+      "axis_mae": {
+        "task_complexity": 0.4,
+        "decision_impact": 0.9,
+        "evidence_synthesis": 0.5
+      },
+      "judge_diversity": 6,
+      "prediction_diversity": 1,
+      "contract_pass_rate": 1.0
+    },
+    {
+      "runs": "21-30",
+      "count": 10,
+      "comparable": 10,
+      "exact_match_rate": 0.0,
+      "axis_mae": {
+        "task_complexity": 0.4,
+        "decision_impact": 0.7,
+        "evidence_synthesis": 0.4
+      },
+      "judge_diversity": 6,
+      "prediction_diversity": 1,
+      "contract_pass_rate": 1.0
+    }
+  ],
+  "checkpoints": [
+    {
+      "after_runs": 10,
+      "processed_count": 10,
+      "remaining_count": 0,
+      "mode": "judge_first",
+      "judged_request_count": 10,
+      "recent_evaluation": {
+        "sample_count": 10,
+        "axis_mean_errors": {
+          "decision_impact": 1.6,
+          "task_complexity": 1.3,
+          "evidence_synthesis": 1.3
+        },
+        "judge_match_rate": 0.0,
+        "contract_pass_rate": 1.0,
+        "judge_label_diversity": 7,
+        "local_prediction_diversity": 1
+      }
+    },
+    {
+      "after_runs": 20,
+      "processed_count": 10,
+      "remaining_count": 0,
+      "mode": "judge_first",
+      "judged_request_count": 20,
+      "recent_evaluation": {
+        "sample_count": 20,
+        "axis_mean_errors": {
+          "decision_impact": 1.25,
+          "task_complexity": 0.85,
+          "evidence_synthesis": 0.9
+        },
+        "judge_match_rate": 0.1,
+        "contract_pass_rate": 1.0,
+        "judge_label_diversity": 8,
+        "local_prediction_diversity": 2
+      }
+    },
+    {
+      "after_runs": 30,
+      "processed_count": 10,
+      "remaining_count": 0,
+      "mode": "judge_first",
+      "judged_request_count": 30,
+      "recent_evaluation": {
+        "sample_count": 20,
+        "axis_mean_errors": {
+          "decision_impact": 0.8,
+          "task_complexity": 0.4,
+          "evidence_synthesis": 0.45
+        },
+        "judge_match_rate": 0.1,
+        "contract_pass_rate": 1.0,
+        "judge_label_diversity": 9,
+        "local_prediction_diversity": 2
+      }
+    }
+  ],
+  "final_learning": {
+    "mode": "judge_first",
+    "judged_request_count": 30,
+    "recent_evaluation": {
+      "sample_count": 20,
+      "axis_mean_errors": {
+        "decision_impact": 0.8,
+        "task_complexity": 0.4,
+        "evidence_synthesis": 0.45
+      },
+      "judge_match_rate": 0.1,
+      "contract_pass_rate": 1.0,
+      "judge_label_diversity": 9,
+      "local_prediction_diversity": 2
+    },
+    "feature_schema_version": "grouped_runtime_variables_v3"
+  }
+}

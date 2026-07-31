@@ -32,7 +32,7 @@ export default function SignupPage() {
 
     try {
       // authApi.signup 사용
-      const data = await authApi.signup({
+      await authApi.signup({
         name: formData.name,
         email: formData.email,
         password: formData.password,

@@ -42,7 +42,7 @@ class Job:
     future: Optional[asyncio.Future] = field(default=None, compare=False)
     
     # 메타데이터
-    tenant_id: Optional[str] = field(default=None, compare=False)
+    organization_id: Optional[str] = field(default=None, compare=False)
     
     def __post_init__(self):
         """기본값 처리"""

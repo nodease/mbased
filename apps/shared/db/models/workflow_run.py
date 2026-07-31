@@ -3,13 +3,24 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import List, Optional
 
-from sqlalchemy import DateTime, Float, ForeignKey, Integer, Numeric, String, Text
+from apps.shared.db.base import Base
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    text,
+)
 from sqlalchemy import Enum as SQLEnum
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-
-from apps.shared.db.base import Base
 
 
 class RunStatus(str, Enum):
@@ -41,6 +52,14 @@ class WorkflowRun(Base):
     """
 
     __tablename__ = "workflow_runs"
+    __table_args__ = (
+        CheckConstraint(
+            "user_id IS NOT NULL OR "
+            "(trigger_mode = 'SCHEDULER' AND workflow_task_id IS NOT NULL "
+            "AND workflow_task_id LIKE 'schedule:%')",
+            name="ck_workflow_runs_system_schedule_executor",
+        ),
+    )
 
     # === 기본 식별자 ===
     id: Mapped[uuid.UUID] = mapped_column(
@@ -55,11 +74,17 @@ class WorkflowRun(Base):
         nullable=False,
         index=True,
     )
-    # 누가 실행했는지 (익명 실행이 없다면 nullable=False)
-    user_id: Mapped[uuid.UUID] = mapped_column(
+    # System schedule만 nullable. 다른 실행 표면은 application validation에서 user 필수.
+    user_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         PGUUID(as_uuid=True),
         ForeignKey("users.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
+        index=True,
+    )
+    app_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("apps.id", ondelete="SET NULL"),
+        nullable=True,
         index=True,
     )
 
@@ -110,6 +135,38 @@ class WorkflowRun(Base):
     # === 메타데이터 ===
     # 클라이언트 IP, User Agent 등 추후 확장을 위한 필드
     meta_info: Mapped[Optional[dict]] = mapped_column("meta_info", JSONB, nullable=True)
+    correlation_id: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True, index=True
+    )
+    # 챗봇 배포 등 멀티턴 대화에서 방문자별 대화를 격리하기 위한 식별자.
+    # 공개 실행은 user_id가 앱 소유자로 고정되므로, 기억 조회는 이 값으로 스코프한다.
+    conversation_id: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True, index=True
+    )
+    request_id: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True, index=True
+    )
+    workflow_task_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    trace_metadata: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    redaction_applied: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    pii_detected: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    redaction_policy_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PGUUID(as_uuid=True), nullable=True
+    )
+    retention_policy_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PGUUID(as_uuid=True), nullable=True
+    )
+    visibility_policy_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PGUUID(as_uuid=True), nullable=True
+    )
+    payload_storage_mode: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="redacted_only"
+    )
+    retention_purged_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
 
     # === 비용/토큰 집계 (Denormalized) ===
     total_tokens: Mapped[Optional[int]] = mapped_column(
@@ -123,6 +180,9 @@ class WorkflowRun(Base):
     # 1:N 관계 - 하나의 실행은 여러 노드 실행 기록을 가짐
     node_runs: Mapped[List["WorkflowNodeRun"]] = relationship(
         "WorkflowNodeRun", back_populates="workflow_run", cascade="all, delete-orphan"
+    )
+    trace_payloads: Mapped[List["TracePayload"]] = relationship(
+        "TracePayload", back_populates="workflow_run", cascade="all, delete-orphan"
     )
 
     # LLM 사용 로그와 연동 (1:N) - 하나의 워크플로우 실행에서 여러 번의 LLM 호출이 발생할 수 있음
@@ -180,8 +240,316 @@ class WorkflowNodeRun(Base):
     finished_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+    duration: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    trace_metadata: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    redaction_applied: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    pii_detected: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    redaction_policy_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PGUUID(as_uuid=True), nullable=True
+    )
+    parent_node_run_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("workflow_node_runs.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    sequence: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     # === Relationships ===
     workflow_run: Mapped["WorkflowRun"] = relationship(
         "WorkflowRun", back_populates="node_runs"
+    )
+    trace_payloads: Mapped[List["TracePayload"]] = relationship(
+        "TracePayload", back_populates="workflow_node_run", cascade="all, delete-orphan"
+    )
+
+
+class TraceRedactionPolicy(Base):
+    """전역, 조직, 앱 범위별 추적 페이로드 마스킹 정책."""
+
+    __tablename__ = "trace_redaction_policies"
+    __table_args__ = (
+        Index(
+            "ix_trace_redaction_policies_scope",
+            "scope_type",
+            "scope_id",
+            "is_active",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), primary_key=True, default=uuid.uuid4, nullable=False
+    )
+    scope_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    scope_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PGUUID(as_uuid=True), nullable=True
+    )
+    redaction_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    raw_payload_storage_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    prompt_completion_storage_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True
+    )
+    pii_detection_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True
+    )
+    store_redacted_copy_only: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True
+    )
+    sensitive_headers: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
+    sensitive_json_paths: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
+    sensitive_keywords: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
+    regex_rules: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
+    replacement: Mapped[str] = mapped_column(
+        String(64), nullable=False, default="[REDACTED]"
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    updated_by: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+
+class TraceRetentionPolicy(Base):
+    """추적 메타데이터와 페이로드 보관 정책."""
+
+    __tablename__ = "trace_retention_policies"
+    __table_args__ = (
+        Index(
+            "ix_trace_retention_policies_scope",
+            "scope_type",
+            "scope_id",
+            "is_active",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), primary_key=True, default=uuid.uuid4, nullable=False
+    )
+    scope_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    scope_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PGUUID(as_uuid=True), nullable=True
+    )
+    metadata_retention_days: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=90
+    )
+    raw_payload_retention_days: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=7
+    )
+    redacted_payload_retention_days: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=30
+    )
+    prompt_completion_retention_days: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=30
+    )
+    failed_trace_retention_days: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=90
+    )
+    retention_action: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="delete"
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    updated_by: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+
+class TraceVisibilityPolicy(Base):
+    """앱 소유자와 시스템 관리자를 위한 추적 표시 정책."""
+
+    __tablename__ = "trace_visibility_policies"
+    __table_args__ = (
+        Index(
+            "ix_trace_visibility_policies_scope",
+            "scope_type",
+            "scope_id",
+            "is_active",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), primary_key=True, default=uuid.uuid4, nullable=False
+    )
+    scope_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    scope_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PGUUID(as_uuid=True), nullable=True
+    )
+    owner_trace_access_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True
+    )
+    owner_redacted_payload_access_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    owner_raw_payload_access_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    owner_prompt_completion_access_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    admin_raw_payload_access_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    admin_prompt_completion_access_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    deny_owner_trace_access: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    default_view_level: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="metadata"
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    updated_by: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+
+class TracePayload(Base):
+    """추가 전용 추적/스팬 페이로드 저장소."""
+
+    __tablename__ = "trace_payloads"
+    __table_args__ = (
+        Index(
+            "ix_trace_payloads_latest_view",
+            "workflow_run_id",
+            "scope",
+            "workflow_node_run_id",
+            "payload_kind",
+            "created_at",
+            "sequence",
+            "attempt",
+        ),
+        Index(
+            "ix_trace_payloads_retention_scan",
+            "retention_purged_at",
+            "payload_kind",
+            "created_at",
+            "retention_expires_at",
+        ),
+        Index(
+            "ix_trace_payloads_raw_retention",
+            "created_at",
+            postgresql_where=text("raw_payload_encrypted IS NOT NULL"),
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), primary_key=True, default=uuid.uuid4, nullable=False
+    )
+    workflow_run_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("workflow_runs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    workflow_node_run_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("workflow_node_runs.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
+    )
+    scope: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    payload_kind: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    sequence: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    redacted_payload: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    raw_payload_encrypted: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    redaction_applied: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    pii_detected: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    secret_detected: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    redaction_metadata: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    storage_mode: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="redacted_only"
+    )
+    retention_expires_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    retention_purged_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+
+    workflow_run: Mapped["WorkflowRun"] = relationship(
+        "WorkflowRun", back_populates="trace_payloads"
+    )
+    workflow_node_run: Mapped[Optional["WorkflowNodeRun"]] = relationship(
+        "WorkflowNodeRun", back_populates="trace_payloads"
+    )
+
+
+class TracePayloadAccessEvent(Base):
+    """원문 페이로드 조회 시도를 남기기 위한 최소 접근 이벤트 모델."""
+
+    __tablename__ = "trace_payload_access_events"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), primary_key=True, default=uuid.uuid4, nullable=False
+    )
+    payload_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("trace_payloads.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    workflow_run_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey("workflow_runs.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    actor_user_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    actor_user_ref: Mapped[Optional[str]] = mapped_column(
+        String(128), nullable=True, index=True
+    )
+    view_level: Mapped[str] = mapped_column(String(32), nullable=False)
+    allowed: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    reason_code: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
     )

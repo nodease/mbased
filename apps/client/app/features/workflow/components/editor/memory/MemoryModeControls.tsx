@@ -1,9 +1,14 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { HelpCircle } from 'lucide-react';
+import { isMockWorkflowPath } from '@/app/features/workflow/utils/mockMode';
+import {
+  activeOrganizationHeaders,
+  getStoredActiveOrganizationId,
+} from '@/lib/activeOrganization';
 
 type MemoryModeModalsProps = {
   showMemoryConfirm: boolean;
@@ -25,7 +30,13 @@ function MemoryModeModals({
   return (
     <>
       {showMemoryConfirm && (
-        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/40 px-4">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="기억모드 비용 확인"
+          data-canvas-shortcut-scope="blocked"
+          className="fixed inset-0 z-[120] flex items-center justify-center bg-black/40 px-4"
+        >
           <div className="bg-white rounded-2xl shadow-2xl border border-gray-100 max-w-md w-full p-6 space-y-4">
             <div className="flex items-center gap-2">
               <div className="h-10 w-10 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center text-xl">
@@ -64,7 +75,13 @@ function MemoryModeModals({
       )}
 
       {showKeyPrompt && (
-        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/40 px-4">
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="LLM Provider 키 등록 안내"
+          data-canvas-shortcut-scope="blocked"
+          className="fixed inset-0 z-[120] flex items-center justify-center bg-black/40 px-4"
+        >
           <div className="bg-white rounded-2xl shadow-2xl border border-gray-100 max-w-md w-full p-6 space-y-4">
             <div className="flex items-center gap-2">
               <div className="h-10 w-10 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center text-xl">
@@ -104,13 +121,21 @@ function MemoryModeModals({
 type MemoryModeToggleProps = {
   isEnabled: boolean;
   hasProviderKey: boolean | null;
+  providerKeyStatus?: ProviderKeyStatus;
   description: string;
   onToggle: () => void;
 };
 
+export type ProviderKeyStatus =
+  | 'checking'
+  | 'available'
+  | 'missing'
+  | 'unavailable';
+
 export function MemoryModeToggle({
   isEnabled,
   hasProviderKey,
+  providerKeyStatus,
   description,
   onToggle,
 }: MemoryModeToggleProps) {
@@ -132,6 +157,11 @@ export function MemoryModeToggle({
             키 필요
           </span>
         )}
+        {providerKeyStatus === 'unavailable' && (
+          <span className="rounded-full border border-red-100 bg-red-50 px-1.5 py-0.5 text-[10px] font-medium text-red-600">
+            확인 실패
+          </span>
+        )}
       </div>
       <button
         onClick={onToggle}
@@ -150,11 +180,24 @@ export function MemoryModeToggle({
   );
 }
 
-export function useMemoryMode(router = useRouter(), toaster = toast) {
+export function useMemoryMode(
+  routerOverride?: ReturnType<typeof useRouter>,
+  toaster = toast,
+) {
+  const defaultRouter = useRouter();
+  const router = routerOverride ?? defaultRouter;
+  const pathname = usePathname();
   const [isMemoryModeEnabled, setIsMemoryModeEnabled] = useState(false);
   const [showMemoryConfirm, setShowMemoryConfirm] = useState(false);
   const [showKeyPrompt, setShowKeyPrompt] = useState(false);
-  const [hasProviderKey, setHasProviderKey] = useState<boolean | null>(null);
+  const [providerKeyStatus, setProviderKeyStatus] =
+    useState<ProviderKeyStatus>('checking');
+  const hasProviderKey =
+    providerKeyStatus === 'available'
+      ? true
+      : providerKeyStatus === 'missing'
+        ? false
+        : null;
 
   // 기억 모드 설명 (툴팁)
   const memoryModeDescription =
@@ -162,21 +205,39 @@ export function useMemoryMode(router = useRouter(), toaster = toast) {
 
   // 키 상태 조회 (최소 침습)
   useEffect(() => {
+    const controller = new AbortController();
+
     const fetchKeyStatus = async () => {
+      if (isMockWorkflowPath(pathname)) {
+        setProviderKeyStatus('available');
+        return;
+      }
+
+      setProviderKeyStatus('checking');
       try {
         const res = await fetch('/api/v1/llm/credentials', {
           credentials: 'include',
+          headers: activeOrganizationHeaders(getStoredActiveOrganizationId()),
+          signal: controller.signal,
         });
-        if (!res.ok) throw new Error('Failed to fetch credentials');
+        if (!res.ok) {
+          setProviderKeyStatus('unavailable');
+          return;
+        }
         const data = await res.json();
-        setHasProviderKey(Array.isArray(data) && data.length > 0);
-      } catch (error) {
-        console.error('Failed to check provider key:', error);
-        setHasProviderKey(false);
+        setProviderKeyStatus(
+          Array.isArray(data) && data.length > 0 ? 'available' : 'missing',
+        );
+      } catch {
+        if (!controller.signal.aborted) {
+          setProviderKeyStatus('unavailable');
+        }
       }
     };
-    fetchKeyStatus();
-  }, []);
+
+    void fetchKeyStatus();
+    return () => controller.abort();
+  }, [pathname]);
 
   // 키 해제 시 자동 OFF
   useEffect(() => {
@@ -190,6 +251,13 @@ export function useMemoryMode(router = useRouter(), toaster = toast) {
   }, [hasProviderKey, isMemoryModeEnabled, toaster]);
 
   const toggleMemoryMode = useCallback(() => {
+    if (providerKeyStatus === 'unavailable') {
+      toaster.error(
+        '프로바이더 키 상태를 확인하지 못했습니다. 로그인 상태와 서버 연결을 확인해 주세요.',
+        { duration: 3000 },
+      );
+      return;
+    }
     if (hasProviderKey === false) {
       setShowKeyPrompt(true);
       return;
@@ -203,7 +271,7 @@ export function useMemoryMode(router = useRouter(), toaster = toast) {
       setIsMemoryModeEnabled(false);
       return prev;
     });
-  }, [hasProviderKey, isMemoryModeEnabled]);
+  }, [hasProviderKey, isMemoryModeEnabled, providerKeyStatus, toaster]);
 
   const handleConfirmMemoryMode = useCallback(() => {
     setIsMemoryModeEnabled(true);
@@ -274,6 +342,7 @@ export function useMemoryMode(router = useRouter(), toaster = toast) {
   return {
     isMemoryModeEnabled,
     hasProviderKey,
+    providerKeyStatus,
     memoryModeDescription,
     toggleMemoryMode,
     appendMemoryFlag,

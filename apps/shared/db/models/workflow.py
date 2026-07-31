@@ -2,15 +2,17 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import DateTime, ForeignKey
+from apps.shared.db.base import Base
+from sqlalchemy import DateTime, ForeignKey, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
-
-from apps.shared.db.base import Base
 
 
 class Workflow(Base):
     __tablename__ = "workflows"
+    __table_args__ = (
+        UniqueConstraint("id", "organization_id", name="uq_workflows_id_organization_id"),
+    )
 
     # === 기본 식별 필드 ===
     id: Mapped[uuid.UUID] = mapped_column(
@@ -20,8 +22,8 @@ class Workflow(Base):
         default=uuid.uuid4,
         nullable=False,
     )
-    tenant_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True), nullable=True
+    organization_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("organization.id"), nullable=True, index=True
     )
     app_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("apps.id"), index=True, nullable=False

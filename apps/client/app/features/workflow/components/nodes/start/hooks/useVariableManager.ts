@@ -106,7 +106,7 @@ export const useVariableManager = (id: string, data: StartNodeData) => {
     const newVar: WorkflowVariable = {
       id: crypto.randomUUID(),
       name: `var_${variables.length + 1}`,
-      label: `새 변수`,
+      label: '',
       type: 'text',
       required: false,
       maxLength: 255,
@@ -165,10 +165,6 @@ export const validateVariableName = (
   label: string,
   existingNames: string[],
 ): string | null => {
-  if (!label || label.trim() === '') {
-    return '표시명(Label)을 입력해주세요.';
-  }
-
   if (!name || name.trim() === '') {
     return '변수명을 입력해주세요.';
   }

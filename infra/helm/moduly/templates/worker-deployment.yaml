@@ -1,4 +1,5 @@
 {{- if .Values.worker.enabled }}
+{{- $storageType := include "moduly.storageType" . }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -14,15 +15,27 @@ spec:
     metadata:
       labels:
         {{- include "moduly.componentSelectorLabels" (dict "component" "worker" "context" .) | nindent 8 }}
+        {{- if .Values.egressProxy.enabled }}
+        nodease.io/egress-mode: proxy-v1
+        {{- end }}
       annotations:
+        nodease.io/egress-enforcement-phase: {{ .Values.egressProxy.networkPolicy.enforcementPhase | quote }}
+        nodease.io/schedule-dispatch-fingerprint: {{ include "moduly.scheduleDispatchFingerprint" . | quote }}
         checksum/config: {{ toYaml .Values | sha256sum }}
         checksum/secret: {{ toYaml .Values.secrets | sha256sum }}
     spec:
+      serviceAccountName: {{ include "moduly.serviceAccountName" . }}
       containers:
       - name: worker
         image: "{{ .Values.worker.image.repository }}:{{ .Values.worker.image.tag | default .Chart.AppVersion }}"
         imagePullPolicy: {{ .Values.worker.image.pullPolicy }}
         env:
+        {{- include "moduly.outboundProxyEnv" (dict "context" . "port" .Values.egressProxy.service.httpCompatiblePort) | nindent 8 }}
+        - name: NODE_ENV
+          valueFrom:
+            configMapKeyRef:
+              name: {{ include "moduly.configMapName" . }}
+              key: NODE_ENV
         # Database configuration (from ConfigMap)
         - name: DB_HOST
           valueFrom:
@@ -71,6 +84,8 @@ spec:
             secretKeyRef:
               name: {{ include "moduly.secretName" . }}
               key: REDIS_PASSWORD
+
+        {{- include "moduly.scheduleDispatchEnv" . | nindent 8 }}
         
         # Sandbox configuration (for Code node execution)
         - name: SANDBOX_URL
@@ -85,18 +100,18 @@ spec:
             configMapKeyRef:
               name: {{ include "moduly.configMapName" . }}
               key: STORAGE_TYPE
-        {{- if .Values.worker.env.S3_BUCKET_NAME }}
+        {{- if eq $storageType "CLOUD" }}
         - name: S3_BUCKET_NAME
           valueFrom:
             configMapKeyRef:
               name: {{ include "moduly.configMapName" . }}
               key: S3_BUCKET_NAME
-        {{- end }}
         - name: AWS_REGION
           valueFrom:
             configMapKeyRef:
               name: {{ include "moduly.configMapName" . }}
               key: AWS_REGION
+        {{- end }}
         
         # Encryption key (from K8s worker config)
         {{- if .Values.secrets.encryptionKey }}
@@ -105,6 +120,33 @@ spec:
             secretKeyRef:
               name: {{ include "moduly.secretName" . }}
               key: ENCRYPTION_KEY
+        {{- end }}
+        {{- if .Values.secrets.mailCredentialEncryptionKeys }}
+        - name: MAIL_CREDENTIAL_ENCRYPTION_KEYS
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "moduly.secretName" . }}
+              key: MAIL_CREDENTIAL_ENCRYPTION_KEYS
+        - name: MAIL_CREDENTIAL_ACTIVE_KEY_VERSION
+          value: {{ .Values.secrets.mailCredentialActiveKeyVersion | default "v1" | quote }}
+        {{- end }}
+        {{- if .Values.secrets.workflowNodeSecretEncryptionKeys }}
+        - name: WORKFLOW_NODE_SECRET_ENCRYPTION_KEYS
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "moduly.secretName" . }}
+              key: WORKFLOW_NODE_SECRET_ENCRYPTION_KEYS
+        - name: WORKFLOW_NODE_SECRET_ACTIVE_KEY_VERSION
+          value: {{ .Values.secrets.workflowNodeSecretActiveKeyVersion | default "v1" | quote }}
+        {{- end }}
+        {{- if .Values.secrets.llmCredentialEncryptionKeys }}
+        - name: LLM_CREDENTIAL_ENCRYPTION_KEYS
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "moduly.secretName" . }}
+              key: LLM_CREDENTIAL_ENCRYPTION_KEYS
+        - name: LLM_CREDENTIAL_ACTIVE_KEY_VERSION
+          value: {{ .Values.secrets.llmCredentialActiveKeyVersion | default "v1" | quote }}
         {{- end }}
         
         # Celery-specific Redis configuration

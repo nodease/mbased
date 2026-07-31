@@ -26,9 +26,15 @@ class TxtParser(BaseParser):
                 with open(source_path, "r", encoding="cp949") as f:
                     content = f.read()
                 return [{"text": content, "page": 1}]
-            except Exception as e:
-                logger.error(f"[TxtParser] Encoding fallback failed: {e}")
+            except Exception as exc:
+                logger.error(
+                    "[TxtParser] Encoding fallback failed: error_type=%s",
+                    type(exc).__name__,
+                )
                 return []
-        except Exception as e:
-            logger.error(f"[TxtParser] Read failed: {e}")
+        except Exception as exc:
+            logger.error(
+                "[TxtParser] Read failed: error_type=%s",
+                type(exc).__name__,
+            )
             return []

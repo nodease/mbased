@@ -2,6 +2,7 @@
 
 import { useCallback, useState, useEffect, useRef } from 'react';
 import { useReactFlow } from '@xyflow/react';
+import { Grid2X2 } from 'lucide-react';
 import {
   TouchpadIcon,
   MousePointerIcon,
@@ -11,7 +12,11 @@ import {
   ChevronDownIcon,
   ArrowsInIcon,
 } from '../nodes/icons';
-import { useWorkflowStore } from '@/app/features/workflow/store/useWorkflowStore';
+import {
+  type SnapGridSize,
+  useWorkflowStore,
+} from '@/app/features/workflow/store/useWorkflowStore';
+import { SNAP_GRID_SIZE_OPTIONS } from '../../utils/gridSnap';
 import { type NoteNode } from '../../types/Nodes';
 
 interface BottomPanelProps {
@@ -23,15 +28,16 @@ interface BottomPanelProps {
 export default function BottomPanel({
   onCenterNodes,
   isPanelOpen = false,
-  onOpenAppSearch,
 }: BottomPanelProps) {
   const {
     interactiveMode,
     setInteractiveMode,
-    nodes,
-    setNodes,
+    addNode,
     toggleFullscreen,
     isFullscreen,
+    snapGridSize,
+    setSnapGridSize,
+    isSnapTemporarilyDisabled,
   } = useWorkflowStore();
   const {
     screenToFlowPosition,
@@ -43,9 +49,9 @@ export default function BottomPanel({
   } = useReactFlow();
 
   // 한 번에 하나의 모달만 열리도록 관리하는 상태
-  const [openModal, setOpenModal] = useState<'interactive' | 'zoom' | null>(
-    null,
-  );
+  const [openModal, setOpenModal] = useState<
+    'interactive' | 'zoom' | 'snap' | null
+  >(null);
   const [isAddingNote, setIsAddingNote] = useState(false);
   const [notePosition, setNotePosition] = useState({ x: 0, y: 0 });
   const [currentZoom, setCurrentZoom] = useState(100);
@@ -53,6 +59,7 @@ export default function BottomPanel({
   // 외부 클릭 감지를 위한 모달 Refs
   const interactiveModalRef = useRef<HTMLDivElement>(null);
   const zoomModalRef = useRef<HTMLDivElement>(null);
+  const snapModalRef = useRef<HTMLDivElement>(null);
 
   // 뷰포트 변경 시 줌 레벨 업데이트
   useEffect(() => {
@@ -81,9 +88,11 @@ export default function BottomPanel({
         interactiveModalRef.current.contains(target);
       const isInsideZoom =
         zoomModalRef.current && zoomModalRef.current.contains(target);
+      const isInsideSnap =
+        snapModalRef.current && snapModalRef.current.contains(target);
 
       // 모달 내부 클릭이 아니면 현재 모달 닫기
-      if (!isInsideInteractive && !isInsideZoom) {
+      if (!isInsideInteractive && !isInsideZoom && !isInsideSnap) {
         setOpenModal(null);
       }
     };
@@ -148,7 +157,7 @@ export default function BottomPanel({
         },
       };
 
-      setNodes([...nodes, newNote]);
+      addNode(newNote);
       setIsAddingNote(false);
     };
 
@@ -167,7 +176,7 @@ export default function BottomPanel({
       window.removeEventListener('click', handleClick);
       window.removeEventListener('keydown', handleEscape);
     };
-  }, [isAddingNote, nodes, setNodes, screenToFlowPosition]);
+  }, [isAddingNote, addNode, screenToFlowPosition]);
 
   const handleFullscreen = useCallback(() => {
     toggleFullscreen();
@@ -186,6 +195,24 @@ export default function BottomPanel({
     setOpenModal((prev) => (prev === 'zoom' ? null : 'zoom'));
   }, []);
 
+  const toggleSnapModal = useCallback(() => {
+    setOpenModal((prev) => (prev === 'snap' ? null : 'snap'));
+  }, []);
+
+  const selectSnapGridSize = useCallback(
+    (size: SnapGridSize) => {
+      setSnapGridSize(size);
+      setOpenModal(null);
+    },
+    [setSnapGridSize],
+  );
+  const isSnapOpen = openModal === 'snap';
+  const snapLabel =
+    snapGridSize === 'off'
+      ? 'Move off'
+      : isSnapTemporarilyDisabled
+        ? `Move ${snapGridSize}px paused`
+        : `Move ${snapGridSize}px`;
   const handleZoomIn = useCallback(() => {
     zoomIn();
   }, [zoomIn]);
@@ -237,25 +264,25 @@ export default function BottomPanel({
             : 'translateX(-50%)',
         }}
       >
-        <div className="flex items-center gap-1 bg-white rounded-lg shadow-lg border border-gray-200 px-2 py-1.5">
+        <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-2 py-1.5 shadow-lg">
           {/* 인터랙티브 설정 */}
           <div className="relative" ref={interactiveModalRef}>
             <button
               onClick={handleInteractiveToggle}
-              className="p-2 hover:bg-gray-100 rounded transition-colors"
+              className="rounded p-2 transition-colors hover:bg-slate-100"
               title="Interactive settings"
             >
               {interactiveMode === 'touchpad' ? (
-                <TouchpadIcon className="w-4 h-4 text-gray-600" />
+                <TouchpadIcon className="h-4 w-4 text-slate-600" />
               ) : (
-                <MousePointerIcon className="w-4 h-4 text-gray-600" />
+                <MousePointerIcon className="h-4 w-4 text-slate-600" />
               )}
             </button>
 
             {/* 인터랙티브 모달 */}
             {openModal === 'interactive' && (
               <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 pointer-events-auto">
-                <div className="bg-white rounded-lg shadow-2xl border border-gray-200 p-6 w-[480px]">
+                <div className="w-[480px] rounded-lg border border-slate-200 bg-white p-6 shadow-2xl">
                   <h3 className="text-lg font-semibold mb-4">Interactive</h3>
 
                   <div className="grid grid-cols-2 gap-3">
@@ -375,21 +402,21 @@ export default function BottomPanel({
             )}
           </div>
 
-          <div className="w-px h-6 bg-gray-200" />
+          <div className="h-6 w-px bg-slate-200" />
 
           {/* 줌 컨트롤 */}
           <div className="relative" ref={zoomModalRef}>
             <button
               onClick={toggleZoomModal}
-              className="px-3 py-1.5 flex items-center gap-1 text-gray-700 hover:bg-gray-100 rounded transition-colors min-w-[60px] justify-center"
+              className="flex min-w-[60px] items-center justify-center gap-1 rounded px-3 py-1.5 text-slate-700 transition-colors hover:bg-slate-100"
             >
-              <span className="text-sm font-medium">{currentZoom}%</span>
+              <span className="text-sm font-semibold">{currentZoom}%</span>
               <ChevronDownIcon className="w-3 h-3" />
             </button>
 
             {/* 줌 모달 */}
             {openModal === 'zoom' && (
-              <div className="absolute bottom-full left-0 mb-2 w-[180px] bg-white rounded-lg shadow-2xl border border-gray-200 py-2">
+              <div className="absolute bottom-full left-0 mb-2 w-[180px] rounded-lg border border-slate-200 bg-white py-2 shadow-2xl">
                 <button
                   onClick={handleZoomOut}
                   className="w-full px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-50 transition-colors"
@@ -438,42 +465,88 @@ export default function BottomPanel({
             )}
           </div>
 
-          <div className="w-px h-6 bg-gray-200" />
+          <div className="h-6 w-px bg-slate-200" />
+
+          {/* Grid Snap 설정 */}
+          <div className="relative" ref={snapModalRef}>
+            <button
+              onClick={toggleSnapModal}
+              className={`flex items-center gap-1 rounded px-2 py-1.5 transition-colors hover:bg-slate-100 ${
+                snapGridSize === 'off' ? 'text-slate-500' : 'text-slate-700'
+              }`}
+              title="Move snap"
+              aria-haspopup="menu"
+              aria-expanded={isSnapOpen}
+              aria-label={`Move snap setting: ${snapLabel}`}
+            >
+              <Grid2X2 className="w-4 h-4" />
+              <span className="text-sm font-semibold">{snapLabel}</span>
+              <ChevronDownIcon className="w-3 h-3" />
+            </button>
+
+            {isSnapOpen && (
+              <div
+                className="absolute bottom-full left-0 mb-2 w-[160px] rounded-lg border border-slate-200 bg-white py-2 shadow-2xl"
+                role="menu"
+                aria-label="Move snap grid size"
+              >
+                {SNAP_GRID_SIZE_OPTIONS.map((size) => (
+                  <button
+                    key={size}
+                    onClick={() => selectSnapGridSize(size)}
+                    aria-pressed={snapGridSize === size}
+                    aria-current={snapGridSize === size ? 'true' : undefined}
+                    role="menuitemradio"
+                    aria-checked={snapGridSize === size}
+                    className={`w-full px-4 py-2 text-left text-sm transition-colors ${
+                      snapGridSize === size
+                        ? 'bg-blue-50 text-blue-600 font-medium'
+                        : 'text-gray-700 hover:bg-gray-50'
+                    }`}
+                  >
+                    {size === 'off' ? 'Move off' : `Move ${size}px grid`}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="h-6 w-px bg-slate-200" />
 
           {/* 노트 추가 */}
           <button
             onClick={handleAddNote}
-            className={`p-2 hover:bg-gray-100 rounded transition-colors ${
+            className={`rounded p-2 transition-colors hover:bg-slate-100 ${
               isAddingNote ? 'bg-blue-100' : ''
             }`}
             title="메모 추가"
           >
-            <NoteIcon className="w-4 h-4 text-gray-600" />
+            <NoteIcon className="h-4 w-4 text-slate-600" />
           </button>
 
-          <div className="w-px h-6 bg-gray-200" />
+          <div className="h-6 w-px bg-slate-200" />
 
           {/* 레이아웃 최적화 */}
           <button
             onClick={onCenterNodes}
-            className="p-2 hover:bg-gray-100 rounded transition-colors"
+            className="rounded p-2 transition-colors hover:bg-slate-100"
             title="레이아웃 최적화"
           >
-            <LayoutIcon className="w-4 h-4 text-gray-600" />
+            <LayoutIcon className="h-4 w-4 text-slate-600" />
           </button>
 
-          <div className="w-px h-6 bg-gray-200" />
+          <div className="h-6 w-px bg-slate-200" />
 
           {/* 전체화면 */}
           <button
             onClick={handleFullscreen}
-            className="p-2 hover:bg-gray-100 rounded transition-colors"
+            className="rounded p-2 transition-colors hover:bg-slate-100"
             title={isFullscreen ? '전체화면 종료' : '전체화면'}
           >
             {isFullscreen ? (
-              <ArrowsInIcon className="w-4 h-4 text-gray-600" />
+              <ArrowsInIcon className="h-4 w-4 text-slate-600" />
             ) : (
-              <FullscreenIcon className="w-4 h-4 text-gray-600" />
+              <FullscreenIcon className="h-4 w-4 text-slate-600" />
             )}
           </button>
         </div>

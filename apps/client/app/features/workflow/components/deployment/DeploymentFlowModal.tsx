@@ -1,17 +1,37 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { DeploymentStep, DeploymentResult } from './types';
-import { DeploymentType } from '../../types/Deployment';
+import {
+  DeploymentOptimizationNode,
+  DeploymentResult,
+  DeploymentStep,
+} from './types';
+import type {
+  DeploymentBrowserAccessPolicy,
+  DeploymentType,
+  DeploymentParameterOptimizationConfig,
+  PublicChatConversationConfig,
+} from '../../types/Deployment';
 import { InputStep } from './InputStep';
 import { SuccessStep } from './SuccessStep';
 import { ErrorStep } from './ErrorStep';
+import type {
+  AppAuthSecretReadiness,
+  IssuedAppAuthSecret,
+} from '@/app/features/app/components/AppAuthSecretControl';
 
 interface Props {
   isOpen: boolean;
   onClose: () => void;
+  appId?: string;
   deploymentType: DeploymentType;
-  onDeploy: (description: string) => Promise<DeploymentResult>;
+  llmNodes: DeploymentOptimizationNode[];
+  onDeploy: (
+    description: string,
+    parameterOptimization: DeploymentParameterOptimizationConfig,
+    browserAccessPolicy?: DeploymentBrowserAccessPolicy,
+    publicConversation?: PublicChatConversationConfig,
+  ) => Promise<DeploymentResult>;
 }
 
 // ========== Main Component ==========
@@ -19,23 +39,59 @@ interface Props {
 export function DeploymentFlowModal({
   isOpen,
   onClose,
+  appId,
   deploymentType,
+  llmNodes,
   onDeploy,
 }: Props) {
   const [currentStep, setCurrentStep] = useState<DeploymentStep>('input');
   const [description, setDescription] = useState('');
   const [deploymentResult, setDeploymentResult] =
     useState<DeploymentResult | null>(null);
+  const [issuedSecret, setIssuedSecret] = useState<IssuedAppAuthSecret | null>(
+    null,
+  );
+  const [appAuthSecretReadiness, setAppAuthSecretReadiness] =
+    useState<AppAuthSecretReadiness>('checking');
   const [isDeploying, setIsDeploying] = useState(false);
+  const [embeddingEnabled, setEmbeddingEnabled] = useState(false);
+  const [parentOrigins, setParentOrigins] = useState<string[]>(['']);
+  const [
+    conversationHistoryConsumerSelection,
+    setConversationHistoryConsumerSelection,
+  ] = useState('');
+  const [parameterOptimization, setParameterOptimization] =
+    useState<DeploymentParameterOptimizationConfig>({
+      enabled: false,
+      node_ids: [],
+      check_every_runs: 50,
+      monthly_validation_budget_usd: 3,
+    });
+
+  useEffect(() => {
+    setIssuedSecret(null);
+    setAppAuthSecretReadiness('checking');
+  }, [appId, deploymentType, isOpen]);
 
   // Reset state when modal opens
   useEffect(() => {
     if (isOpen) {
       setCurrentStep('input');
       setDescription('');
+      setParameterOptimization({
+        enabled: false,
+        node_ids: llmNodes.map((node) => node.id),
+        check_every_runs: 50,
+        monthly_validation_budget_usd: 3,
+      });
       setDeploymentResult(null);
+      setEmbeddingEnabled(false);
+      setParentOrigins(['']);
+      setConversationHistoryConsumerSelection(
+        llmNodes.length === 1 ? llmNodes[0].selectionKey : '',
+      );
     }
-  }, [isOpen]);
+  }, [isOpen, llmNodes]);
 
   // Handle ESC key
   useEffect(() => {
@@ -57,11 +113,39 @@ export function DeploymentFlowModal({
   }, [isOpen, isDeploying, onClose]);
 
   // Handle deployment submission
-  const handleSubmit = async () => {
+  const handleSubmit = async (
+    nextBrowserAccessPolicy?: DeploymentBrowserAccessPolicy,
+  ) => {
     setIsDeploying(true);
+    const selectedHistoryConsumer = llmNodes.find(
+      (node) => node.selectionKey === conversationHistoryConsumerSelection,
+    );
 
     try {
-      const result = await onDeploy(description);
+      const publicConversation: PublicChatConversationConfig | undefined =
+        deploymentType === 'chatbot' && selectedHistoryConsumer
+          ? {
+              contract_version: 'public_chat_conversation.v1',
+              history_consumer: {
+                node_id: selectedHistoryConsumer.id,
+                container_path: [...selectedHistoryConsumer.containerPath],
+              },
+            }
+          : undefined;
+      const result = publicConversation
+        ? await onDeploy(
+            description,
+            parameterOptimization,
+            nextBrowserAccessPolicy,
+            publicConversation,
+          )
+        : nextBrowserAccessPolicy
+          ? await onDeploy(
+              description,
+              parameterOptimization,
+              nextBrowserAccessPolicy,
+            )
+          : await onDeploy(description, parameterOptimization);
       setDeploymentResult(result);
 
       if (result.success) {
@@ -69,10 +153,13 @@ export function DeploymentFlowModal({
       } else {
         setCurrentStep('error');
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       setDeploymentResult({
         success: false,
-        message: error.message || '알 수 없는 오류가 발생했습니다.',
+        message:
+          error instanceof Error
+            ? error.message
+            : '알 수 없는 오류가 발생했습니다.',
       });
       setCurrentStep('error');
     } finally {
@@ -86,6 +173,12 @@ export function DeploymentFlowModal({
     setDeploymentResult(null);
   };
 
+  const handleInputSubmit = (
+    nextBrowserAccessPolicy?: DeploymentBrowserAccessPolicy,
+  ) => {
+    void handleSubmit(nextBrowserAccessPolicy);
+  };
+
   if (!isOpen) return null;
 
   // Get deployment type display name
@@ -97,15 +190,33 @@ export function DeploymentFlowModal({
         return '웹 앱';
       case 'widget':
         return '웹사이트 위젯';
+      case 'chatbot':
+        return '공개 챗봇';
+      case 'internal_chatbot':
+        return '내부 챗봇';
       case 'workflow_node':
         return '서브 모듈';
+      case 'mcp':
+        return 'MCP';
+      case 'schedule':
+        return '알람';
+      case 'webhook':
+        return '웹훅';
       default:
         return '배포';
     }
   };
 
+  const stepNumber = currentStep === 'input' ? 1 : 2;
+
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100]">
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="배포"
+      data-canvas-shortcut-scope="blocked"
+      className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100]"
+    >
       <div
         className={`relative bg-white rounded-lg shadow-xl w-full mx-4 flex flex-col overflow-hidden ${
           (deploymentType === 'api' || deploymentType === 'webhook') &&
@@ -118,15 +229,17 @@ export function DeploymentFlowModal({
         <div className="absolute top-4 right-4 z-10">
           <div className="bg-blue-50 border border-blue-200 rounded-full px-3 py-1 flex items-center gap-2">
             <span className="text-xs font-semibold text-blue-700">
-              {currentStep === 'input' ? 'Step 1/2' : 'Step 2/2'}
+              {stepNumber}/2
             </span>
             <div className="flex items-center gap-1">
-              <div
-                className={`w-1.5 h-1.5 rounded-full ${currentStep === 'input' ? 'bg-blue-600' : 'bg-gray-300'}`}
-              />
-              <div
-                className={`w-1.5 h-1.5 rounded-full ${currentStep === 'success' || currentStep === 'error' ? 'bg-blue-600' : 'bg-gray-300'}`}
-              />
+              {['input', 'result'].map((step, index) => (
+                <div
+                  key={step}
+                  className={`h-1.5 w-1.5 rounded-full ${
+                    index < stepNumber ? 'bg-blue-600' : 'bg-gray-300'
+                  }`}
+                />
+              ))}
             </div>
           </div>
         </div>
@@ -135,12 +248,51 @@ export function DeploymentFlowModal({
         <div className="flex-1 transition-all duration-300">
           {currentStep === 'input' && (
             <InputStep
-              deploymentType={getDeploymentTypeName()}
+              appId={appId}
+              issuedSecret={issuedSecret}
+              onSecretAvailable={setIssuedSecret}
+              appAuthSecretReadiness={appAuthSecretReadiness}
+              onAppAuthSecretReadinessChange={setAppAuthSecretReadiness}
+              deploymentType={deploymentType}
+              deploymentTypeLabel={getDeploymentTypeName()}
               description={description}
               onDescriptionChange={setDescription}
+              llmNodes={llmNodes}
+              conversationHistoryConsumerSelection={
+                conversationHistoryConsumerSelection
+              }
+              onConversationHistoryConsumerSelectionChange={
+                setConversationHistoryConsumerSelection
+              }
+              embeddingEnabled={embeddingEnabled}
+              parentOrigins={parentOrigins}
+              onEmbeddingEnabledChange={(enabled) => {
+                setEmbeddingEnabled(enabled);
+                if (enabled && parentOrigins.length === 0) {
+                  setParentOrigins(['']);
+                }
+              }}
+              onParentOriginChange={(index, value) =>
+                setParentOrigins((current) =>
+                  current.map((origin, originIndex) =>
+                    originIndex === index ? value : origin,
+                  ),
+                )
+              }
+              onAddParentOrigin={() =>
+                setParentOrigins((current) => [...current, ''])
+              }
+              onRemoveParentOrigin={(index) =>
+                setParentOrigins((current) =>
+                  current.length === 1
+                    ? ['']
+                    : current.filter((_, originIndex) => originIndex !== index),
+                )
+              }
               onCancel={onClose}
-              onSubmit={handleSubmit}
+              onSubmit={handleInputSubmit}
               isDeploying={isDeploying}
+              submitLabel="배포"
             />
           )}
 
@@ -148,6 +300,8 @@ export function DeploymentFlowModal({
             <SuccessStep
               result={deploymentResult}
               deploymentType={deploymentType}
+              issuedSecret={issuedSecret}
+              onSecretAvailable={setIssuedSecret}
               onClose={onClose}
             />
           )}

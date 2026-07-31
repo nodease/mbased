@@ -4,11 +4,24 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from apps.shared.db.session import SessionLocal
 from apps.shared.db.models.knowledge import Document, KnowledgeBase, SourceType
+from apps.shared.services.connection_runtime_snapshot import (
+    ConnectionRuntimeSnapshotProvider,
+)
 from apps.shared.services.ingestion.processors.db_processor import DbProcessor
 from apps.shared.services.ingestion.vector_store_service import VectorStoreService
+from apps.shared.services.permissions import has_knowledge_base_permission
 
 logger = logging.getLogger(__name__)
+
+_SAFE_PROCESSOR_FAILURE_REASONS = frozenset(
+    {
+        "configuration.invalid",
+        "resource.hidden",
+        "source.temporarily_unavailable",
+    }
+)
 
 
 class SyncService:
@@ -16,12 +29,33 @@ class SyncService:
     [Workflow Engine] 실행 전 DB 지식 베이스 동기화 서비스
     """
 
-    def __init__(self, db: Session, user_id: UUID):
+    def __init__(
+        self,
+        db: Session,
+        user_id: UUID,
+        organization_id: UUID | str | None = None,
+    ):
         self.db = db
         self.user_id = user_id
+        self.organization_id = self._coerce_uuid(organization_id)
         # Shared Processors & Services
-        self.db_processor = DbProcessor(db_session=db, user_id=user_id)
+        self.db_processor = DbProcessor(
+            db_session=db,
+            user_id=user_id,
+            connection_snapshot_provider=ConnectionRuntimeSnapshotProvider(
+                SessionLocal
+            ),
+        )
         self.vector_store_service = VectorStoreService(db=db, user_id=user_id)
+
+    @staticmethod
+    def _coerce_uuid(value: UUID | str | None) -> UUID | None:
+        if value is None or isinstance(value, UUID):
+            return value
+        try:
+            return UUID(str(value))
+        except (TypeError, ValueError):
+            return None
 
     def sync_knowledge_bases(self, graph_data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -46,12 +80,25 @@ class SyncService:
         synced_count = 0
         failed_docs = []
 
+        if self.organization_id is None:
+            logger.warning("[동기화] organization_id 없음, DB 지식 베이스 동기화 건너뜀")
+            return {
+                "synced_count": 0,
+                "failed": [
+                    {
+                        "filename": "knowledge_base_sync",
+                        "last_synced": "알 수 없음",
+                        "error": "organization_id_required",
+                    }
+                ],
+            }
+
         # DB 타입 KnowledgeBase만 필터링 조회
         kbs = (
             self.db.query(KnowledgeBase)
             .filter(
                 KnowledgeBase.id.in_(kb_ids),
-                KnowledgeBase.user_id == self.user_id,
+                KnowledgeBase.organization_id == self.organization_id,
                 # SourceType Check: KB 자체에는 type이 없으므로 Document에서 확인하거나,
                 # 여기서 KB를 가져온 후 Document를 조회할 때 필터링
             )
@@ -59,6 +106,22 @@ class SyncService:
         )
 
         for kb in kbs:
+            if not has_knowledge_base_permission(
+                self.db,
+                self.user_id,
+                kb.id,
+                "use",
+                organization_id=self.organization_id,
+            ):
+                failed_docs.append(
+                    {
+                        "filename": kb.name,
+                        "last_synced": "알 수 없음",
+                        "error": "knowledge_base_use_permission_required",
+                    }
+                )
+                continue
+
             # KB에 연결된 'SourceType.DB' 문서 조회
             documents = (
                 self.db.query(Document)
@@ -97,6 +160,24 @@ class SyncService:
 
                     # Processor 실행 (DB 접속 -> SQL 실행 -> NL 변환 -> Chunking)
                     result = self.db_processor.process(source_config)
+                    if result.metadata.get("error") is not None:
+                        reason_code = result.metadata.get("reason_code")
+                        if reason_code not in _SAFE_PROCESSOR_FAILURE_REASONS:
+                            reason_code = "source.sync_failed"
+                        last_sync = (
+                            doc.updated_at.strftime("%Y-%m-%d %H:%M:%S")
+                            if doc.updated_at
+                            else "알 수 없음"
+                        )
+                        failed_docs.append(
+                            {
+                                "filename": doc.filename,
+                                "last_synced": last_sync,
+                                "error": reason_code,
+                            }
+                        )
+                        self.db.rollback()
+                        continue
 
                     # 2. Vector Store Save (Embedding -> DB Save)
                     self.vector_store_service.save_chunks(
@@ -107,8 +188,11 @@ class SyncService:
 
                     synced_count += 1
 
-                except Exception as e:
-                    logger.error(f"[동기화] 외부 DB {doc.filename} 동기화 실패: {e}")
+                except Exception as exc:
+                    logger.error(
+                        "[동기화] 외부 DB 동기화 실패: error_type=%s",
+                        type(exc).__name__,
+                    )
 
                     last_sync = (
                         doc.updated_at.strftime("%Y-%m-%d %H:%M:%S")
@@ -119,9 +203,10 @@ class SyncService:
                         {
                             "filename": doc.filename,
                             "last_synced": last_sync,
-                            "error": str(e),
+                            "error": "source.sync_failed",
                         }
                     )
+                    self.db.rollback()
                     # 워크플로우 실행 자체를 막지 않고 이전 데이터로 계속 실행
                     continue
 

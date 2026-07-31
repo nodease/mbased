@@ -1,0 +1,14 @@
+{
+  "run_id": "2026-07-22__auto-vs-high-30__quality-gpt-5.4",
+  "purpose": "automatic routing vs fixed high-cost model",
+  "arms": [
+    "automatic",
+    "high_fixed"
+  ],
+  "automatic_selector": "current product implementation",
+  "high_fixed_model": "gpt-5.6-sol",
+  "routing_judge_model": "gpt-5.4-mini",
+  "quality_judge_model": "gpt-5.4",
+  "case_count": 30,
+  "quality_judge_cost_is_product_cost": false
+}

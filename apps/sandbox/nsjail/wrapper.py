@@ -4,12 +4,12 @@ NSJail Wrapper - NSJail CLI를 Python에서 호출하기 위한 래퍼
 import json
 import os
 import subprocess
-import tempfile
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 from uuid import UUID
 
 from apps.sandbox.config import settings
+from apps.sandbox.core.network_policy import require_network_access_disabled
 from apps.sandbox.models.result import ExecutionResult
 
 
@@ -174,16 +174,14 @@ except Exception as e:
         enable_network: bool,
     ) -> list:
         """NSJail 실행 명령 구성"""
+        require_network_access_disabled(enable_network)
+
         cmd = [
             self.nsjail_path,
             "--config", self.config_path,
             "--time_limit", str(timeout),
         ]
-        
-        # enable_network가 true이면 네트워크 격리 비활성화
-        if enable_network:
-            cmd.extend(["--disable_clone_newnet"])
-        
+
         # 스크립트 바인드 마운트
         cmd.extend([
             "--bindmount_ro", f"{script_path}:/app/run.py",

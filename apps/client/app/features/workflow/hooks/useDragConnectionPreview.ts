@@ -1,6 +1,10 @@
 import { useState, useCallback } from 'react';
 import { useReactFlow } from '@xyflow/react';
 import type { AppNode } from '../types/Nodes';
+import {
+  WORKFLOW_NODE_GAP,
+  WORKFLOW_NODE_SIZE,
+} from '../utils/workflowCanvasGeometry';
 
 interface DragPreviewState {
   nearestNode: AppNode | null;
@@ -106,8 +110,8 @@ export function useDragConnectionPreview(
         if (node.type === 'note') return;
 
         const nodeCenter = {
-          x: node.position.x + 150,
-          y: node.position.y + 75,
+          x: node.position.x + WORKFLOW_NODE_SIZE.width / 2,
+          y: node.position.y + WORKFLOW_NODE_SIZE.height / 2,
         };
 
         const dx = nodeCenter.x - mousePosition.x;
@@ -123,7 +127,8 @@ export function useDragConnectionPreview(
       if (nearestNode) {
         // Determine if dragged node should be on right or left
         const isRight =
-          mousePosition.x > (nearestNode as AppNode).position.x + 150;
+          mousePosition.x >
+          (nearestNode as AppNode).position.x + WORKFLOW_NODE_SIZE.width / 2;
 
         // 시작 노드(startNode, scheduleTrigger)의 왼쪽과 응답 노드(answerNode)의 오른쪽은 연결 불가
         const nodeType = (nearestNode as any).type as string;
@@ -142,15 +147,14 @@ export function useDragConnectionPreview(
           return;
         }
 
-        // Calculate smart position for dragged node
-        // Account for node width (300px) to ensure proper spacing
-        const NODE_WIDTH = 300;
-        const SPACING = 100; // Gap between nodes (increased for wider spacing)
-
         const draggedNodePosition = {
           x: isRight
-            ? (nearestNode as AppNode).position.x + NODE_WIDTH + SPACING // Right: after nearest node
-            : (nearestNode as AppNode).position.x - NODE_WIDTH - SPACING, // Left: before nearest node
+            ? (nearestNode as AppNode).position.x +
+              WORKFLOW_NODE_SIZE.width +
+              WORKFLOW_NODE_GAP.dragPreview // Right: after nearest node
+            : (nearestNode as AppNode).position.x -
+              WORKFLOW_NODE_SIZE.width -
+              WORKFLOW_NODE_GAP.dragPreview, // Left: before nearest node
           y: (nearestNode as AppNode).position.y,
         };
 

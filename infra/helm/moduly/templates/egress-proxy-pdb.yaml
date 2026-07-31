@@ -1,0 +1,13 @@
+{{- if .Values.egressProxy.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "moduly.fullname" . }}-egress-proxy
+  labels:
+    {{- include "moduly.componentLabels" (dict "component" "egress-proxy" "context" .) | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      {{- include "moduly.componentSelectorLabels" (dict "component" "egress-proxy" "context" .) | nindent 6 }}
+{{- end }}

@@ -1,0 +1,470 @@
+{
+  "rubric_version": "routing-requirements-v4",
+  "judge_model": "gpt-5.4-mini",
+  "case_count": 24,
+  "results": [
+    {
+      "case_id": "guide-password-reset",
+      "task_requirements": {
+        "task_complexity": 1,
+        "decision_impact": 0,
+        "evidence_synthesis": 0
+      },
+      "confidence": 0.98,
+      "ambiguity_flags": [],
+      "reason_codes": [],
+      "usage": {
+        "total_tokens": 628,
+        "prompt_tokens": 518,
+        "completion_tokens": 110,
+        "latency_ms": 1693
+      }
+    },
+    {
+      "case_id": "guide-workflow-filter",
+      "task_requirements": {
+        "task_complexity": 1,
+        "decision_impact": 0,
+        "evidence_synthesis": 0
+      },
+      "confidence": 0.96,
+      "ambiguity_flags": [],
+      "reason_codes": [],
+      "usage": {
+        "total_tokens": 630,
+        "prompt_tokens": 526,
+        "completion_tokens": 104,
+        "latency_ms": 1553
+      }
+    },
+    {
+      "case_id": "guide-json-extract",
+      "task_requirements": {
+        "task_complexity": 0,
+        "decision_impact": 0,
+        "evidence_synthesis": 0
+      },
+      "confidence": 0.98,
+      "ambiguity_flags": [],
+      "reason_codes": [],
+      "usage": {
+        "total_tokens": 598,
+        "prompt_tokens": 506,
+        "completion_tokens": 92,
+        "latency_ms": 1583
+      }
+    },
+    {
+      "case_id": "guide-format-rewrite",
+      "task_requirements": {
+        "task_complexity": 1,
+        "decision_impact": 0,
+        "evidence_synthesis": 0
+      },
+      "confidence": 0.98,
+      "ambiguity_flags": [],
+      "reason_codes": [
+        "multi_step_reasoning"
+      ],
+      "usage": {
+        "total_tokens": 618,
+        "prompt_tokens": 519,
+        "completion_tokens": 99,
+        "latency_ms": 1444
+      }
+    },
+    {
+      "case_id": "guide-customer-tier-a",
+      "task_requirements": {
+        "task_complexity": 0,
+        "decision_impact": 1,
+        "evidence_synthesis": 0
+      },
+      "confidence": 0.97,
+      "ambiguity_flags": [],
+      "reason_codes": [],
+      "usage": {
+        "total_tokens": 601,
+        "prompt_tokens": 514,
+        "completion_tokens": 87,
+        "latency_ms": 1442
+      }
+    },
+    {
+      "case_id": "guide-customer-tier-b",
+      "task_requirements": {
+        "task_complexity": 1,
+        "decision_impact": 1,
+        "evidence_synthesis": 0
+      },
+      "confidence": 0.98,
+      "ambiguity_flags": [],
+      "reason_codes": [
+        "high_decision_impact"
+      ],
+      "usage": {
+        "total_tokens": 635,
+        "prompt_tokens": 514,
+        "completion_tokens": 121,
+        "latency_ms": 1869
+      }
+    },
+    {
+      "case_id": "rag-single-policy",
+      "task_requirements": {
+        "task_complexity": 1,
+        "decision_impact": 1,
+        "evidence_synthesis": 1
+      },
+      "confidence": 0.94,
+      "ambiguity_flags": [],
+      "reason_codes": [],
+      "usage": {
+        "total_tokens": 656,
+        "prompt_tokens": 544,
+        "completion_tokens": 112,
+        "latency_ms": 1671
+      }
+    },
+    {
+      "case_id": "rag-multi-policy",
+      "task_requirements": {
+        "task_complexity": 2,
+        "decision_impact": 2,
+        "evidence_synthesis": 2
+      },
+      "confidence": 0.93,
+      "ambiguity_flags": [],
+      "reason_codes": [
+        "multi_step_reasoning",
+        "broad_context_synthesis",
+        "high_decision_impact"
+      ],
+      "usage": {
+        "total_tokens": 816,
+        "prompt_tokens": 553,
+        "completion_tokens": 263,
+        "latency_ms": 2771
+      }
+    },
+    {
+      "case_id": "rag-conflicting-retention",
+      "task_requirements": {
+        "task_complexity": 3,
+        "decision_impact": 3,
+        "evidence_synthesis": 3
+      },
+      "confidence": 0.96,
+      "ambiguity_flags": [
+        "conflicting_evidence"
+      ],
+      "reason_codes": [
+        "high_decision_impact",
+        "security_or_compliance_risk",
+        "evidence_conflict"
+      ],
+      "usage": {
+        "total_tokens": 715,
+        "prompt_tokens": 557,
+        "completion_tokens": 158,
+        "latency_ms": 1777
+      }
+    },
+    {
+      "case_id": "rag-partial-evidence",
+      "task_requirements": {
+        "task_complexity": 2,
+        "decision_impact": 1,
+        "evidence_synthesis": 2
+      },
+      "confidence": 0.89,
+      "ambiguity_flags": [
+        "insufficient_context",
+        "boundary_score"
+      ],
+      "reason_codes": [
+        "multi_step_reasoning",
+        "broad_context_synthesis"
+      ],
+      "usage": {
+        "total_tokens": 766,
+        "prompt_tokens": 559,
+        "completion_tokens": 207,
+        "latency_ms": 2468
+      }
+    },
+    {
+      "case_id": "rag-contract-comparison",
+      "task_requirements": {
+        "task_complexity": 2,
+        "decision_impact": 1,
+        "evidence_synthesis": 2
+      },
+      "confidence": 0.94,
+      "ambiguity_flags": [],
+      "reason_codes": [
+        "multi_step_reasoning",
+        "broad_context_synthesis"
+      ],
+      "usage": {
+        "total_tokens": 709,
+        "prompt_tokens": 546,
+        "completion_tokens": 163,
+        "latency_ms": 2427
+      }
+    },
+    {
+      "case_id": "rag-long-context",
+      "task_requirements": {
+        "task_complexity": 2,
+        "decision_impact": 1,
+        "evidence_synthesis": 2
+      },
+      "confidence": 0.93,
+      "ambiguity_flags": [],
+      "reason_codes": [
+        "multi_step_reasoning",
+        "broad_context_synthesis",
+        "long_context_handling"
+      ],
+      "usage": {
+        "total_tokens": 768,
+        "prompt_tokens": 563,
+        "completion_tokens": 205,
+        "latency_ms": 3087
+      }
+    },
+    {
+      "case_id": "action-refund-explain",
+      "task_requirements": {
+        "task_complexity": 1,
+        "decision_impact": 1,
+        "evidence_synthesis": 0
+      },
+      "confidence": 0.96,
+      "ambiguity_flags": [],
+      "reason_codes": [],
+      "usage": {
+        "total_tokens": 650,
+        "prompt_tokens": 518,
+        "completion_tokens": 132,
+        "latency_ms": 2033
+      }
+    },
+    {
+      "case_id": "action-refund-approve",
+      "task_requirements": {
+        "task_complexity": 1,
+        "decision_impact": 3,
+        "evidence_synthesis": 0
+      },
+      "confidence": 0.97,
+      "ambiguity_flags": [],
+      "reason_codes": [
+        "high_decision_impact"
+      ],
+      "usage": {
+        "total_tokens": 681,
+        "prompt_tokens": 529,
+        "completion_tokens": 152,
+        "latency_ms": 1894
+      }
+    },
+    {
+      "case_id": "action-access-explain",
+      "task_requirements": {
+        "task_complexity": 1,
+        "decision_impact": 1,
+        "evidence_synthesis": 0
+      },
+      "confidence": 0.9,
+      "ambiguity_flags": [],
+      "reason_codes": [],
+      "usage": {
+        "total_tokens": 681,
+        "prompt_tokens": 517,
+        "completion_tokens": 164,
+        "latency_ms": 2977
+      }
+    },
+    {
+      "case_id": "action-access-grant",
+      "task_requirements": {
+        "task_complexity": 1,
+        "decision_impact": 2,
+        "evidence_synthesis": 0
+      },
+      "confidence": 0.98,
+      "ambiguity_flags": [],
+      "reason_codes": [
+        "high_decision_impact"
+      ],
+      "usage": {
+        "total_tokens": 645,
+        "prompt_tokens": 528,
+        "completion_tokens": 117,
+        "latency_ms": 1866
+      }
+    },
+    {
+      "case_id": "action-status-explain",
+      "task_requirements": {
+        "task_complexity": 0,
+        "decision_impact": 0,
+        "evidence_synthesis": 0
+      },
+      "confidence": 0.98,
+      "ambiguity_flags": [],
+      "reason_codes": [],
+      "usage": {
+        "total_tokens": 595,
+        "prompt_tokens": 512,
+        "completion_tokens": 83,
+        "latency_ms": 1703
+      }
+    },
+    {
+      "case_id": "action-disable-deployment",
+      "task_requirements": {
+        "task_complexity": 1,
+        "decision_impact": 3,
+        "evidence_synthesis": 1
+      },
+      "confidence": 0.95,
+      "ambiguity_flags": [
+        "high_impact_uncertainty"
+      ],
+      "reason_codes": [
+        "high_decision_impact",
+        "security_or_compliance_risk"
+      ],
+      "usage": {
+        "total_tokens": 672,
+        "prompt_tokens": 527,
+        "completion_tokens": 145,
+        "latency_ms": 3377
+      }
+    },
+    {
+      "case_id": "action-credit-recommend",
+      "task_requirements": {
+        "task_complexity": 2,
+        "decision_impact": 2,
+        "evidence_synthesis": 2
+      },
+      "confidence": 0.91,
+      "ambiguity_flags": [],
+      "reason_codes": [
+        "high_decision_impact",
+        "multi_step_reasoning"
+      ],
+      "usage": {
+        "total_tokens": 719,
+        "prompt_tokens": 515,
+        "completion_tokens": 204,
+        "latency_ms": 2378
+      }
+    },
+    {
+      "case_id": "action-credit-apply",
+      "task_requirements": {
+        "task_complexity": 1,
+        "decision_impact": 3,
+        "evidence_synthesis": 0
+      },
+      "confidence": 0.96,
+      "ambiguity_flags": [],
+      "reason_codes": [
+        "high_decision_impact"
+      ],
+      "usage": {
+        "total_tokens": 715,
+        "prompt_tokens": 524,
+        "completion_tokens": 191,
+        "latency_ms": 2840
+      }
+    },
+    {
+      "case_id": "risk-public-contract",
+      "task_requirements": {
+        "task_complexity": 2,
+        "decision_impact": 3,
+        "evidence_synthesis": 2
+      },
+      "confidence": 0.93,
+      "ambiguity_flags": [],
+      "reason_codes": [
+        "high_decision_impact",
+        "security_or_compliance_risk",
+        "multi_step_reasoning"
+      ],
+      "usage": {
+        "total_tokens": 815,
+        "prompt_tokens": 555,
+        "completion_tokens": 260,
+        "latency_ms": 3102
+      }
+    },
+    {
+      "case_id": "risk-credential-leak",
+      "task_requirements": {
+        "task_complexity": 2,
+        "decision_impact": 3,
+        "evidence_synthesis": 2
+      },
+      "confidence": 0.96,
+      "ambiguity_flags": [],
+      "reason_codes": [
+        "security_or_compliance_risk",
+        "high_decision_impact",
+        "multi_step_reasoning"
+      ],
+      "usage": {
+        "total_tokens": 727,
+        "prompt_tokens": 564,
+        "completion_tokens": 163,
+        "latency_ms": 2093
+      }
+    },
+    {
+      "case_id": "risk-privacy-delete",
+      "task_requirements": {
+        "task_complexity": 3,
+        "decision_impact": 3,
+        "evidence_synthesis": 3
+      },
+      "confidence": 0.92,
+      "ambiguity_flags": [
+        "boundary_score"
+      ],
+      "reason_codes": [
+        "high_decision_impact",
+        "security_or_compliance_risk",
+        "multi_step_reasoning"
+      ],
+      "usage": {
+        "total_tokens": 788,
+        "prompt_tokens": 558,
+        "completion_tokens": 230,
+        "latency_ms": 2500
+      }
+    },
+    {
+      "case_id": "risk-security-summary",
+      "task_requirements": {
+        "task_complexity": 1,
+        "decision_impact": 0,
+        "evidence_synthesis": 0
+      },
+      "confidence": 0.96,
+      "ambiguity_flags": [],
+      "reason_codes": [],
+      "usage": {
+        "total_tokens": 623,
+        "prompt_tokens": 523,
+        "completion_tokens": 100,
+        "latency_ms": 1726
+      }
+    }
+  ]
+}

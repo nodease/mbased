@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { ArrowLeft, Clock } from 'lucide-react';
 
 import { workflowApi } from '@/app/features/workflow/api/workflowApi';
@@ -20,6 +20,7 @@ import { useABTestComparison } from '@/app/features/workflow/hooks/useABTestComp
 interface LogTabProps {
   workflowId: string;
   initialRunId?: string | null;
+  withTopSpacer?: boolean;
 }
 
 // [BEST PRACTICE] 순수 함수는 컴포넌트 외부에 정의
@@ -29,7 +30,11 @@ const isValidUUID = (id: string): boolean => {
   return uuidRegex.test(id);
 };
 
-export const LogTab = ({ workflowId, initialRunId }: LogTabProps) => {
+export const LogTab = ({
+  workflowId,
+  initialRunId,
+  withTopSpacer = false,
+}: LogTabProps) => {
   const [logs, setLogs] = useState<WorkflowRun[]>([]);
   const [filteredLogs, setFilteredLogs] = useState<WorkflowRun[]>([]);
   const [selectedLog, setSelectedLog] = useState<WorkflowRun | null>(null);
@@ -277,7 +282,11 @@ export const LogTab = ({ workflowId, initialRunId }: LogTabProps) => {
     <div className="h-full w-full bg-gray-100 flex flex-col overflow-hidden">
       {/* 상세/비교 헤더 네비게이션 */}
       {(viewMode === 'detail' || viewMode === 'compare') && (
-        <div className="px-6 py-3 border-b border-gray-200 bg-white flex items-center gap-2 mt-14">
+        <div
+          className={`flex items-center gap-2 border-b border-gray-200 bg-white px-6 py-3 ${
+            withTopSpacer ? 'mt-14' : ''
+          }`}
+        >
           <button
             onClick={handleBackToList}
             className="p-1.5 hover:bg-gray-100 rounded-full transition-colors text-gray-500"
@@ -296,7 +305,7 @@ export const LogTab = ({ workflowId, initialRunId }: LogTabProps) => {
           className={`h-full w-full flex flex-col ${viewMode === 'list' ? 'flex' : 'hidden'}`}
         >
           {/* Header Spacer */}
-          <div className="h-14 shrink-0" />
+          {withTopSpacer && <div className="h-14 shrink-0" />}
 
           <div className="flex-1 w-full overflow-y-auto scroll-smooth">
             <div className="max-w-5xl mx-auto p-6 pb-20 animate-in fade-in slide-in-from-bottom-2 duration-300">

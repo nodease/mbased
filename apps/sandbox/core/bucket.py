@@ -27,38 +27,38 @@ class PriorityBucket:
     
     def __init__(self, priority: Priority):
         self.priority = priority
-        self._queues: Dict[str, deque[Job]] = defaultdict(deque)  # tenant_id -> deque of jobs
+        self._queues: Dict[str, deque[Job]] = defaultdict(deque)  # organization_id -> deque of jobs
         self._tenant_order: List[str] = []
         self._current_index = 0
-        self._last_activity: Dict[str, float] = {}  # tenant_id -> last activity time
+        self._last_activity: Dict[str, float] = {}  # organization_id -> last activity time
         self._lock = asyncio.Lock()
 
     
     async def add(self, job: Job):
         """작업 추가"""
         async with self._lock:
-            tenant_id = job.tenant_id or "__default__"
+            organization_id = job.organization_id or "__default__"
             
             # 새 테넌트면 순서에 추가
-            if tenant_id not in self._queues or len(self._queues[tenant_id]) == 0:
-                if tenant_id not in self._tenant_order:
-                    self._tenant_order.append(tenant_id)
+            if organization_id not in self._queues or len(self._queues[organization_id]) == 0:
+                if organization_id not in self._tenant_order:
+                    self._tenant_order.append(organization_id)
             
-            self._queues[tenant_id].append(job)
-            self._last_activity[tenant_id] = time.time()
+            self._queues[organization_id].append(job)
+            self._last_activity[organization_id] = time.time()
 
     
-    async def pop(self, tenant_id: str) -> Optional[Job]:
+    async def pop(self, organization_id: str) -> Optional[Job]:
         """특정 테넌트의 작업 가져오기"""
         async with self._lock:
-            if tenant_id in self._queues and self._queues[tenant_id]:
-                job = self._queues[tenant_id].popleft()
-                self._last_activity[tenant_id] = time.time()
+            if organization_id in self._queues and self._queues[organization_id]:
+                job = self._queues[organization_id].popleft()
+                self._last_activity[organization_id] = time.time()
                 
                 # 큐가 비었으면 순서에서 제거
-                if not self._queues[tenant_id]:
-                    if tenant_id in self._tenant_order:
-                        self._tenant_order.remove(tenant_id)
+                if not self._queues[organization_id]:
+                    if organization_id in self._tenant_order:
+                        self._tenant_order.remove(organization_id)
                         if self._current_index >= len(self._tenant_order):
                             self._current_index = 0
                 
@@ -71,7 +71,7 @@ class PriorityBucket:
         Round-Robin으로 다음 작업을 원자적으로 선택 및 반환
         
         Args:
-            is_tenant_allowed: tenant_id를 받아서 실행 가능 여부를 반환하는 콜백 함수
+            is_tenant_allowed: organization_id를 받아서 실행 가능 여부를 반환하는 콜백 함수
                               (테넌트당 동시 실행 제한 체크용)
         
         Returns:
@@ -89,22 +89,22 @@ class PriorityBucket:
                 if not self._tenant_order:
                     return None
                 
-                tenant_id = self._tenant_order[self._current_index]
+                organization_id = self._tenant_order[self._current_index]
                 self._current_index = (self._current_index + 1) % len(self._tenant_order)
                 checked += 1
                 
                 # 테넌트 실행 제한 체크
-                if not is_tenant_allowed(tenant_id):
+                if not is_tenant_allowed(organization_id):
                     continue
                 
                 # 작업 꺼내기
-                if tenant_id in self._queues and self._queues[tenant_id]:
-                    job = self._queues[tenant_id].popleft()
-                    self._last_activity[tenant_id] = time.time()
+                if organization_id in self._queues and self._queues[organization_id]:
+                    job = self._queues[organization_id].popleft()
+                    self._last_activity[organization_id] = time.time()
                     
                     # 큐가 비었으면 순서에서 제거
-                    if not self._queues[tenant_id]:
-                        self._tenant_order.remove(tenant_id)
+                    if not self._queues[organization_id]:
+                        self._tenant_order.remove(organization_id)
                         if self._current_index >= len(self._tenant_order):
                             self._current_index = 0
                     
@@ -124,15 +124,15 @@ class PriorityBucket:
     async def remove_job(self, job: Job) -> bool:
         """특정 작업 제거 (Aging 승급용)"""
         async with self._lock:
-            tenant_id = job.tenant_id or "__default__"
-            if tenant_id in self._queues:
+            organization_id = job.organization_id or "__default__"
+            if organization_id in self._queues:
                 try:
-                    self._queues[tenant_id].remove(job)
+                    self._queues[organization_id].remove(job)
                     
                     # 큐가 비었으면 순서에서 제거
-                    if not self._queues[tenant_id]:
-                        if tenant_id in self._tenant_order:
-                            self._tenant_order.remove(tenant_id)
+                    if not self._queues[organization_id]:
+                        if organization_id in self._tenant_order:
+                            self._tenant_order.remove(organization_id)
                             if self._current_index >= len(self._tenant_order):
                                 self._current_index = 0
                     
@@ -147,17 +147,17 @@ class PriorityBucket:
             now = time.time()
             to_remove = []
             
-            for tenant_id, queue in self._queues.items():
+            for organization_id, queue in self._queues.items():
                 if len(queue) == 0:
-                    last = self._last_activity.get(tenant_id, 0)
+                    last = self._last_activity.get(organization_id, 0)
                     if now - last > idle_timeout:
-                        to_remove.append(tenant_id)
+                        to_remove.append(organization_id)
             
-            for tenant_id in to_remove:
-                del self._queues[tenant_id]
-                self._last_activity.pop(tenant_id, None)
-                if tenant_id in self._tenant_order:
-                    self._tenant_order.remove(tenant_id)
+            for organization_id in to_remove:
+                del self._queues[organization_id]
+                self._last_activity.pop(organization_id, None)
+                if organization_id in self._tenant_order:
+                    self._tenant_order.remove(organization_id)
             
             if to_remove:
                 logger.debug(f"Cleaned up {len(to_remove)} idle queues from {self.priority.name} bucket")

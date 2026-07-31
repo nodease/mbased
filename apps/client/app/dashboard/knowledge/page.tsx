@@ -11,12 +11,15 @@ import {
   Clock,
   FolderOpen,
   ChevronRight,
+  Layers,
+  BookOpen,
 } from 'lucide-react';
 import CreateKnowledgeModal from '@/app/features/knowledge/components/create-knowledge-modal';
 import {
   knowledgeApi,
   KnowledgeBaseResponse,
 } from '@/app/features/knowledge/api/knowledgeApi';
+import { DashboardTitle } from '@/app/features/dashboard/components/DashboardSurface';
 
 export default function KnowledgePage() {
   const router = useRouter();
@@ -24,6 +27,7 @@ export default function KnowledgePage() {
     [],
   );
   const [isLoading, setIsLoading] = useState(true);
+  const [hasFetchError, setHasFetchError] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [initialTab, setInitialTab] = useState<
@@ -36,8 +40,10 @@ export default function KnowledgePage() {
       setIsLoading(true);
       const data = await knowledgeApi.getKnowledgeBases();
       setKnowledgeBases(data);
-    } catch (error) {
-      console.error('Failed to fetch knowledge bases', error);
+      setHasFetchError(false);
+    } catch {
+      setKnowledgeBases([]);
+      setHasFetchError(true);
     } finally {
       setIsLoading(false);
     }
@@ -78,7 +84,11 @@ export default function KnowledgePage() {
   return (
     <div className="p-8 bg-white min-h-full">
       {/* Page Title */}
-      <h1 className="text-2xl font-bold text-gray-800 mb-6">지식 관리</h1>
+      <DashboardTitle
+        icon={BookOpen}
+        title="지식 관리"
+        className="mb-6 text-2xl font-bold text-gray-800"
+      />
       {/* Actions Section */}
       <div className="flex flex-col md:flex-row justify-end items-center gap-3 mb-6">
         {/* Search Bar */}
@@ -94,6 +104,14 @@ export default function KnowledgePage() {
         </div>
 
         {/* Create Button */}
+        <button
+          onClick={() => router.push('/dashboard/knowledge/collections')}
+          className="inline-flex items-center px-4 py-2 border border-slate-200 text-sm font-medium rounded-md text-slate-700 bg-white hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors"
+          title="Knowledge Collection 관리"
+        >
+          <Layers className="-ml-1 mr-2 h-5 w-5" aria-hidden="true" />
+          Collection
+        </button>
         <button
           onClick={() => handleCreate()}
           className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors"
@@ -112,7 +130,22 @@ export default function KnowledgePage() {
       ) : (
         // List View
         <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg overflow-hidden">
-          {filteredKnowledge.length === 0 ? (
+          {hasFetchError ? (
+            <div className="p-8 text-center text-gray-500 dark:text-gray-400">
+              <p className="font-medium text-gray-700 dark:text-gray-200">
+                지식 베이스 목록을 불러오지 못했습니다.
+              </p>
+              <p className="mt-1 text-sm">
+                일시적인 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.
+              </p>
+              <button
+                onClick={fetchKnowledgeBases}
+                className="mt-4 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-700"
+              >
+                다시 시도
+              </button>
+            </div>
+          ) : filteredKnowledge.length === 0 ? (
             <div className="p-8 text-center text-gray-500 dark:text-gray-400">
               등록된 지식 베이스가 없습니다.
             </div>

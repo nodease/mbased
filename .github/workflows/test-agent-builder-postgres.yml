@@ -1,0 +1,101 @@
+name: Test Agent Builder PostgreSQL Contracts
+
+on:
+  workflow_call:
+  push:
+    branches:
+      - dev
+    paths:
+      - "apps/gateway/adapters/db/agent_builder_repository.py"
+      - "apps/gateway/api/v1/endpoints/llm.py"
+      - "apps/gateway/api/v1/endpoints/organization.py"
+      - "apps/gateway/application/agent_builder/**"
+      - "apps/gateway/composition/agent_builder.py"
+      - "apps/gateway/services/admin_usage_service.py"
+      - "apps/gateway/services/agent_builder/**"
+      - "apps/gateway/services/agent_builder_intent_service.py"
+      - "apps/gateway/services/agent_builder_service.py"
+      - "apps/gateway/services/app_service.py"
+      - "apps/gateway/services/llm_service.py"
+      - "apps/gateway/services/organization_member_service.py"
+      - "apps/gateway/services/workflow_budget_service.py"
+      - "apps/shared/services/llm_client/**"
+      - "apps/gateway/tests/integration/test_agent_builder_intent_usage_postgres.py"
+      - "apps/gateway/tests/services/test_llm_client_base.py"
+      - "apps/gateway/tests/services/test_llm_client_openai.py"
+      - "apps/shared/tests/services/test_anthropic_client.py"
+      - "apps/gateway/services/workflow_service.py"
+      - "apps/gateway/tests/integration/test_agent_builder_model_selection_db.py"
+      - "apps/gateway/tests/integration/test_agent_builder_primary_workflow_db.py"
+      - "apps/gateway/tests/integration/test_agent_builder_workflow_cas.py"
+      - "apps/shared/alembic/**"
+      - "apps/shared/db/models/agent_builder.py"
+      - "apps/shared/db/models/llm.py"
+      - "apps/shared/db/models/workflow.py"
+      - "apps/shared/domain/llm_usage.py"
+      - "apps/shared/schemas/agent_builder.py"
+      - "apps/shared/schemas/organization_membership.py"
+      - "apps/shared/schemas/workflow.py"
+      - ".github/workflows/test-agent-builder-postgres.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  agent-builder-postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      DB_HOST: 127.0.0.1
+      DB_PORT: "5432"
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      NODEASE_DISPOSABLE_DB_MAINTENANCE_DB: postgres
+      NODEASE_RUN_DISPOSABLE_DB_TEST: "1"
+      PYTHONPATH: ${{ github.workspace }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            apps/gateway/pyproject.toml
+            apps/shared/pyproject.toml
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+
+      - name: Install test dependencies
+        run: |
+          uv venv .venv-ci-agent-builder --python "3.11"
+          uv pip install --python .venv-ci-agent-builder/bin/python \
+            -e apps/shared \
+            -e "apps/gateway[dev]"
+
+      - name: Run Agent Builder database contracts
+        run: >-
+          .venv-ci-agent-builder/bin/python -m pytest
+          apps/gateway/tests/integration/test_agent_builder_model_selection_db.py
+          apps/gateway/tests/integration/test_agent_builder_primary_workflow_db.py
+          apps/gateway/tests/integration/test_agent_builder_workflow_cas.py
+          apps/gateway/tests/integration/test_agent_builder_intent_usage_postgres.py
+          -q

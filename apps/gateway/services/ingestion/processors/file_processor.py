@@ -1,15 +1,19 @@
-import json
 import logging
 import os
-import tempfile
 from typing import Any, Dict
-
-import requests
 
 from apps.gateway.services.ingestion.parsers.docx_parser import DocxParser
 from apps.gateway.services.ingestion.parsers.excel_csv_parser import ExcelCsvParser
 from apps.gateway.services.ingestion.parsers.pdf_parser import PdfParser
 from apps.gateway.services.ingestion.parsers.txt_parser import TxtParser
+from apps.shared.domain.knowledge_document_ingestion import (
+    RAW_PARSER_EGRESS_UNAVAILABLE_REASON,
+)
+from apps.shared.services.egress_guard import (
+    EgressGuardError,
+    download_url_to_temp_file,
+)
+from apps.shared.services.outbound_operation_policy import KNOWLEDGE_DOCUMENT_FETCH
 from apps.shared.services.ingestion.processors.base import (
     BaseProcessor,
     ProcessingResult,
@@ -32,6 +36,15 @@ class FileProcessor(BaseProcessor):
         file_path = source_config.get("file_path")
         if not file_path:
             raise FileNotFoundError("File path is missing")
+        strategy = source_config.get("strategy", "general")
+        if strategy == "llamaparse":
+            return ProcessingResult(
+                chunks=[],
+                metadata={
+                    "error": "External parser is unavailable.",
+                    "reason_code": RAW_PARSER_EGRESS_UNAVAILABLE_REASON,
+                },
+            )
 
         # [MODIFIED] S3/HTTP URL 처리
         is_remote_file = str(file_path).startswith("http") or str(file_path).startswith(
@@ -60,34 +73,26 @@ class FileProcessor(BaseProcessor):
                 )
 
             parse_kwargs = {}
-            strategy = source_config.get("strategy", "general")
-
-            if isinstance(parser, PdfParser) and strategy == "llamaparse":
-                parse_kwargs["strategy"] = "llamaparse"
-                parse_kwargs["api_key"] = self._get_llamaparse_key()
-                # Preview 시에는 일부 페이지만 파싱하여 사용자 경험 개선
-                if "target_pages" in source_config:
-                    parse_kwargs["target_pages"] = source_config["target_pages"]
-
             try:
                 parsed_blocks = parser.parse(target_path, **parse_kwargs)
             except Exception as e:
-                logger.error(f"[FileProcessor] Parsing error: {e}")
-                return ProcessingResult(chunks=[], metadata={"error": str(e)})
+                logger.error("[FileProcessor] Parsing error: %s", type(e).__name__)
+                return ProcessingResult(chunks=[], metadata={"error": "Parsing failed."})
 
             chunks = []
+            safe_source = "remote_file" if is_remote_file else file_path
             for block in parsed_blocks:
                 chunks.append(
                     {
                         "content": block["text"],
-                        "metadata": {"page": block["page"], "source": file_path},
+                        "metadata": {"page": block["page"], "source": safe_source},
                     }
                 )
 
             return ProcessingResult(
                 chunks=chunks,
                 metadata={
-                    "file_path": file_path,
+                    "file_path": safe_source,
                     "extension": ext,
                     "strategy": strategy,
                 },
@@ -98,8 +103,11 @@ class FileProcessor(BaseProcessor):
             if temp_file_path and os.path.exists(temp_file_path):
                 try:
                     os.remove(temp_file_path)
-                except Exception as e:
-                    logger.warning(f"Failed to remove temp file: {e}")
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to remove temporary file: error_type=%s",
+                        type(exc).__name__,
+                    )
 
     def _download_file(self, url: str) -> str:
         """
@@ -113,24 +121,20 @@ class FileProcessor(BaseProcessor):
                 "Raw s3:// URL is not supported for direct processing. Use HTTP URL."
             )
 
+        from urllib.parse import urlparse
+
+        path = urlparse(url).path
+        ext = os.path.splitext(path)[1] or ".tmp"
         try:
-            response = requests.get(url, stream=True)
-            response.raise_for_status()
-
-            # 확장자 추론
-            from urllib.parse import urlparse
-
-            path = urlparse(url).path
-            ext = os.path.splitext(path)[1]
-            if not ext:
-                ext = ".tmp"
-
-            with tempfile.NamedTemporaryFile(delete=False, suffix=ext) as tmp:
-                for chunk in response.iter_content(chunk_size=8192):
-                    tmp.write(chunk)
-                return tmp.name
+            return download_url_to_temp_file(
+                url,
+                suffix=ext,
+                operation_id=KNOWLEDGE_DOCUMENT_FETCH,
+            )
+        except EgressGuardError:
+            raise
         except Exception as e:
-            raise RuntimeError(f"Failed to download file from {url}: {e}")
+            raise RuntimeError("Remote file download failed.") from e
 
     def analyze(self, source_config: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -164,14 +168,18 @@ class FileProcessor(BaseProcessor):
             return {}
 
         except Exception as e:
-            return {"error": str(e)}
+            logger.warning("[FileProcessor] Analyze failed: %s", type(e).__name__)
+            return {"error": "Analyze failed."}
 
         finally:
             if temp_file_path and os.path.exists(temp_file_path):
                 try:
                     os.remove(temp_file_path)
-                except Exception as e:
-                    logger.warning(f"Failed to remove temp file: {e}")
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to remove temporary file: error_type=%s",
+                        type(exc).__name__,
+                    )
 
     def _get_parser(self, ext: str):
         if ext == ".pdf":
@@ -183,47 +191,3 @@ class FileProcessor(BaseProcessor):
         elif ext in [".csv", ".xlsx", ".xls"]:
             return ExcelCsvParser()
         return None
-
-    def _get_llamaparse_key(self) -> str:
-        """
-        DB에서 LlamaParse API Key 조회
-        """
-        env_key = os.getenv("LLAMA_CLOUD_API_KEY")
-        if env_key:
-            return env_key
-
-        if not self.db:
-            return None
-
-        from apps.shared.db.models.llm import LLMCredential, LLMProvider
-
-        provider = (
-            self.db.query(LLMProvider).filter(LLMProvider.name == "llamaparse").first()
-        )
-        if not provider:
-            return None
-
-        query = self.db.query(LLMCredential).filter(
-            LLMCredential.provider_id == provider.id, LLMCredential.is_valid
-        )
-        if self.user_id:
-            user_cred = (
-                query.filter(LLMCredential.user_id == self.user_id)
-                .order_by(LLMCredential.created_at.desc())
-                .first()
-            )
-            if user_cred:
-                return self._extract_key(user_cred)
-
-        sys_cred = query.order_by(LLMCredential.created_at.desc()).first()
-        if sys_cred:
-            return self._extract_key(sys_cred)
-
-        return None
-
-    def _extract_key(self, cred) -> str:
-        try:
-            cfg = json.loads(cred.encrypted_config)
-            return cfg.get("apiKey")
-        except Exception:
-            return None

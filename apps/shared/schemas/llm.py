@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from typing import List, Optional, Dict, Any
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -43,6 +43,7 @@ class LLMCredentialCreate(BaseModel):
     - apiKey -> api_key (to be encrypted)
     """
     provider_id: uuid.UUID
+    organization_id: Optional[uuid.UUID] = None
     credential_name: str
     api_key: str = Field(..., description="Raw API Key")
     # For custom provider override if supported later, otherwise ignored/removed
@@ -55,6 +56,7 @@ class LLMCredentialResponse(BaseModel):
     id: uuid.UUID
     provider_id: uuid.UUID
     user_id: uuid.UUID
+    organization_id: Optional[uuid.UUID] = None
     credential_name: str
     config_preview: Optional[str] = None # sk-****
     is_valid: bool
@@ -70,6 +72,36 @@ class LLMCredentialResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class LLMCredentialOptionResponse(BaseModel):
+    id: uuid.UUID
+    provider_id: uuid.UUID
+    organization_id: Optional[uuid.UUID] = None
+    credential_name: str
+    config_preview: Optional[str] = None
+    is_valid: bool
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class LLMCredentialModelOptionResponse(BaseModel):
+    """
+    Agent answer처럼 model과 credential을 함께 선택해야 하는 UI용 옵션.
+    model 전용 권한을 만들지 않고 verified credential-model relation과
+    credential use 권한을 통과한 조합만 반환한다.
+    """
+
+    model: LLMModelResponse
+    credential: LLMCredentialOptionResponse
+    provider_name: str
+    relation_priority: int = 0
+
+
+class LLMIntentModelProviderResponse(BaseModel):
+    provider_name: str
+    options: List[LLMCredentialModelOptionResponse] = Field(default_factory=list)
+    unavailable_reason: Optional[str] = None
+
+
 class LLMUsageLogResponse(BaseModel):
     id: uuid.UUID
     prompt_tokens: int
@@ -83,6 +115,33 @@ class LLMUsageLogResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class LLMTraceItem(BaseModel):
+    id: uuid.UUID
+    workflow_id: Optional[uuid.UUID] = None
+    workflow_run_id: uuid.UUID
+    node_id: Optional[str] = None
+    model_id: Optional[uuid.UUID] = None
+    model_name: Optional[str] = None
+    provider: Optional[str] = None
+    credential_id: Optional[uuid.UUID] = None
+    prompt_tokens: int
+    completion_tokens: int
+    total_tokens: int
+    total_cost: Optional[float]
+    latency_ms: Optional[int]
+    status: str
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class LLMTraceListResponse(BaseModel):
+    total: int
+    limit: int
+    offset: int
+    items: List[LLMTraceItem]
+
+
 class LLMModelPricingUpdate(BaseModel):
-    input_price_1k: float
-    output_price_1k: float
+    input_price_1k: float = Field(ge=0)
+    output_price_1k: float = Field(ge=0)

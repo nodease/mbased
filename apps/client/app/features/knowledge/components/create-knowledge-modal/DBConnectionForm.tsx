@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Shield,
   Key,
@@ -12,12 +12,15 @@ import {
   SupportedDbType,
   DBConfig,
 } from '@/app/features/knowledge/types/DB';
+import type { ConnectionTestResult } from '../../api/connectorApi';
 
 // 타입 정의
 
 interface Props {
   onChange: (config: DBConfig) => void;
-  onTestConnection: (config: DBConfig) => Promise<boolean>; // 부모 컴포넌트에서 테스트 로직 주입
+  onTestConnection: (
+    config: DBConfig,
+  ) => Promise<Pick<ConnectionTestResult, 'success' | 'retryAfter'>>;
   initialConfig?: Partial<DBConfig>; // DB 연결 수정 원래 값 보여주기 용도
 }
 
@@ -28,27 +31,37 @@ export default function DBConnectionForm({
 }: Props) {
   // 상태 관리
   const [loading, setLoading] = useState(false);
+  const [retryAfter, setRetryAfter] = useState(0);
   const [testStatus, setTestStatus] = useState<'idle' | 'success' | 'error'>(
     'idle',
   );
   const [config, setConfig] = useState<DBConfig>({
-    connectionName: initialConfig?.connectionName || '실시간 재고 데이터',
+    connectionName: initialConfig?.connectionName || '',
     type: initialConfig?.type || 'postgres',
-    host: initialConfig?.host || '127.0.0.1',
+    host: initialConfig?.host || '',
     port: initialConfig?.port || 5432,
-    database: initialConfig?.database || 'kb_test_db',
-    username: initialConfig?.username || 'kb_user',
-    password: 'admin123',
+    database: initialConfig?.database || '',
+    username: initialConfig?.username || '',
+    password: '',
     ssh: {
-      enabled: initialConfig?.ssh?.enabled ?? true,
-      host: initialConfig?.ssh?.host || '54.180.250.3',
+      enabled: initialConfig?.ssh?.enabled ?? false,
+      host: initialConfig?.ssh?.host || '',
       port: initialConfig?.ssh?.port || 22,
-      username: initialConfig?.ssh?.username || 'ubuntu',
-      authType: initialConfig?.ssh?.authType || 'key',
+      username: initialConfig?.ssh?.username || '',
+      authType: initialConfig?.ssh?.authType || 'password',
       password: '',
       privateKey: '',
     },
   });
+
+  useEffect(() => {
+    if (retryAfter <= 0) return;
+    const timer = window.setTimeout(
+      () => setRetryAfter((seconds) => Math.max(0, seconds - 1)),
+      1000,
+    );
+    return () => window.clearTimeout(timer);
+  }, [retryAfter]);
 
   // 입력 핸들러 (중첩 객체 업데이트 유틸리티 필요)
   const handleChange = (field: string, value: any, isSsh = false) => {
@@ -83,8 +96,9 @@ export default function DBConnectionForm({
     setLoading(true);
     setTestStatus('idle');
     try {
-      const success = await onTestConnection(config);
-      setTestStatus(success ? 'success' : 'error');
+      const result = await onTestConnection(config);
+      setTestStatus(result.success ? 'success' : 'error');
+      setRetryAfter(result.retryAfter ?? 0);
     } catch {
       setTestStatus('error');
     } finally {
@@ -99,7 +113,7 @@ export default function DBConnectionForm({
         <div className="space-y-3">
           <div>
             <label className="block text-xs text-gray-600 dark:text-gray-400 mb-1">
-              연결 이름 (식별용)
+              연결 이름 (식별용) <span className="text-red-500">*</span>
             </label>
             <input
               type="text"
@@ -107,6 +121,8 @@ export default function DBConnectionForm({
               placeholder="예: 운영 DB"
               value={config.connectionName}
               onChange={(e) => handleChange('connectionName', e.target.value)}
+              maxLength={100}
+              required
             />
           </div>
 
@@ -132,12 +148,12 @@ export default function DBConnectionForm({
           <div className="grid grid-cols-3 gap-3">
             <div className="col-span-2">
               <label className="block text-xs text-gray-600 dark:text-gray-400 mb-1">
-                호스트 주소 (IP)
+                호스트 이름
               </label>
               <input
                 type="text"
                 className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-                placeholder="127.0.0.1"
+                placeholder="db.example.com"
                 value={config.host}
                 onChange={(e) => handleChange('host', e.target.value)}
               />
@@ -330,7 +346,7 @@ export default function DBConnectionForm({
         <button
           type="button"
           onClick={handleTest}
-          disabled={loading}
+          disabled={loading || retryAfter > 0}
           className="w-full py-3 px-4 border-2 border-blue-100 dark:border-blue-900/30 hover:border-blue-500 dark:hover:border-blue-400 bg-blue-50 dark:bg-blue-900/10 text-blue-600 dark:text-blue-400 rounded-xl transition-all flex items-center justify-center gap-2 font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {loading ? (
@@ -338,7 +354,7 @@ export default function DBConnectionForm({
           ) : (
             <Play className="w-4 h-4 fill-current" />
           )}
-          연결 테스트
+          {retryAfter > 0 ? `${retryAfter}초 후 재시도` : '연결 테스트'}
         </button>
 
         {/* 상태 메시지 */}

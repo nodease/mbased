@@ -1,9 +1,11 @@
+import sys
+import types
 import uuid
 from unittest.mock import MagicMock, patch
 
 import pytest
-from apps.shared.db.models.knowledge import Document
-from apps.shared.services.ingestion.vector_store_service import VectorStoreService
+
+sys.modules.setdefault("openai", types.SimpleNamespace(OpenAI=object))
 
 # ------------------------------------------------------------------
 # Mocks & Fixtures
@@ -39,20 +41,40 @@ def mock_embedding_service():
         yield instance
 
 
+@pytest.fixture(autouse=True)
+def mock_tiktoken():
+    encoding = MagicMock()
+    encoding.encode.side_effect = lambda text: list(str(text))
+    encoding.decode.side_effect = lambda tokens: "".join(tokens)
+    with patch(
+        "apps.shared.services.ingestion.vector_store_service.tiktoken.encoding_for_model",
+        return_value=encoding,
+    ), patch(
+        "apps.shared.services.ingestion.vector_store_service.tiktoken.get_encoding",
+        return_value=encoding,
+    ):
+        yield encoding
+
+
 @pytest.fixture
 def service(mock_db, mock_encryption, mock_embedding_service):
+    from apps.shared.services.ingestion.vector_store_service import VectorStoreService
+
     user_id = uuid.uuid4()
     return VectorStoreService(db=mock_db, user_id=user_id)
 
 
 @pytest.fixture
 def mock_document(mock_db):
+    from apps.shared.db.models.knowledge import Document
+
     doc_id = uuid.uuid4()
     kb_id = uuid.uuid4()
     mock_doc = MagicMock(spec=Document)
     mock_doc.id = doc_id
     mock_doc.knowledge_base_id = kb_id
     mock_doc.embedding_model = "text-embedding-3-small"
+    mock_doc.meta_info = {}
 
     # DB query for Document returns this doc
     mock_db.query.return_value.filter.return_value.first.return_value = mock_doc
@@ -151,3 +173,161 @@ def test_incremental_update_scenarios(
     assert texts_to_embed[0] == "content 4 UPDATED"
 
     print("✅ Scenario 3 (Partial Update) Passed")
+
+
+def test_vector_store_rejects_hierarchical_document_mode(service, mock_document):
+    mock_document.meta_info = {"chunking_mode": "hierarchical"}
+
+    with pytest.raises(RuntimeError, match="flat-only"):
+        service.save_chunks(mock_document.id, [{"content": "x", "metadata": {}}])
+
+
+def test_vector_store_rejects_non_flat_payload(service, mock_document):
+    with pytest.raises(RuntimeError, match="hierarchical chunks"):
+        service.save_chunks(
+            mock_document.id,
+            [{"content": "x", "metadata": {}, "chunk_level": "child"}],
+        )
+
+
+def test_empty_sync_result_replaces_chunks_inside_caller_transaction(
+    service, mock_db, mock_document
+):
+    service.save_chunks(
+        mock_document.id,
+        [],
+        commit=False,
+        allow_empty_replace=True,
+    )
+
+    mock_db.query.return_value.filter.return_value.delete.assert_called_once()
+    mock_db.flush.assert_called_once()
+    mock_db.commit.assert_not_called()
+
+
+def test_postgres_document_replacement_acquires_transaction_lock(
+    service, mock_db, mock_document
+):
+    mock_db.get_bind.return_value.dialect.name = "postgresql"
+
+    service.save_chunks(
+        mock_document.id,
+        [],
+        commit=False,
+        allow_empty_replace=True,
+    )
+
+    statement, parameters = mock_db.execute.call_args.args
+    assert "pg_advisory_xact_lock" in str(statement)
+    assert isinstance(parameters["lock_key"], int)
+
+
+def test_versioned_save_replaces_only_target_version_chunks(
+    service,
+    mock_db,
+    mock_document,
+) -> None:
+    from apps.shared.db.models.knowledge import (
+        Document,
+        DocumentChunk,
+        DocumentVersion,
+    )
+
+    version_id = uuid.uuid4()
+    document_query = MagicMock()
+    document_query.filter.return_value = document_query
+    document_query.first.return_value = mock_document
+    version_query = MagicMock()
+    version_query.filter.return_value = version_query
+    version_query.one_or_none.return_value = MagicMock(id=version_id)
+    chunk_query = MagicMock()
+    chunk_query.filter.return_value = chunk_query
+    chunk_query.all.return_value = []
+
+    def query(model):
+        if model is Document:
+            return document_query
+        if model is DocumentVersion:
+            return version_query
+        if model is DocumentChunk:
+            return chunk_query
+        raise AssertionError(f"unexpected model: {model}")
+
+    mock_db.query.side_effect = query
+
+    service.save_chunks(
+        mock_document.id,
+        [{"content": "versioned content", "metadata": {}}],
+        document_version_id=version_id,
+        commit=False,
+    )
+
+    saved_chunks = mock_db.bulk_save_objects.call_args.args[0]
+    assert [chunk.document_version_id for chunk in saved_chunks] == [version_id]
+    assert any(
+        "document_version_id" in str(predicate)
+        for call in chunk_query.filter.call_args_list
+        for predicate in call.args
+    )
+    chunk_query.delete.assert_called_once_with(synchronize_session=False)
+    mock_db.flush.assert_called_once()
+    mock_db.commit.assert_not_called()
+
+
+def test_unversioned_save_replaces_only_unversioned_chunks(
+    service,
+    mock_db,
+    mock_document,
+) -> None:
+    from apps.shared.db.models.knowledge import Document, DocumentChunk
+
+    document_query = MagicMock()
+    document_query.filter.return_value = document_query
+    document_query.first.return_value = mock_document
+    chunk_query = MagicMock()
+    chunk_query.filter.return_value = chunk_query
+    chunk_query.all.return_value = []
+
+    def query(model):
+        if model is Document:
+            return document_query
+        if model is DocumentChunk:
+            return chunk_query
+        raise AssertionError(f"unexpected model: {model}")
+
+    mock_db.query.side_effect = query
+
+    service.save_chunks(
+        mock_document.id,
+        [{"content": "legacy content", "metadata": {}}],
+        commit=False,
+    )
+
+    predicates = [
+        str(predicate)
+        for call in chunk_query.filter.call_args_list
+        for predicate in call.args
+    ]
+    assert predicates.count("document_chunks.document_version_id IS NULL") == 2
+    saved_chunks = mock_db.bulk_save_objects.call_args.args[0]
+    assert [chunk.document_version_id for chunk in saved_chunks] == [None]
+    chunk_query.delete.assert_called_once_with(synchronize_session=False)
+    mock_db.flush.assert_called_once()
+    mock_db.commit.assert_not_called()
+
+
+def test_embedding_failure_uses_sanitized_exception_and_log(
+    service, mock_document, mock_embedding_service, caplog
+):
+    mock_embedding_service.embed_batch.side_effect = RuntimeError(
+        "credential-bearing provider detail"
+    )
+
+    with pytest.raises(RuntimeError, match="^embedding_generation_failed$"):
+        service.save_chunks(
+            mock_document.id,
+            [{"content": "new content", "metadata": {}}],
+            commit=False,
+        )
+
+    assert "credential-bearing provider detail" not in caplog.text

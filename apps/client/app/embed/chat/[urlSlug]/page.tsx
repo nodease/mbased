@@ -3,7 +3,18 @@
 'use client';
 
 import { useParams } from 'next/navigation';
-import { useState, useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { CitationList } from '@/app/features/workflow/components/execution/CitationList';
+import {
+  getDeploymentRunCitations,
+  getDeploymentRunFinalPreview,
+  type WorkflowCitation,
+} from '@/app/features/workflow/utils/deploymentRunResult';
+import {
+  buildPublicConversationRequest,
+  isPublicConversationHistoryContentEligible,
+  type PublicConversationContract,
+} from '../publicConversationHistory';
 import './embed-reset.css';
 
 interface DeploymentInfo {
@@ -12,6 +23,7 @@ interface DeploymentInfo {
   version: number;
   description?: string;
   type: string;
+  public_conversation_contract?: PublicConversationContract;
   input_schema?: {
     variables: Array<{
       name: string;
@@ -32,12 +44,44 @@ interface Message {
   role: 'user' | 'assistant';
   content: string;
   timestamp: Date;
+  citations?: WorkflowCitation[];
+  historyEligible?: boolean;
 }
+
+const welcomeMessage = (deployment: DeploymentInfo): Message => ({
+  id: 'welcome',
+  role: 'assistant',
+  content: `안녕하세요! ${deployment.name}입니다. 무엇을 도와드릴까요?`,
+  timestamp: new Date(),
+});
+
+const loadDeploymentInfo = async (urlSlug: string): Promise<DeploymentInfo> => {
+  const response = await fetch(`/api/v1/deployments/public/${urlSlug}/info`, {
+    cache: 'no-store',
+  });
+  if (!response.ok) {
+    throw new Error('배포된 워크플로우를 찾을 수 없습니다.');
+  }
+  return (await response.json()) as DeploymentInfo;
+};
+
+const isDeploymentVersionChanged = async (
+  response: Response,
+): Promise<boolean> => {
+  if (response.status !== 409) return false;
+  try {
+    const payload = (await response.json()) as {
+      detail?: { code?: unknown };
+    };
+    return payload.detail?.code === 'conversation.deployment_version_changed';
+  } catch {
+    return false;
+  }
+};
 
 export default function EmbedChatPage() {
   const params = useParams();
   const urlSlug = params.urlSlug as string;
-
   const [deploymentInfo, setDeploymentInfo] = useState<DeploymentInfo | null>(
     null,
   );
@@ -47,42 +91,41 @@ export default function EmbedChatPage() {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const refreshDeploymentInfo = useCallback(
+    () => loadDeploymentInfo(urlSlug),
+    [urlSlug],
+  );
+
   // 배포 정보 가져오기
   useEffect(() => {
+    let active = true;
+
     async function fetchDeploymentInfo() {
       try {
         setLoading(true);
-        const response = await fetch(
-          `/api/v1/deployments/public/${urlSlug}/info`,
-        );
-
-        if (!response.ok) {
-          throw new Error('배포된 워크플로우를 찾을 수 없습니다.');
-        }
-
-        const data = await response.json();
+        const data = await refreshDeploymentInfo();
+        if (!active) return;
         setDeploymentInfo(data);
-
-        // 환영 메시지 추가 (선택사항)
-        setMessages([
-          {
-            id: 'welcome',
-            role: 'assistant',
-            content: `안녕하세요! ${data.name}입니다. 무엇을 도와드릴까요?`,
-            timestamp: new Date(),
-          },
-        ]);
-      } catch (err: any) {
-        setError(err.message || '배포 정보를 불러오는 중 오류가 발생했습니다.');
+        setMessages([welcomeMessage(data)]);
+      } catch (err: unknown) {
+        if (!active) return;
+        setError(
+          err instanceof Error
+            ? err.message
+            : '배포 정보를 불러오는 중 오류가 발생했습니다.',
+        );
       } finally {
-        setLoading(false);
+        if (active) setLoading(false);
       }
     }
 
     if (urlSlug) {
-      fetchDeploymentInfo();
+      void fetchDeploymentInfo();
     }
-  }, [urlSlug]);
+    return () => {
+      active = false;
+    };
+  }, [refreshDeploymentInfo, urlSlug]);
 
   // 메시지 전송 처리
   const handleSendMessage = async (e: React.FormEvent) => {
@@ -103,82 +146,95 @@ export default function EmbedChatPage() {
     setSending(true);
 
     try {
-      // 실제 API 호출
-      const response = await fetch(`/api/v1/run-public/${urlSlug}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          inputs: deploymentInfo?.input_schema?.variables.reduce(
+      if (!deploymentInfo) {
+        throw new Error('배포 정보를 불러올 수 없습니다.');
+      }
+
+      const runRequest = async (
+        deployment: DeploymentInfo,
+        historyMessages: readonly Message[],
+      ): Promise<Response> => {
+        const inputs: Record<string, unknown> =
+          deployment.input_schema?.variables.reduce(
             (acc, variable) => {
-              // 첫 번째 input 변수에 사용자 메시지 매핑
-              // TODO: 추후 다중 입력 변수 지원 시 개선 필요
               if (Object.keys(acc).length === 0) {
                 acc[variable.name] = currentInput;
               }
               return acc;
             },
-            {} as Record<string, string>,
-          ),
-        }),
-      });
+            {} as Record<string, unknown>,
+          ) ?? {};
+        const publicRequest = buildPublicConversationRequest(
+          urlSlug,
+          inputs,
+          historyMessages,
+          deployment.public_conversation_contract,
+          deployment.version,
+        );
+        const sendRequest = (request: typeof publicRequest) =>
+          fetch(request.path, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(request.body),
+          });
+        const response = await sendRequest(publicRequest);
+        if (
+          response.status !== 404 ||
+          deployment.public_conversation_contract !== 'client_history_v1'
+        ) {
+          return response;
+        }
 
+        const legacyFallbackRequest = buildPublicConversationRequest(
+          urlSlug,
+          inputs,
+          [],
+          'legacy_v0',
+          deployment.version,
+        );
+        return sendRequest(legacyFallbackRequest);
+      };
+
+      let activeDeployment = deploymentInfo;
+      let response = await runRequest(activeDeployment, messages);
+      if (await isDeploymentVersionChanged(response)) {
+        activeDeployment = await refreshDeploymentInfo();
+        setDeploymentInfo(activeDeployment);
+        setMessages([welcomeMessage(activeDeployment), userMessage]);
+        response = await runRequest(activeDeployment, []);
+      }
       if (!response.ok) {
         throw new Error(`API 호출 실패: ${response.status}`);
       }
 
       const data = await response.json();
-
-      // 응답에서 결과 추출
-      let assistantContent = '';
-
-      if (data.status === 'success' && data.results) {
-        // results 객체에서 AnswerNode의 answer 찾기
-        for (const nodeResult of Object.values(data.results)) {
-          if (
-            nodeResult &&
-            typeof nodeResult === 'object' &&
-            'answer' in nodeResult
-          ) {
-            assistantContent = (nodeResult as { answer: string }).answer;
-            break;
-          }
-        }
-
-        // answer를 찾지 못한 경우, 첫 번째 결과값 사용
-        if (!assistantContent) {
-          const firstResult = Object.values(data.results)[0];
-          if (typeof firstResult === 'string') {
-            assistantContent = firstResult;
-          } else if (firstResult && typeof firstResult === 'object') {
-            // 객체인 경우 첫 번째 값 추출 시도
-            const firstValue = Object.values(firstResult)[0];
-            assistantContent =
-              typeof firstValue === 'string'
-                ? firstValue
-                : '응답을 처리할 수 없습니다.';
-          } else {
-            assistantContent = '응답을 처리할 수 없습니다.';
-          }
-        }
-      } else {
-        assistantContent = data.message || '응답을 처리할 수 없습니다.';
-      }
+      const preview = getDeploymentRunFinalPreview(activeDeployment, data);
+      const successfulResponse = data.status === 'success' && !preview.isEmpty;
+      const assistantContent = successfulResponse
+        ? preview.text
+        : '응답을 처리할 수 없습니다.';
+      const historyEligible =
+        successfulResponse &&
+        isPublicConversationHistoryContentEligible(assistantContent);
 
       const assistantMessage: Message = {
         id: `assistant-${Date.now()}`,
         role: 'assistant',
         content: assistantContent,
         timestamp: new Date(),
+        citations: successfulResponse
+          ? getDeploymentRunCitations(data)
+          : undefined,
+        historyEligible,
       };
       setMessages((prev) => [...prev, assistantMessage]);
-    } catch (error: any) {
-      // 에러 메시지 표시
+    } catch {
       const errorMessage: Message = {
         id: `error-${Date.now()}`,
         role: 'assistant',
-        content: `오류가 발생했습니다: ${error.message || '알 수 없는 오류'}`,
+        content: '요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.',
         timestamp: new Date(),
       };
       setMessages((prev) => [...prev, errorMessage]);
@@ -335,19 +391,28 @@ export default function EmbedChatPage() {
             <div
               style={{
                 maxWidth: '75%',
-                padding: '12px 16px',
-                borderRadius: '12px',
-                backgroundColor:
-                  message.role === 'user' ? '#4AAED9' : '#ffffff',
-                color: message.role === 'user' ? '#ffffff' : '#111827',
-                fontSize: '14px',
-                lineHeight: '1.5',
-                boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)',
-                wordWrap: 'break-word',
-                whiteSpace: 'pre-wrap',
+                width: message.role === 'assistant' ? '100%' : 'auto',
               }}
             >
-              {message.content}
+              <div
+                style={{
+                  padding: '12px 16px',
+                  borderRadius: '12px',
+                  backgroundColor:
+                    message.role === 'user' ? '#4AAED9' : '#ffffff',
+                  color: message.role === 'user' ? '#ffffff' : '#111827',
+                  fontSize: '14px',
+                  lineHeight: '1.5',
+                  boxShadow: '0 1px 2px 0 rgba(0, 0, 0, 0.05)',
+                  wordWrap: 'break-word',
+                  whiteSpace: 'pre-wrap',
+                }}
+              >
+                {message.content}
+              </div>
+              {message.role === 'assistant' ? (
+                <CitationList items={message.citations ?? []} />
+              ) : null}
             </div>
             <span
               style={{

@@ -5,7 +5,22 @@
 # =============================================================================
 # Secrets (Local Development Values)
 # =============================================================================
+scheduleDispatch:
+  mode: "disabled"
+
+# Local Helm keeps the existing direct-pinned development transport. The
+# production reference and Docker Compose exercise proxy-only enforcement.
+egressProxy:
+  enabled: false
+
+# In-cluster Gateway reaches the PostgreSQL service on its service port only.
+connectorTest:
+  allowedPorts:
+    - 5432
+
 secrets:
+  # Local-only fixed key. Production values must provide an independent secret.
+  connectorTestAdmissionHmacKey: "connector-test-local-development-key-v1"
   # Database password
   dbPassword: "moduly123"
   
@@ -84,9 +99,31 @@ gateway:
   env:
     CORS_ORIGINS: "http://localhost:3000,http://127.0.0.1:3000"
     SANDBOX_URL: "http://localhost:8194"  # Port-forward sandbox
+    NODE_ENV: "development"
+
+knowledgeWorker:
+  enabled: true
+  replicaCount: 1
+  concurrency: 1
+  localStorage:
+    enabled: true
+    size: 2Gi
+    accessModes:
+      - ReadWriteOnce
+  resources:
+    limits:
+      cpu: 500m
+      memory: 768Mi
+    requests:
+      cpu: 100m
+      memory: 192Mi
 
 worker:
   replicaCount: 1  # Single replica for local
+  networkPolicy:
+    # The local Helm profile explicitly keeps the direct-pinned development
+    # transport and therefore does not render the production proxy-only policy.
+    enabled: false
   resources:
     limits:
       cpu: 500m
@@ -119,9 +156,9 @@ frontend:
       memory: 128Mi
   # Override API URL for local port-forward testing
   env:
-    # Client-side (browser) API URL
-    NEXT_PUBLIC_API_URL: "http://localhost"
-    # Server-side (SSR) API URL - uses Kubernetes service
+    # Browser uses same-origin /api through ingress.
+    NEXT_PUBLIC_API_URL: ""
+    # SSE server route uses the Kubernetes service URL at runtime.
     API_URL: "http://my-moduly-gateway:8000"
 
 sandbox:

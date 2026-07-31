@@ -1,0 +1,25 @@
+{{- if .Values.egressProxy.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "moduly.fullname" . }}-egress-proxy
+  labels:
+    {{- include "moduly.componentLabels" (dict "component" "egress-proxy" "context" .) | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "moduly.componentSelectorLabels" (dict "component" "egress-proxy" "context" .) | nindent 4 }}
+  ports:
+    - name: https-connect
+      port: {{ .Values.egressProxy.service.httpsPort }}
+      targetPort: https-connect
+      protocol: TCP
+    - name: http-compatible
+      port: {{ .Values.egressProxy.service.httpCompatiblePort }}
+      targetPort: http-compatible
+      protocol: TCP
+    - name: connector-tcp
+      port: {{ .Values.egressProxy.service.connectorTcpPort }}
+      targetPort: connector-tcp
+      protocol: TCP
+{{- end }}

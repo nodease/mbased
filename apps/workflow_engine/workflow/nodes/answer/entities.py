@@ -11,7 +11,12 @@ class AnswerNodeOutput(BaseModel):
     BaseNodeData가 아닌 BaseModel을 상속 (title 필수 문제 해결)
     """
 
-    variable: str = Field(..., description="출력할 변수명 (Key)")
+    variable: str = Field(
+        ...,
+        max_length=32,
+        pattern=r"^[a-z][a-z0-9_]*$",
+        description="출력할 변수명 (최대 32자, 영문 소문자로 시작, 영문 소문자/숫자/언더바만 허용)",
+    )
     value_selector: List[str] = Field(
         ..., description="값을 가져올 위치 [node_id, variable_key]"
     )

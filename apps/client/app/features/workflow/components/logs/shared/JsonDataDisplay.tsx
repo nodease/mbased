@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import {
   ChevronRight,
@@ -42,7 +41,11 @@ const ValueRenderer = ({ value }: { value: any }) => {
     return <span className="text-gray-400 italic">undefined</span>;
   if (typeof value === 'boolean')
     return (
-      <span className={value ? 'text-green-600 font-bold' : 'text-red-500 font-bold'}>
+      <span
+        className={
+          value ? 'text-green-600 font-bold' : 'text-red-500 font-bold'
+        }
+      >
         {String(value)}
       </span>
     );
@@ -108,15 +111,11 @@ export const JsonDataDisplay = ({
   initiallyExpanded = true,
 }: JsonDataDisplayProps) => {
   const [expanded, setExpanded] = useState(
-    level === 0 ? true : initiallyExpanded
+    level === 0 ? true : initiallyExpanded,
   );
 
   // 기본 타입 처리
-  if (
-    data === null ||
-    data === undefined ||
-    typeof data !== 'object'
-  ) {
+  if (data === null || data === undefined || typeof data !== 'object') {
     return (
       <div className="flex items-center gap-2 group">
         <ValueRenderer value={data} />
@@ -167,8 +166,11 @@ export const JsonDataDisplay = ({
             {!expanded && (
               <span className="text-gray-400 text-[10px]">...</span>
             )}
-            <div className="opacity-0 hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
-               <CopyButton text={JSON.stringify(data, null, 2)} />
+            <div
+              className="opacity-0 hover:opacity-100 transition-opacity"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <CopyButton text={JSON.stringify(data, null, 2)} />
             </div>
           </div>
 
@@ -176,14 +178,13 @@ export const JsonDataDisplay = ({
             <div className="pl-2 mt-1 border-l-2 border-gray-100 space-y-1">
               {keys.map((key) => {
                 const value = data[key];
-                const isComplex =
-                  value !== null &&
-                  typeof value === 'object' &&
-                  Object.keys(value).length > 0;
 
                 return (
                   <div key={key} className="flex gap-2 items-start group/item">
-                    <div className="min-w-[4rem] max-w-[12rem] text-gray-500 font-semibold truncate shrink-0 pt-0.5" title={key}>
+                    <div
+                      className="min-w-[4rem] max-w-[12rem] text-gray-500 font-semibold truncate shrink-0 pt-0.5"
+                      title={key}
+                    >
                       {key}:
                     </div>
                     <div className="flex-1 min-w-0">

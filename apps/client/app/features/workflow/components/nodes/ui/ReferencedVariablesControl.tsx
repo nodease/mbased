@@ -1,8 +1,8 @@
 import React from 'react';
 import { Plus, Trash2, ArrowRight } from 'lucide-react';
 import { AppNode } from '../../../types/Nodes';
-import { getNodeOutputs } from '../../../utils/getNodeOutputs';
-import { RoundedSelect } from '../../ui/RoundedSelect';
+import { getNodeOutputVariables } from '../../../utils/nodeVariablePorts';
+import { VariableSelectorSlot } from './VariableSelectorSlot';
 
 export interface ReferencedVariable {
   name: string;
@@ -46,28 +46,6 @@ export const ReferencedVariablesControl: React.FC<
   showItemLabel = true,
   hideAlias = false,
 }) => {
-  const handleSelectorUpdate = (
-    index: number,
-    position: 0 | 1,
-    value: string,
-  ) => {
-    const currentSelector = [...(variables[index].value_selector || [])];
-
-    if (currentSelector.length < 2) {
-      currentSelector[0] = currentSelector[0] || '';
-      currentSelector[1] = currentSelector[1] || '';
-    }
-
-    currentSelector[position] = value;
-
-    // 노드가 변경되면(인덱스 0), 출력 키(인덱스 1) 초기화
-    if (position === 0) {
-      currentSelector[1] = '';
-    }
-
-    onUpdate(index, 'value_selector', currentSelector);
-  };
-
   return (
     <div className="flex flex-col gap-3">
       {/* 헤더: 타이틀 또는 설명 + 추가 버튼 */}
@@ -134,15 +112,16 @@ export const ReferencedVariablesControl: React.FC<
       )}
 
       {variables.map((variable, index) => {
-        const selectedSourceNodeId = variable.value_selector?.[0] || '';
-        const selectedVarKey = variable.value_selector?.[1] || '';
-
         const selectedNode = upstreamNodes.find(
-          (n) => n.id === selectedSourceNodeId,
+          (n) => n.id === variable.value_selector?.[0],
         );
-        const availableOutputs = selectedNode
-          ? getNodeOutputs(selectedNode)
-          : [];
+        const selectedOutput = selectedNode
+          ? getNodeOutputVariables(selectedNode).find(
+              (output) =>
+                output.key === variable.value_selector?.[1] ||
+                output.outputId === variable.value_selector?.[1],
+            )
+          : undefined;
 
         return (
           <div
@@ -175,50 +154,17 @@ export const ReferencedVariablesControl: React.FC<
 
             <div className="flex flex-row items-center gap-2">
               {/* (1) Source Group: Node & Output */}
-              <div className="flex flex-[4] flex-col gap-1 sm:flex-row sm:items-center">
-                <div className="relative flex-1">
-                  <RoundedSelect
-                    value={selectedSourceNodeId}
-                    onChange={(val) =>
-                      handleSelectorUpdate(index, 0, val as string)
-                    }
-                    options={[
-                      { label: '노드 선택', value: '' },
-                      ...upstreamNodes.map((n) => ({
-                        label: (n.data as { title?: string })?.title || n.type,
-                        value: n.id,
-                      })),
-                    ]}
-                    placeholder="노드 선택"
-                    className="py-1.5 text-xs"
-                  />
-                </div>
-
-                <div className="relative flex-1">
-                  <RoundedSelect
-                    value={selectedVarKey}
-                    onChange={(val) =>
-                      handleSelectorUpdate(index, 1, val as string)
-                    }
-                    options={[
-                      {
-                        label: !selectedSourceNodeId
-                          ? '출력 선택'
-                          : '출력값 선택',
-                        value: '',
-                      },
-                      ...availableOutputs.map((outKey: string) => ({
-                        label: outKey,
-                        value: outKey,
-                      })),
-                    ]}
-                    disabled={!selectedSourceNodeId}
-                    placeholder={
-                      !selectedSourceNodeId ? '출력 선택' : '출력값 선택'
-                    }
-                    className="py-1.5 text-xs"
-                  />
-                </div>
+              <div className="flex-[4]">
+                <VariableSelectorSlot
+                  value={variable.value_selector}
+                  selectedOutput={selectedOutput}
+                  label={`${title || '입력변수'} ${index + 1}`}
+                  placeholder="입력 변수 클릭"
+                  kind="mapping"
+                  onChange={(selector) =>
+                    onUpdate(index, 'value_selector', selector)
+                  }
+                />
               </div>
 
               {!hideAlias && (
@@ -234,7 +180,7 @@ export const ReferencedVariablesControl: React.FC<
                   <div className="flex-[3]">
                     <input
                       type="text"
-                      className="w-full rounded-md border border-gray-200 px-2.5 py-1.5 text-xs font-semibold text-blue-600 placeholder:font-normal placeholder:text-gray-300 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500/20"
+                      className="w-full rounded-md border border-gray-200 px-2.5 py-1.5 text-xs font-semibold text-blue-600 placeholder:font-normal placeholder:text-gray-500 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500/20"
                       placeholder={placeholder}
                       value={variable.name}
                       onChange={(e) => onUpdate(index, 'name', e.target.value)}

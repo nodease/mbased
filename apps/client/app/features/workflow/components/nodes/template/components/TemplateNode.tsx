@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { LayoutTemplate } from 'lucide-react';
-import { BaseNodeData, TemplateNodeData } from '../../../../types/Nodes';
+import { TemplateNodeData } from '../../../../types/Nodes';
 import { BaseNode } from '../../BaseNode';
 import { ValidationBadge } from '../../../ui/ValidationBadge';
 import { hasIncompleteVariables } from '../../../../utils/validationUtils';
@@ -37,7 +37,7 @@ export const TemplateNode: React.FC<TemplateNodeProps> = ({
 
   const incompleteVars = useMemo(
     () => hasIncompleteVariables(data.variables),
-    [data.variables]
+    [data.variables],
   );
 
   const hasValidationIssue = missingVariables.length > 0 || incompleteVars;

@@ -1,7 +1,7 @@
 'use client';
 
-import Image from 'next/image';
 import { useRouter } from 'next/navigation';
+import { LayoutDashboard } from 'lucide-react';
 
 export default function Logo({ collapsed }: { collapsed?: boolean }) {
   const router = useRouter();
@@ -14,26 +14,20 @@ export default function Logo({ collapsed }: { collapsed?: boolean }) {
     >
       <button
         onClick={() => router.push('/dashboard')}
-        className="cursor-pointer hover:opacity-80 transition-opacity"
+        className="flex cursor-pointer items-center gap-3 transition-opacity hover:opacity-80"
+        aria-label="Nodease dashboard"
       >
         {collapsed ? (
-          <Image
-            src="/moduly-logo-small.png"
-            alt="Moduly Small Logo"
-            width={32}
-            height={32}
-            className="h-8 w-auto ml-[4px]"
-            priority
-          />
+          <span className="grid h-8 w-8 place-items-center rounded-lg bg-slate-950 text-white">
+            <LayoutDashboard className="h-4 w-4" />
+          </span>
         ) : (
-          <Image
-            src="/moduly-logo.png"
-            alt="Moduly Logo"
-            width={120}
-            height={32}
-            className="h-8 w-auto"
-            priority
-          />
+          <>
+            <span className="grid h-9 w-9 place-items-center rounded-lg bg-slate-950 text-white">
+              <LayoutDashboard className="h-5 w-5" />
+            </span>
+            <span className="text-sm font-black text-slate-950">Nodease</span>
+          </>
         )}
       </button>
     </div>

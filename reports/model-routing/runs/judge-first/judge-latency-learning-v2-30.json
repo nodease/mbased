@@ -1,0 +1,75 @@
+{
+  "started_at": "2026-07-21T07:38:50.377526+00:00",
+  "executions": 30,
+  "workflow_success_count": 30,
+  "schema_pass_count": 30,
+  "selected_models": {
+    "gpt-5-mini": 16,
+    "gpt-4o-mini": 8,
+    "gpt-4.1-mini": 6
+  },
+  "task_cost_usd": 0.035919,
+  "judge_cost_usd": 0.120113,
+  "judge_usage_log_count": 30,
+  "judge_latency_count": 30,
+  "judge_latency_ms": {
+    "min": 1847,
+    "mean": 3609.8,
+    "median": 3393.0,
+    "p95": 5664,
+    "max": 5951,
+    "stdev": 1140.24
+  },
+  "labels_created": 0,
+  "labels_accepted": 0,
+  "labels_rejected": 0,
+  "learning_blocks": [
+    {
+      "runs": "1-10",
+      "count": 0,
+      "comparable": 0
+    },
+    {
+      "runs": "11-20",
+      "count": 0,
+      "comparable": 0
+    },
+    {
+      "runs": "21-30",
+      "count": 0,
+      "comparable": 0
+    }
+  ],
+  "checkpoints": [
+    {
+      "after_runs": 10,
+      "processed_count": 0,
+      "remaining_count": 0,
+      "mode": "judge_first",
+      "judged_request_count": 0,
+      "recent_evaluation": null
+    },
+    {
+      "after_runs": 20,
+      "processed_count": 0,
+      "remaining_count": 0,
+      "mode": "judge_first",
+      "judged_request_count": 0,
+      "recent_evaluation": null
+    },
+    {
+      "after_runs": 30,
+      "processed_count": 0,
+      "remaining_count": 0,
+      "mode": "judge_first",
+      "judged_request_count": 0,
+      "recent_evaluation": null
+    }
+  ],
+  "final_learning": {
+    "mode": "judge_first",
+    "judged_request_count": 0,
+    "recent_evaluation": null,
+    "feature_schema_version": null
+  }
+}

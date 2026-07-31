@@ -27,11 +27,7 @@ export const NodeSelector = ({ onSelect }: NodeSelectorProps) => {
     ? ['startNode', 'webhookTrigger', 'scheduleTrigger', 'loopNode']
     : ['loopNode'];
 
-  const handleHoverNode = (
-    nodeId: string | null,
-    node: any,
-    event: React.MouseEvent,
-  ) => {
+  const handleHoverNode = (nodeId: string | null, node: any) => {
     if (node) {
       setHoveredNode(node);
     } else {

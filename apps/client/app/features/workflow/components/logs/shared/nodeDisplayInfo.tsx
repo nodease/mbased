@@ -17,6 +17,8 @@ import {
   Github,
   FileOutput,
   Repeat,
+  FilePenLine,
+  CheckCheck,
 } from 'lucide-react';
 
 export interface NodeDisplayInfo {
@@ -112,6 +114,16 @@ const nodeDisplayMapping: Record<string, NodeDisplayInfo> = {
     icon: <Mail className="w-4 h-4" />,
     color: 'text-red-600 bg-red-50',
   },
+  gmailDraftNode: {
+    label: 'Gmail 답장 초안',
+    icon: <FilePenLine className="w-4 h-4" />,
+    color: 'text-red-700 bg-red-50',
+  },
+  mailAcknowledgeNode: {
+    label: '메일 처리 완료',
+    icon: <CheckCheck className="w-4 h-4" />,
+    color: 'text-green-700 bg-green-50',
+  },
   githubNode: {
     label: 'GitHub',
     icon: <Github className="w-4 h-4" />,
@@ -162,8 +174,10 @@ const defaultNodeDisplay: NodeDisplayInfo = {
  * 노드 타입에 따른 표시 정보(라벨, 아이콘, 색상)를 반환합니다.
  */
 export function getNodeDisplayInfo(nodeType: string): NodeDisplayInfo {
-  return nodeDisplayMapping[nodeType] || {
-    ...defaultNodeDisplay,
-    label: nodeType,
-  };
+  return (
+    nodeDisplayMapping[nodeType] || {
+      ...defaultNodeDisplay,
+      label: nodeType,
+    }
+  );
 }

@@ -1,0 +1,87 @@
+{{- if and .Values.worker.enabled .Values.worker.networkPolicy.enabled .Values.egressProxy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "moduly.fullname" . }}-worker-egress
+  labels:
+    {{- include "moduly.componentLabels" (dict "component" "worker" "context" .) | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "moduly.componentSelectorLabels" (dict "component" "worker" "context" .) | nindent 6 }}
+      {{- include "moduly.egressWorkloadSelectorLabel" . | nindent 6 }}
+  policyTypes:
+    - Egress
+  egress:
+    # Operator-owned cluster DNS only. Service DNAT behavior remains
+    # CNI-specific, so DNS coordinates are shared by all strict policies.
+    - to:
+        {{- include "moduly.dnsEgressPeer" . | nindent 8 }}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "moduly.componentSelectorLabels" (dict "component" "egress-proxy" "context" .) | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: 3129
+        - protocol: TCP
+          port: 3130
+    {{- if .Values.postgresql.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: {{ .Release.Name }}
+              app.kubernetes.io/name: postgresql
+      ports:
+        - protocol: TCP
+          port: {{ include "moduly.postgresql.port" . }}
+    {{- end }}
+    {{- if .Values.redis.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: {{ .Release.Name }}
+              app.kubernetes.io/name: redis
+      ports:
+        - protocol: TCP
+          port: 6379
+    {{- end }}
+    {{- if .Values.sandbox.enabled }}
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "moduly.componentSelectorLabels" (dict "component" "sandbox" "context" .) | nindent 14 }}
+      ports:
+        - protocol: TCP
+          port: 8194
+    {{- end }}
+    {{- range .Values.worker.networkPolicy.externalDatabaseCidrs }}
+    - to:
+        - ipBlock:
+            cidr: {{ . | quote }}
+      ports:
+        - protocol: TCP
+          port: {{ include "moduly.postgresql.port" $ }}
+    {{- end }}
+    {{- range .Values.worker.networkPolicy.externalRedisCidrs }}
+    - to:
+        - ipBlock:
+            cidr: {{ . | quote }}
+      ports:
+        - protocol: TCP
+          port: 6379
+    {{- end }}
+    {{- range .Values.worker.networkPolicy.externalSandboxCidrs }}
+    - to:
+        - ipBlock:
+            cidr: {{ . | quote }}
+      ports:
+        - protocol: TCP
+          port: 8194
+    {{- end }}
+{{- end }}

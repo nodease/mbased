@@ -16,6 +16,8 @@ class DeploymentType(str, Enum):
     API = "api"  # REST API / 웹훅 배포
     WEBAPP = "webapp"  # 웹 앱으로 배포 (공개)
     WIDGET = "widget"  # 웹 위젯 임베딩 배포 (공개)
+    CHATBOT = "chatbot"  # 공개 챗봇 배포
+    INTERNAL_CHATBOT = "internal_chatbot"  # 로그인 사용자 권한 기반 내부 챗봇 배포
     MCP = "mcp"  # Model Context Protocol
     WORKFLOW_NODE = (
         "workflow_node"  # 워크플로우 노드로 배포 (다른 워크플로우에서 재사용)
@@ -63,6 +65,12 @@ class WorkflowDeployment(Base):
 
     # 배포 설정. 예시: {"rate_limit": 100, "timeout": 30}
     config: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True, default={})
+
+    # iframe parent policy. Legacy rows remain null and resolve fail-closed.
+    browser_access_policy: Mapped[Optional[dict]] = mapped_column(
+        JSONB,
+        nullable=True,
+    )
 
     # 입출력 스키마 (graph_snapshot에서 자동 추출하여 저장)
     input_schema: Mapped[Optional[dict]] = mapped_column(

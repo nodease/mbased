@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useRef, useEffect, DragEvent } from 'react';
+import { useState, useRef, useEffect } from 'react';
+import type { DragEvent as ReactDragEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { useRouter } from 'next/navigation';
 import {
@@ -16,6 +17,60 @@ import {
   Check,
   AlertTriangle,
 } from 'lucide-react';
+import { toast } from 'sonner';
+import { knowledgeApi } from '@/app/features/knowledge/api/knowledgeApi';
+import DBConnectionForm from './DBConnectionForm';
+import {
+  DBConfig,
+  SUPPORTED_DB_TYPES,
+} from '@/app/features/knowledge/types/DB';
+import { connectorApi } from '@/app/features/knowledge/api/connectorApi';
+
+const getHttpStatus = (error: unknown): number | undefined => {
+  if (typeof error !== 'object' || error === null) return undefined;
+  const response = (error as { response?: { status?: unknown } }).response;
+  return typeof response?.status === 'number' ? response.status : undefined;
+};
+
+const logCreateKnowledgeModalFailure = (operation: string, error: unknown) => {
+  console.warn('[CreateKnowledgeModal] request failed', {
+    operation,
+    status: getHttpStatus(error),
+  });
+};
+
+const safeFailureMessage = (message: string, error: unknown) => {
+  const status = getHttpStatus(error);
+  return status ? `${message} (HTTP ${status})` : message;
+};
+
+const getReasonCode = (error: unknown): string | undefined => {
+  if (typeof error !== 'object' || error === null) return undefined;
+  const response = (
+    error as {
+      response?: {
+        data?: {
+          detail?: {
+            reason_code?: unknown;
+            error?: { code?: unknown };
+          };
+        };
+      };
+    }
+  ).response;
+  const reasonCode =
+    response?.data?.detail?.error?.code ??
+    response?.data?.detail?.reason_code;
+  return typeof reasonCode === 'string' ? reasonCode : undefined;
+};
+
+const SAFE_CONNECTOR_COMPENSATION_REASON_CODES = new Set([
+  'knowledge.document_slot_occupied',
+  'knowledge.document_registration_not_allowed',
+  'resource.hidden',
+  'resource.not_found',
+  'permission.denied',
+]);
 
 interface SelectOption {
   value: string;
@@ -174,14 +229,6 @@ function CustomSelect({
     </div>
   );
 }
-import { toast } from 'sonner';
-import { knowledgeApi } from '@/app/features/knowledge/api/knowledgeApi';
-import DBConnectionForm from './DBConnectionForm';
-import {
-  DBConfig,
-  SUPPORTED_DB_TYPES,
-} from '@/app/features/knowledge/types/DB';
-import { connectorApi } from '@/app/features/knowledge/api/connectorApi';
 
 interface CreateKnowledgeModalProps {
   isOpen: boolean;
@@ -300,10 +347,13 @@ export default function CreateKnowledgeModal({
             }));
           }
         } else {
-          console.error('Failed to fetch embedding models');
+          console.warn('[CreateKnowledgeModal] request failed', {
+            operation: 'fetchEmbeddingModels',
+            status: res.status,
+          });
         }
       } catch (err) {
-        console.error('Error fetching embedding models', err);
+        logCreateKnowledgeModalFailure('fetchEmbeddingModels', err);
       } finally {
         setLoadingModels(false);
       }
@@ -386,12 +436,23 @@ export default function CreateKnowledgeModal({
     }
   };
 
-  const handleDragOver = (e: DragEvent<HTMLDivElement>) => {
+  const hasDraggedFiles = (e: ReactDragEvent<HTMLElement>) =>
+    Array.from(e.dataTransfer.types).includes('Files');
+
+  const preventModalFileDropDefaults = (e: ReactDragEvent<HTMLElement>) => {
+    if (!hasDraggedFiles(e)) return;
+
     e.preventDefault();
   };
 
-  const handleDrop = (e: DragEvent<HTMLDivElement>) => {
+  const stopFileDragDefaults = (e: ReactDragEvent<HTMLDivElement>) => {
     e.preventDefault();
+    e.stopPropagation();
+    e.dataTransfer.dropEffect = 'copy';
+  };
+
+  const handleDrop = (e: ReactDragEvent<HTMLDivElement>) => {
+    stopFileDragDefaults(e);
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
       const droppedFile = e.dataTransfer.files[0];
       if (droppedFile.size > MAX_FILE_SIZE) {
@@ -403,26 +464,27 @@ export default function CreateKnowledgeModal({
   };
 
   // DB Connection Test
-  const handleTestDBConnection = async (config: DBConfig): Promise<boolean> => {
+  const handleTestDBConnection = async (config: DBConfig) => {
     try {
       const result = await connectorApi.testConnection(config);
       if (result.success) {
         toast.success(result.message || 'DB 연결 테스트 성공!');
-        return true;
+        return result;
       } else {
         toast.error(result.message || 'DB 연결에 실패했습니다.');
-        return false;
+        return result;
       }
-    } catch (err: any) {
-      console.error('DB Connection Test Error', err);
+    } catch (err) {
+      logCreateKnowledgeModalFailure('testDbConnection', err);
       toast.error(
-        err.message || 'DB 연결 테스트 중 알 수 없는 오류가 발생했습니다.',
+        safeFailureMessage('DB 연결 테스트 중 오류가 발생했습니다.', err),
       );
-      return false;
+      return { success: false };
     }
   };
 
   const handleSubmit = async () => {
+    let requestOwnedConnectionId: string | undefined;
     try {
       setIsLoading(true);
 
@@ -463,6 +525,11 @@ export default function CreateKnowledgeModal({
         setIsLoading(false);
         return;
       }
+      if (sourceType === 'DB' && !dbConfig.connectionName.trim()) {
+        alert('DB 연결 이름을 입력해주세요.');
+        setIsLoading(false);
+        return;
+      }
       if (
         sourceType === 'DB' &&
         (!dbConfig.host ||
@@ -486,18 +553,18 @@ export default function CreateKnowledgeModal({
           const connectorRes = await connectorApi.createConnector(dbConfig);
           if (connectorRes.success && connectorRes.id) {
             connectionId = connectorRes.id;
+            requestOwnedConnectionId = connectorRes.id;
           } else {
-            console.error('Connector creation failed:', connectorRes.message);
             toast.error(
               connectorRes.message || 'DB 연결 정보 저장에 실패했습니다.',
             );
             setIsLoading(false);
             return;
           }
-        } catch (err: any) {
-          console.error('Connector creation error:', err);
+        } catch (err) {
+          logCreateKnowledgeModalFailure('createConnector', err);
           toast.error(
-            err.message || 'DB 연결 정보 저장 중 오류가 발생했습니다.',
+            safeFailureMessage('DB 연결 정보 저장 중 오류가 발생했습니다.', err),
           );
           setIsLoading(false);
           return;
@@ -511,6 +578,7 @@ export default function CreateKnowledgeModal({
           const presignedData = await knowledgeApi.getPresignedUploadUrl(
             file.name,
             file.type || 'application/octet-stream',
+            knowledgeBaseId,
           );
 
           if (presignedData.use_backend_proxy) {
@@ -527,9 +595,16 @@ export default function CreateKnowledgeModal({
             s3FileUrl = presignedData.upload_url.split('?')[0]; // Query string 제거
             s3FileKey = presignedData.s3_key;
           }
-        } catch (err: any) {
-          console.error('[S3 Upload] Failed:', err);
-          toast.error(`S3 업로드 실패: ${err.message}`);
+        } catch (err) {
+          logCreateKnowledgeModalFailure('uploadToS3', err);
+          if (getReasonCode(err) === 'knowledge.document_slot_occupied') {
+            toast.error(
+              '이 지식 베이스에는 이미 소스가 있습니다. 새 지식 베이스를 만든 뒤 Collection에서 묶어주세요.',
+            );
+            onClose();
+            return;
+          }
+          toast.error(safeFailureMessage('S3 업로드에 실패했습니다.', err));
           setIsLoading(false);
           return;
         }
@@ -565,26 +640,31 @@ export default function CreateKnowledgeModal({
       // 성공 시 모달 닫기
       onClose();
 
-      // 문서 ID가 있으면 문서 상세로 이동
-      if (response.document_id) {
-        router.push(
-          `/dashboard/knowledge/${response.knowledge_base_id}/document/${response.document_id}`,
+      toast.success(
+        '소스가 등록되었습니다. 소스 목록에서 처리 시작을 눌러주세요.',
+      );
+      router.push(`/dashboard/knowledge/${response.knowledge_base_id}`);
+    } catch (error) {
+      const reasonCode = getReasonCode(error);
+      if (
+        requestOwnedConnectionId &&
+        reasonCode &&
+        SAFE_CONNECTOR_COMPENSATION_REASON_CODES.has(reasonCode)
+      ) {
+        await connectorApi.deleteConnector(requestOwnedConnectionId);
+      }
+      if (reasonCode === 'knowledge.document_slot_occupied') {
+        toast.error(
+          '이 지식 베이스에는 이미 소스가 있습니다. 새 지식 베이스를 만든 뒤 Collection에서 묶어주세요.',
         );
-      } else {
-        // 혹시 모르니 KB 상세로
-        router.push(`/dashboard/knowledge/${response.knowledge_base_id}`);
+        onClose();
+        return;
       }
-    } catch (error: any) {
-      console.group('[CreateKnowledgeModal] Submission failed');
-      console.error('Error object:', error);
-      if (error.response) {
-        console.error('Response data:', error.response.data);
-        console.error('Response status:', error.response.status);
-      }
-      console.groupEnd();
-      console.error('Failed to create/upload knowledge base:', error);
-      alert(
-        `요청 처리에 실패했습니다: ${error.response?.data?.detail || error.message}`,
+      const status = getHttpStatus(error);
+      toast.error(
+        status
+          ? `요청 처리에 실패했습니다. (HTTP ${status})`
+          : '요청 처리에 실패했습니다.',
       );
     } finally {
       setIsLoading(false);
@@ -645,9 +725,9 @@ export default function CreateKnowledgeModal({
       );
       setApiPreviewData(data.data);
       toast.success('데이터를 성공적으로 불러왔습니다.');
-    } catch (error: any) {
-      console.error('API Fetch Error:', error);
-      toast.error(`API 호출 실패: ${error.message || '알 수 없는 오류'}`);
+    } catch (error) {
+      logCreateKnowledgeModalFailure('proxyApiPreview', error);
+      toast.error(safeFailureMessage('API 호출에 실패했습니다.', error));
     } finally {
       setIsFetchingApi(false);
     }
@@ -740,7 +820,11 @@ export default function CreateKnowledgeModal({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-md p-4 animate-in fade-in duration-200">
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-md p-4 animate-in fade-in duration-200"
+      onDragOverCapture={preventModalFileDropDefaults}
+      onDropCapture={preventModalFileDropDefaults}
+    >
       <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto border border-gray-100 dark:border-gray-700 flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
@@ -831,7 +915,9 @@ export default function CreateKnowledgeModal({
               {sourceType === 'FILE' && (
                 <>
                   <div
-                    onDragOver={handleDragOver}
+                    onDragEnter={stopFileDragDefaults}
+                    onDragOver={stopFileDragDefaults}
+                    onDragLeave={stopFileDragDefaults}
                     onDrop={handleDrop}
                     className="border-2 border-dashed border-gray-200 dark:border-gray-600 rounded-xl p-10 text-center hover:border-blue-500 hover:bg-blue-50/50 dark:hover:border-blue-400 dark:hover:bg-blue-900/10 transition-all cursor-pointer group"
                     onClick={() => fileInputRef.current?.click()}

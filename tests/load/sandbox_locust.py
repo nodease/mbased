@@ -61,8 +61,8 @@ class SandboxUser(HttpUser):
     wait_time = between(0.1, 0.5)
     
     def on_start(self):
-        """테스트 시작 시 랜덤 tenant_id 할당"""
-        self.tenant_id = f"tenant_{random.randint(1, TENANT_COUNT)}"
+        """테스트 시작 시 랜덤 organization_id 할당"""
+        self.organization_id = f"tenant_{random.randint(1, TENANT_COUNT)}"
         self.user_start_time = time.time()
     
     @tag('fast')
@@ -78,7 +78,7 @@ class SandboxUser(HttpUser):
             "inputs": {"x": random.randint(1, 100), "y": random.randint(1, 100)},
             "trigger_type": "manual",
             "timeout": 5,
-            "tenant_id": self.tenant_id,
+            "organization_id": self.organization_id,
         }
         
         with self.client.post(
@@ -103,7 +103,7 @@ class SandboxUser(HttpUser):
             "inputs": {},
             "trigger_type": "schedule",
             "timeout": 10,
-            "tenant_id": self.tenant_id,
+            "organization_id": self.organization_id,
         }
         
         with self.client.post(
@@ -133,7 +133,7 @@ def main(args):
             "inputs": {"size": 500000},
             "trigger_type": "api",
             "timeout": 10,
-            "tenant_id": self.tenant_id,
+            "organization_id": self.organization_id,
         }
         
         with self.client.post(
@@ -157,7 +157,7 @@ def main(args):
                 "inputs": {},
                 "trigger_type": "api",
                 "timeout": 5,
-                "tenant_id": self.tenant_id,
+                "organization_id": self.organization_id,
             }
             self.client.post(
                 "/v1/sandbox/execute",
@@ -228,7 +228,7 @@ class ConvoyEffectTest(HttpUser):
     
     def on_start(self):
         """테스트 시작"""
-        self.tenant_id = f"convoy_tenant_{random.randint(1, 3)}"
+        self.organization_id = f"convoy_tenant_{random.randint(1, 3)}"
         self.request_count = 0
     
     @tag('convoy', 'slow')
@@ -243,7 +243,7 @@ class ConvoyEffectTest(HttpUser):
             "inputs": {},
             "trigger_type": "schedule",  # LOW priority fallback
             "timeout": 10,
-            "tenant_id": self.tenant_id,
+            "organization_id": self.organization_id,
         }
         
         with self.client.post(
@@ -276,7 +276,7 @@ class ConvoyEffectTest(HttpUser):
             "inputs": {"x": random.randint(1, 100)},
             "trigger_type": "manual",  # HIGH priority fallback
             "timeout": 5,
-            "tenant_id": self.tenant_id,
+            "organization_id": self.organization_id,
         }
         
         with self.client.post(
@@ -288,8 +288,6 @@ class ConvoyEffectTest(HttpUser):
             if response.status_code == 200:
                 data = response.json()
                 if data.get("success"):
-                    # 응답 시간 로깅 (선택)
-                    exec_time = data.get("execution_time_ms", 0)
                     response.success()
                 else:
                     response.failure(data.get("error", "Unknown error"))
@@ -320,7 +318,7 @@ class WarmupThenMeasureTest(HttpUser):
     SLOW_CODE = "import time\ndef main(args): time.sleep(1.5); return {'waited': 1.5}"
     
     def on_start(self):
-        self.tenant_id = f"warmup_tenant_{random.randint(1, 5)}"
+        self.organization_id = f"warmup_tenant_{random.randint(1, 5)}"
         self.start_time = time.time()
     
     def is_warmup_phase(self) -> bool:
@@ -338,7 +336,7 @@ class WarmupThenMeasureTest(HttpUser):
             "inputs": {"a": random.randint(1, 50), "b": random.randint(1, 50)},
             "trigger_type": "manual",
             "timeout": 5,
-            "tenant_id": self.tenant_id,
+            "organization_id": self.organization_id,
         }
         
         with self.client.post(
@@ -360,7 +358,7 @@ class WarmupThenMeasureTest(HttpUser):
             "inputs": {},
             "trigger_type": "schedule",
             "timeout": 10,
-            "tenant_id": self.tenant_id,
+            "organization_id": self.organization_id,
         }
         
         with self.client.post(
@@ -460,9 +458,6 @@ def on_test_stop(environment, **kwargs):
 # ============================================================
 
 if __name__ == "__main__":
-    import subprocess
-    import sys
-    
     print("Locust를 직접 실행하세요:")
     print(f"  locust -f {__file__} --host=http://localhost:8001")
     print("\n옵션:")

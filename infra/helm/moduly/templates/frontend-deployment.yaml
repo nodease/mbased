@@ -27,11 +27,14 @@ spec:
           protocol: TCP
         env:
         # Next.js API URLs (from ConfigMap)
+        {{- if .Values.frontend.env.NEXT_PUBLIC_API_URL }}
         - name: NEXT_PUBLIC_API_URL
           valueFrom:
             configMapKeyRef:
               name: {{ include "moduly.configMapName" . }}
               key: NEXT_PUBLIC_API_URL
+              optional: true
+        {{- end }}
         - name: API_URL
           valueFrom:
             configMapKeyRef:

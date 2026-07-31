@@ -55,7 +55,7 @@ class SandboxService:
         priority: str = None,  # None이면 SJF 기반 자동 결정
         trigger_type: str = None,  # 트리거 유형 (manual, schedule, webhook, batch)
         enable_network: bool = False,
-        tenant_id: str = None,
+        organization_id: str = None,
     ) -> Dict[str, Any]:
         """
         파이썬 코드를 Moduly Sandbox API에서 안전하게 실행
@@ -69,7 +69,7 @@ class SandboxService:
             priority: 우선순위 ("high", "normal", "low", None=자동)
             trigger_type: 트리거 유형 (첫 실행 시 fallback 우선순위 결정용)
             enable_network: 네트워크 허용 여부
-            tenant_id: 테넌트 ID (공정 스케줄링용)
+            organization_id: 테넌트 ID (공정 스케줄링용)
 
         Returns:
             실행 결과 딕셔너리 또는 에러 딕셔너리
@@ -85,7 +85,7 @@ class SandboxService:
             "priority": priority,
             "trigger_type": trigger_type,
             "enable_network": enable_network,
-            "tenant_id": tenant_id,
+            "organization_id": organization_id,
         }
 
         # 타임아웃 설정
@@ -98,7 +98,7 @@ class SandboxService:
 
         try:
             # HTTP POST 요청
-            with httpx.Client(timeout=timeout_config) as client:
+            with httpx.Client(timeout=timeout_config, trust_env=False) as client:
                 response = client.post(
                     url,
                     json=request_data,

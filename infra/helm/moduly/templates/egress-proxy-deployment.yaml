@@ -1,0 +1,130 @@
+{{- include "moduly.validateEgressProxy" . }}
+{{- if .Values.egressProxy.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "moduly.fullname" . }}-egress-proxy
+  labels:
+    {{- include "moduly.componentLabels" (dict "component" "egress-proxy" "context" .) | nindent 4 }}
+spec:
+  replicas: {{ .Values.egressProxy.replicaCount }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      {{- include "moduly.componentSelectorLabels" (dict "component" "egress-proxy" "context" .) | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "moduly.componentSelectorLabels" (dict "component" "egress-proxy" "context" .) | nindent 8 }}
+        nodease.io/egress-mode: proxy-v1
+      annotations:
+        nodease.io/egress-enforcement-phase: {{ .Values.egressProxy.networkPolicy.enforcementPhase | quote }}
+        checksum/proxy-config: {{ include (print $.Template.BasePath "/egress-proxy-configmap.yaml") . | sha256sum }}
+    spec:
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              {{- include "moduly.componentSelectorLabels" (dict "component" "egress-proxy" "context" .) | nindent 14 }}
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 13
+        runAsGroup: 13
+        fsGroup: 13
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: egress-proxy
+          image: "{{ .Values.egressProxy.image.repository }}@{{ .Values.egressProxy.image.digest }}"
+          imagePullPolicy: {{ .Values.egressProxy.image.pullPolicy }}
+          command:
+            - squid
+          args:
+            - -NYC
+            - -f
+            - /etc/squid/squid.conf
+          ports:
+            - name: https-connect
+              containerPort: {{ .Values.egressProxy.service.httpsPort }}
+              protocol: TCP
+            - name: http-compatible
+              containerPort: {{ .Values.egressProxy.service.httpCompatiblePort }}
+              protocol: TCP
+            - name: connector-tcp
+              containerPort: {{ .Values.egressProxy.service.connectorTcpPort }}
+              protocol: TCP
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            {{- toYaml .Values.egressProxy.resources | nindent 12 }}
+          startupProbe:
+            tcpSocket:
+              port: https-connect
+            failureThreshold: 30
+            periodSeconds: 2
+          readinessProbe:
+            tcpSocket:
+              port: https-connect
+            periodSeconds: 5
+            timeoutSeconds: 2
+            failureThreshold: 3
+          livenessProbe:
+            tcpSocket:
+              port: https-connect
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          volumeMounts:
+            - name: proxy-config
+              mountPath: /etc/squid/squid.conf
+              subPath: squid.conf
+              readOnly: true
+            - name: proxy-config
+              mountPath: /etc/squid/authorized-sources.conf
+              subPath: authorized-sources.conf
+              readOnly: true
+            - name: proxy-config
+              mountPath: /etc/squid/connector-ports.conf
+              subPath: connector-ports.conf
+              readOnly: true
+            - name: proxy-run
+              mountPath: /run/squid
+            - name: proxy-log
+              mountPath: /var/log/squid
+            - name: proxy-spool
+              mountPath: /var/spool/squid
+            - name: proxy-tmp
+              mountPath: /tmp
+      volumes:
+        - name: proxy-config
+          configMap:
+            name: {{ include "moduly.fullname" . }}-egress-proxy
+        - name: proxy-run
+          emptyDir:
+            medium: Memory
+            sizeLimit: 16Mi
+        - name: proxy-log
+          emptyDir:
+            medium: Memory
+            sizeLimit: 16Mi
+        - name: proxy-spool
+          emptyDir:
+            medium: Memory
+            sizeLimit: 16Mi
+        - name: proxy-tmp
+          emptyDir:
+            medium: Memory
+            sizeLimit: 16Mi
+{{- end }}

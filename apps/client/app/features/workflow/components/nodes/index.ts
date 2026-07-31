@@ -14,6 +14,8 @@ import { ScheduleTriggerNode } from './schedule/components/ScheduleTriggerNode';
 
 import { GithubNode } from './github/components/GithubNode';
 import { MailNode } from './mail/components/MailNode';
+import { GmailDraftNode } from './mail/components/GmailDraftNode';
+import { MailAcknowledgeNode } from './mail/components/MailAcknowledgeNode';
 import { LoopNode } from './loop/components/LoopNode';
 
 // NOTE: ReactFlow에 등록할 노드 타입 맵
@@ -34,5 +36,7 @@ export const nodeTypes = {
 
   githubNode: GithubNode,
   mailNode: MailNode,
+  gmailDraftNode: GmailDraftNode,
+  mailAcknowledgeNode: MailAcknowledgeNode,
   loopNode: LoopNode,
 };

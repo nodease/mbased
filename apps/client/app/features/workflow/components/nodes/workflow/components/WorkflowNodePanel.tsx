@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useWorkflowStore } from '@/app/features/workflow/store/useWorkflowStore';
 import {
   WorkflowNodeData,
@@ -6,10 +6,9 @@ import {
   WorkflowNodeInput,
 } from '../../../../types/Nodes';
 import { workflowApi } from '@/app/features/workflow/api/workflowApi';
-import { getUpstreamNodes } from '../../../../utils/getUpstreamNodes';
-import { getNodeOutputs } from '../../../../utils/getNodeOutputs';
+import { getNodeOutputVariables } from '../../../../utils/nodeVariablePorts';
 import { CollapsibleSection } from '../../ui/CollapsibleSection';
-import { RoundedSelect } from '../../../ui/RoundedSelect';
+import { VariableSelectorSlot } from '../../ui/VariableSelectorSlot';
 
 interface WorkflowNodePanelProps {
   nodeId: string;
@@ -20,7 +19,7 @@ export const WorkflowNodePanel: React.FC<WorkflowNodePanelProps> = ({
   nodeId,
   data,
 }) => {
-  const { nodes, edges, updateNodeData } = useWorkflowStore();
+  const { nodes, updateNodeData } = useWorkflowStore();
   const [targetVariables, setTargetVariables] = useState<WorkflowVariable[]>(
     [],
   );
@@ -66,7 +65,7 @@ export const WorkflowNodePanel: React.FC<WorkflowNodePanelProps> = ({
                 id: v.name || `var-${idx}`,
                 name: v.name,
                 label: v.label || v.name,
-                type: (v.type as any) || 'text',
+                type: (v.type as WorkflowVariable['type']) || 'text',
                 required: true, // 배포된 입력은 기본적으로 required라고 가정하거나, 스키마에 required 필드 추가 필요
               }));
             setTargetVariables(mappedVars);
@@ -74,8 +73,7 @@ export const WorkflowNodePanel: React.FC<WorkflowNodePanelProps> = ({
             setTargetVariables([]);
           }
         }
-      } catch (err: any) {
-        console.error('Failed to load target deployment:', err);
+      } catch {
         setError('배포 정보를 불러오지 못했습니다.');
       } finally {
         setIsLoading(false);
@@ -83,19 +81,10 @@ export const WorkflowNodePanel: React.FC<WorkflowNodePanelProps> = ({
     };
 
     loadTargetDeployment();
-  }, [data.deployment_id, nodeId, updateNodeData]);
+  }, [data.deployment_id, data.outputs, nodeId, updateNodeData]);
 
-  // 2. 매핑을 위한 상위 노드 목록 (Upstream Nodes)
-  const upstreamNodes = useMemo(() => {
-    return getUpstreamNodes(nodeId, nodes, edges);
-  }, [nodeId, nodes, edges]);
-
-  // 3. 선택자(Selector) 업데이트 처리
-  const handleSelectorUpdate = (
-    targetVarName: string,
-    position: 0 | 1,
-    value: string,
-  ) => {
+  // 2. 선택자(Selector) 업데이트 처리
+  const handleSelectorUpdate = (targetVarName: string, selector: string[]) => {
     const currentInputs = [...(data.inputs || [])];
     const existingIdx = currentInputs.findIndex(
       (i) => i.name === targetVarName,
@@ -104,27 +93,9 @@ export const WorkflowNodePanel: React.FC<WorkflowNodePanelProps> = ({
     let newInput: WorkflowNodeInput;
 
     if (existingIdx !== -1) {
-      // Update existing
-      newInput = { ...currentInputs[existingIdx] };
-      const selector = [...newInput.value_selector];
-
-      // Ensure array size
-      if (selector.length < 2) {
-        selector[0] = selector[0] || '';
-        selector[1] = selector[1] || '';
-      }
-
-      selector[position] = value;
-      // 노드 변경 시 출력값 초기화
-      if (position === 0) {
-        selector[1] = '';
-      }
-      newInput.value_selector = selector;
+      newInput = { ...currentInputs[existingIdx], value_selector: selector };
       currentInputs[existingIdx] = newInput;
     } else {
-      // Create new
-      const selector = ['', ''];
-      selector[position] = value;
       newInput = {
         name: targetVarName,
         value_selector: selector,
@@ -167,12 +138,14 @@ export const WorkflowNodePanel: React.FC<WorkflowNodePanelProps> = ({
                   (i) => i.name === targetVar.name,
                 );
                 const selectedNodeId = mapping?.value_selector?.[0] || '';
-                const selectedOutputKey = mapping?.value_selector?.[1] || '';
-
                 const selectedNode = nodes.find((n) => n.id === selectedNodeId);
-                const availableOutputs = selectedNode
-                  ? getNodeOutputs(selectedNode)
-                  : [];
+                const selectedOutput = selectedNode
+                  ? getNodeOutputVariables(selectedNode).find(
+                      (output) =>
+                        output.key === mapping?.value_selector?.[1] ||
+                        output.outputId === mapping?.value_selector?.[1],
+                    )
+                  : undefined;
 
                 return (
                   <div
@@ -195,65 +168,16 @@ export const WorkflowNodePanel: React.FC<WorkflowNodePanelProps> = ({
                       )}
                     </div>
 
-                    <div className="flex flex-row gap-2 items-center">
-                      {/* 노드 선택 */}
-                      <div className="flex-[1]">
-                        <RoundedSelect
-                          value={selectedNodeId}
-                          onChange={(val) =>
-                            handleSelectorUpdate(
-                              targetVar.name,
-                              0,
-                              val as string,
-                            )
-                          }
-                          options={[
-                            { label: '노드 선택', value: '' },
-                            ...upstreamNodes.map((n) => ({
-                              label: (n.data.title as string) || n.type,
-                              value: n.id,
-                            })),
-                          ]}
-                          placeholder="노드 선택"
-                          className="p-1.5 text-xs"
-                        />
-                      </div>
-
-                      {/* 출력 선택 */}
-                      <div className="flex-[1] relative">
-                        <RoundedSelect
-                          value={selectedOutputKey}
-                          onChange={(val) =>
-                            handleSelectorUpdate(
-                              targetVar.name,
-                              1,
-                              val as string,
-                            )
-                          }
-                          options={[
-                            {
-                              label: !selectedNodeId
-                                ? '변수 선택'
-                                : '출력 선택',
-                              value: '',
-                            },
-                            ...availableOutputs.map((outKey) => ({
-                              label: outKey,
-                              value: outKey,
-                            })),
-                          ]}
-                          disabled={!selectedNodeId}
-                          placeholder={
-                            !selectedNodeId ? '변수 선택' : '출력 선택'
-                          }
-                          className={`p-1.5 text-xs ${
-                            !selectedNodeId
-                              ? 'bg-gray-100 text-gray-400 border-gray-200'
-                              : 'border-gray-300 bg-white'
-                          }`}
-                        />
-                      </div>
-                    </div>
+                    <VariableSelectorSlot
+                      value={mapping?.value_selector}
+                      selectedOutput={selectedOutput}
+                      label={`${targetVar.label || targetVar.name} 입력`}
+                      placeholder="입력 변수 클릭"
+                      kind="mapping"
+                      onChange={(selector) =>
+                        handleSelectorUpdate(targetVar.name, selector)
+                      }
+                    />
                   </div>
                 );
               })}

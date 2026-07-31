@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "run_id": "2026-07-20__norag-80-blind__judge-gpt-5.4-mini__out-768__attempt-04",
+  "experiment": "judge-first-norag-blind-economics",
+  "strategy_id": "judge_bootstrap_incremental_v1",
+  "routing_judge_model": "gpt-5.4-mini",
+  "routing_judge_max_output_tokens": 768,
+  "quality_judge_model": "gpt-5-mini",
+  "candidate_model_ids": [
+    "gpt-4o-mini",
+    "gpt-4.1-mini",
+    "gpt-4.1",
+    "gpt-4o",
+    "gpt-5-mini",
+    "gpt-5.4-mini",
+    "gpt-5.4",
+    "gpt-5.6-sol",
+    "gpt-5.6-luna",
+    "gpt-5.6-terra",
+    "o3"
+  ],
+  "comparison_arms": {
+    "automatic": "automatic routing",
+    "mid_fixed": "gpt-5.4-mini",
+    "high_fixed": "gpt-5.6-sol",
+    "low_fixed": "gpt-4o-mini"
+  },
+  "dataset": {
+    "name": "enterprise-norag-routing-80-v2",
+    "total_case_count": 80
+  },
+  "batch_size": 10,
+  "artifact_files": {
+    "report": "report.md",
+    "result": "result.json",
+    "batches": "batches/",
+    "append_only_events": "execution-events.jsonl"
+  }
+}

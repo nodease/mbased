@@ -1,0 +1,74 @@
+[
+  {
+    "id": "ko_new_webhook_knowledge_chatbot",
+    "message": "웹훅으로 받는 사내 문서 챗봇 워크플로우를 만들어줘",
+    "workflow_context": {"workflow_present": true, "selected_node_present": false, "selected_edge_present": false, "nodes": [{"node_type": "llmNode", "title": "기존 LLM"}]},
+    "expected": {"request_type": "new_workflow", "draft_mode": "new_workflow", "ordered_capabilities": ["webhook_trigger", "knowledge_backed_llm", "answer"]}
+  },
+  {
+    "id": "ko_new_schedule_http_slack",
+    "message": "새 워크플로우로 schedule trigger에서 시작해서 REST API를 호출하고 LLM으로 결과를 요약한 뒤 Slack으로 보내줘",
+    "workflow_context": {"workflow_present": false, "selected_node_present": false, "selected_edge_present": false, "nodes": []},
+    "expected": {"request_type": "new_workflow", "draft_mode": "new_workflow", "ordered_capabilities": ["schedule_trigger", "http_request", "llm", "slack_send", "answer"]}
+  },
+  {
+    "id": "ko_new_simple_input_output",
+    "message": "입력 출력 노드 생성해줘",
+    "workflow_context": {"workflow_present": false, "selected_node_present": false, "selected_edge_present": false, "nodes": []},
+    "expected": {"request_type": "new_workflow", "draft_mode": "new_workflow", "ordered_capabilities": ["start_input", "answer"]}
+  },
+  {
+    "id": "ko_new_mail_summary",
+    "message": "새 워크플로우로 이메일을 검색하고 LLM으로 내용을 요약해서 응답하는 워크플로우를 만들어줘",
+    "workflow_context": {"workflow_present": false, "selected_node_present": false, "selected_edge_present": false, "nodes": []},
+    "expected": {"request_type": "new_workflow", "draft_mode": "new_workflow", "ordered_capabilities": ["start_input", "mail_search", "llm", "answer"]}
+  },
+  {
+    "id": "ko_new_github_review_comment",
+    "message": "새 워크플로우로 웹훅에서 요청을 받고 GitHub PR을 조회한 뒤 LLM으로 리뷰해서 GitHub PR에 댓글을 등록해줘",
+    "workflow_context": {"workflow_present": false, "selected_node_present": false, "selected_edge_present": false, "nodes": []},
+    "expected": {"request_type": "new_workflow", "draft_mode": "new_workflow", "ordered_capabilities": ["webhook_trigger", "github_pr_read", "llm", "github_pr_comment", "answer"]}
+  },
+  {
+    "id": "ko_modify_after_github",
+    "message": "GitHub PR 조회 노드 뒤에 LLM 노드를 추가해줘",
+    "workflow_context": {"workflow_present": true, "selected_node_present": false, "selected_edge_present": false, "nodes": [{"node_type": "githubNode", "title": "GitHub PR 조회", "role": "get_pr"}]},
+    "expected": {"request_type": "modify_workflow", "draft_mode": "modify_workflow", "ordered_capabilities": ["llm"], "target_reference_type": "natural_language_node", "placement": "after"}
+  },
+  {
+    "id": "ko_modify_selected_node",
+    "message": "선택한 노드 뒤에 Slack 전송을 추가해줘",
+    "workflow_context": {"workflow_present": true, "selected_node_present": true, "selected_edge_present": false, "nodes": [{"node_type": "llmNode", "title": "요약 LLM"}]},
+    "expected": {"request_type": "modify_workflow", "draft_mode": "modify_workflow", "ordered_capabilities": ["slack_send"], "target_reference_type": "selected_node", "placement": "after"}
+  },
+  {
+    "id": "ko_modify_selected_edge",
+    "message": "선택한 연결 사이에 LLM 노드를 추가해줘",
+    "workflow_context": {"workflow_present": true, "selected_node_present": false, "selected_edge_present": true, "nodes": [{"node_type": "githubNode", "title": "PR 조회", "role": "get_pr"}, {"node_type": "answerNode", "title": "응답"}]},
+    "expected": {"request_type": "modify_workflow", "draft_mode": "modify_workflow", "ordered_capabilities": ["llm"], "target_reference_type": "selected_edge", "placement": "between"}
+  },
+  {
+    "id": "en_replace_workflow",
+    "message": "Replace the current workflow with an input, an LLM summary, and an answer.",
+    "workflow_context": {"workflow_present": true, "selected_node_present": false, "selected_edge_present": false, "nodes": [{"node_type": "httpRequestNode", "title": "Old API call"}]},
+    "expected": {"request_type": "modify_workflow", "draft_mode": "replace_workflow", "ordered_capabilities": ["start_input", "llm", "answer"]}
+  },
+  {
+    "id": "en_unsupported_non_workflow",
+    "message": "What will the weather be tomorrow?",
+    "workflow_context": {"workflow_present": false, "selected_node_present": false, "selected_edge_present": false, "nodes": []},
+    "expected": {"request_type": "unsupported", "draft_mode": "new_workflow", "ordered_capabilities": []}
+  },
+  {
+    "id": "ko_modify_github_pr_create_english_brand",
+    "message": "기존 LLM 노드 뒤에 GitHub PR 생성 노드를 삽입",
+    "workflow_context": {"workflow_present": true, "selected_node_present": false, "selected_edge_present": false, "nodes": [{"node_type": "llmNode", "title": "LLM"}]},
+    "expected": {"request_type": "modify_workflow", "draft_mode": "modify_workflow", "ordered_capabilities": [], "target_reference_type": "natural_language_node", "placement": "after", "integration_actions": ["github.pull_request.create"]}
+  },
+  {
+    "id": "ko_modify_github_pr_create_korean_brand",
+    "message": "기존 LLM 노드 뒤에 깃허브 PR 생성 노드를 삽입",
+    "workflow_context": {"workflow_present": true, "selected_node_present": false, "selected_edge_present": false, "nodes": [{"node_type": "llmNode", "title": "LLM"}]},
+    "expected": {"request_type": "modify_workflow", "draft_mode": "modify_workflow", "ordered_capabilities": [], "target_reference_type": "natural_language_node", "placement": "after", "integration_actions": ["github.pull_request.create"]}
+  }
+]

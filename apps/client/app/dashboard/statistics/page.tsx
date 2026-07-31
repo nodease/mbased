@@ -1,8 +1,10 @@
 'use client';
 
 import { useState } from 'react';
+import { BarChart3 } from 'lucide-react';
 import { MonitoringTab } from './components/MonitoringTab';
 import { LogTab } from './components/LogTab';
+import { DashboardTitle } from '@/app/features/dashboard/components/DashboardSurface';
 
 export default function StatisticsPage() {
   const [activeTab, setActiveTab] = useState<'monitoring' | 'logs'>(
@@ -12,7 +14,11 @@ export default function StatisticsPage() {
   return (
     <div className="p-8 bg-white min-h-full">
       {/* Page Title */}
-      <h1 className="text-2xl font-bold text-gray-800 mb-6">통계</h1>
+      <DashboardTitle
+        icon={BarChart3}
+        title="통계"
+        className="mb-6 text-2xl font-bold text-gray-800"
+      />
 
       {/* 탭 네비게이션 */}
       <div className="mb-8 border-b border-gray-200 dark:border-gray-800">
@@ -41,11 +47,12 @@ export default function StatisticsPage() {
       </div>
 
       {/* 탭 컨텐츠 */}
-      {activeTab === 'monitoring' ? (
+      {activeTab === 'monitoring' && (
         <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
           <MonitoringTab />
         </div>
-      ) : (
+      )}
+      {activeTab === 'logs' && (
         <div className="animate-in fade-in slide-in-from-bottom-2 duration-300 h-[calc(100vh-200px)]">
           <LogTab />
         </div>

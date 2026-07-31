@@ -1,207 +1,276 @@
-import dagre from 'dagre';
-import type { AppNode } from '../types/Nodes';
 import type { Edge } from '@xyflow/react';
+import type { AppNode } from '../types/Nodes';
+import {
+  snapCanvasPosition,
+  WORKFLOW_NODE_GAP,
+  WORKFLOW_NODE_SIZE,
+} from './workflowCanvasGeometry';
 
-const NODE_WIDTH = 300;
-const NODE_HEIGHT = 150;
+const ORPHAN_GAP_X = 50;
+const ORPHAN_GAP_Y = 50;
+const MIN_ORPHAN_ROW_WIDTH = 1000;
 
-/**
- * Calculate auto layout for workflow nodes using Dagre
- */
+type LayoutNode = AppNode & {
+  measured?: {
+    width?: number | null;
+    height?: number | null;
+  };
+  width?: number;
+  height?: number;
+};
+
+type SortKey = [number, number, number];
+
+const getLayoutNodeSize = (node: AppNode) => {
+  const layoutNode = node as LayoutNode;
+  const measuredWidth = layoutNode.measured?.width;
+  const measuredHeight = layoutNode.measured?.height;
+  return {
+    width:
+      typeof measuredWidth === 'number' && measuredWidth > 0
+        ? measuredWidth
+        : typeof layoutNode.width === 'number' && layoutNode.width > 0
+        ? layoutNode.width
+        : WORKFLOW_NODE_SIZE.width,
+    height:
+      typeof measuredHeight === 'number' && measuredHeight > 0
+        ? measuredHeight
+        : typeof layoutNode.height === 'number' && layoutNode.height > 0
+        ? layoutNode.height
+        : WORKFLOW_NODE_SIZE.height,
+  };
+};
+
+const compareSortKeys = (left: SortKey, right: SortKey) => {
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index] !== right[index]) {
+      return left[index] - right[index];
+    }
+  }
+  return 0;
+};
+
+const assignLayers = (
+  nodeIds: string[],
+  edges: Edge[],
+  nodeOrder: Map<string, number>,
+) => {
+  const incomingCount = new Map(nodeIds.map((nodeId) => [nodeId, 0]));
+  const outgoing = new Map<string, string[]>();
+
+  edges.forEach((edge) => {
+    if (!incomingCount.has(edge.source) || !incomingCount.has(edge.target)) {
+      return;
+    }
+    incomingCount.set(edge.target, (incomingCount.get(edge.target) ?? 0) + 1);
+    const targets = outgoing.get(edge.source) ?? [];
+    targets.push(edge.target);
+    outgoing.set(edge.source, targets);
+  });
+
+  outgoing.forEach((targets) => {
+    targets.sort(
+      (left, right) =>
+        (nodeOrder.get(left) ?? Number.MAX_SAFE_INTEGER) -
+        (nodeOrder.get(right) ?? Number.MAX_SAFE_INTEGER),
+    );
+  });
+
+  const queue = nodeIds
+    .filter((nodeId) => incomingCount.get(nodeId) === 0)
+    .sort(
+      (left, right) =>
+        (nodeOrder.get(left) ?? Number.MAX_SAFE_INTEGER) -
+        (nodeOrder.get(right) ?? Number.MAX_SAFE_INTEGER),
+    );
+  const layers = new Map(nodeIds.map((nodeId) => [nodeId, 0]));
+  const processed = new Set<string>();
+
+  while (queue.length > 0) {
+    const nodeId = queue.shift();
+    if (!nodeId) break;
+    processed.add(nodeId);
+
+    (outgoing.get(nodeId) ?? []).forEach((target) => {
+      layers.set(
+        target,
+        Math.max(layers.get(target) ?? 0, (layers.get(nodeId) ?? 0) + 1),
+      );
+      const remaining = (incomingCount.get(target) ?? 0) - 1;
+      incomingCount.set(target, remaining);
+      if (remaining === 0) {
+        queue.push(target);
+        queue.sort(
+          (left, right) =>
+            (nodeOrder.get(left) ?? Number.MAX_SAFE_INTEGER) -
+            (nodeOrder.get(right) ?? Number.MAX_SAFE_INTEGER),
+        );
+      }
+    });
+  }
+
+  const processedLayers = [...processed].map(
+    (nodeId) => layers.get(nodeId) ?? 0,
+  );
+  let nextCycleLayer =
+    (processedLayers.length > 0 ? Math.max(...processedLayers) : -1) + 1;
+  nodeIds.forEach((nodeId) => {
+    if (processed.has(nodeId)) return;
+    layers.set(nodeId, nextCycleLayer);
+    nextCycleLayer += 1;
+  });
+
+  return layers;
+};
+
+const conditionBranchOrder = (
+  edges: Edge[],
+  nodeById: Map<string, AppNode>,
+  nodeOrder: Map<string, number>,
+) => {
+  const orderedTargets = new Map<string, SortKey>();
+
+  edges.forEach((edge) => {
+    const sourceNode = nodeById.get(edge.source);
+    if (!sourceNode || sourceNode.type !== 'conditionNode') return;
+
+    const cases = Array.isArray(sourceNode.data.cases)
+      ? (sourceNode.data.cases as Array<{ id?: string }>)
+      : [];
+    const caseOrder = new Map(
+      cases
+        .map((caseItem, index) => [caseItem.id, index + 1] as const)
+        .filter(([caseId]) => Boolean(caseId)),
+    );
+    const sourceHandle = edge.sourceHandle ?? '';
+    const branchOrder =
+      sourceHandle === 'default'
+        ? 0
+        : (caseOrder.get(sourceHandle) ?? caseOrder.size + 1);
+    const candidate: SortKey = [
+      nodeOrder.get(edge.source) ?? Number.MAX_SAFE_INTEGER,
+      branchOrder,
+      nodeOrder.get(edge.target) ?? Number.MAX_SAFE_INTEGER,
+    ];
+    const current = orderedTargets.get(edge.target);
+    if (!current || compareSortKeys(candidate, current) < 0) {
+      orderedTargets.set(edge.target, candidate);
+    }
+  });
+
+  return orderedTargets;
+};
+
+/** Apply the same deterministic layout contract used by backend apply/save. */
 export function calculateAutoLayout(
   nodes: AppNode[],
   edges: Edge[],
 ): AppNode[] {
-  // 1. 노드 초기화 및 DAGRE 그래프 생성
-  const dagreGraph = new dagre.graphlib.Graph();
-  dagreGraph.setDefaultEdgeLabel(() => ({}));
+  const layoutedNodes = nodes.map((node) => ({ ...node }));
+  const nodeById = new Map(
+    layoutedNodes
+      .filter((node) => node.type !== 'note')
+      .map((node) => [node.id, node]),
+  );
+  const nodeOrder = new Map(
+    [...nodeById.keys()].map((nodeId, index) => [nodeId, index]),
+  );
+  const validEdges = edges.filter(
+    (edge) => nodeById.has(edge.source) && nodeById.has(edge.target),
+  );
+  const connectedIds = new Set(
+    validEdges.flatMap((edge) => [edge.source, edge.target]),
+  );
+  const connectedOrder = [...nodeById.keys()].filter((nodeId) =>
+    connectedIds.has(nodeId),
+  );
+  const orphanOrder = [...nodeById.keys()].filter(
+    (nodeId) => !connectedIds.has(nodeId),
+  );
 
-  // 간격을 넓혀서 엣지가 더 잘 보이도록 설정
-  dagreGraph.setGraph({ rankdir: 'LR', ranksep: 100, nodesep: 80 });
-
-  // 2. 연결된 노드와 고립된 노드 분류
-  const connectedNodeIds = new Set<string>();
-  edges.forEach((edge) => {
-    connectedNodeIds.add(edge.source);
-    connectedNodeIds.add(edge.target);
+  const layers = assignLayers(connectedOrder, validEdges, nodeOrder);
+  const layerNodes = new Map<number, string[]>();
+  connectedOrder.forEach((nodeId) => {
+    const layer = layers.get(nodeId) ?? 0;
+    const ids = layerNodes.get(layer) ?? [];
+    ids.push(nodeId);
+    layerNodes.set(layer, ids);
   });
 
-  const connectedNodes: AppNode[] = [];
-  nodes.forEach((node) => {
-    if (node.type === 'note') return;
+  const branchOrder = conditionBranchOrder(validEdges, nodeById, nodeOrder);
+  layerNodes.forEach((nodeIds) => {
+    nodeIds.sort((left, right) => {
+      const leftOrder = nodeOrder.get(left) ?? Number.MAX_SAFE_INTEGER;
+      const rightOrder = nodeOrder.get(right) ?? Number.MAX_SAFE_INTEGER;
+      return compareSortKeys(
+        branchOrder.get(left) ?? [leftOrder, Number.POSITIVE_INFINITY, leftOrder],
+        branchOrder.get(right) ?? [rightOrder, Number.POSITIVE_INFINITY, rightOrder],
+      );
+    });
+  });
 
-    if (connectedNodeIds.has(node.id)) {
-      connectedNodes.push(node);
+  const orderedLayers = [...layerNodes.keys()].sort((left, right) => left - right);
+  const layerWidths = new Map<number, number>();
+  const layerHeights = new Map<number, number>();
+  orderedLayers.forEach((layer) => {
+    const ids = layerNodes.get(layer) ?? [];
+    const sizes = ids.map((nodeId) => getLayoutNodeSize(nodeById.get(nodeId)!));
+    layerWidths.set(layer, Math.max(...sizes.map(({ width }) => width)));
+    layerHeights.set(
+      layer,
+      sizes.reduce((total, { height }) => total + height, 0) +
+        WORKFLOW_NODE_GAP.sibling * Math.max(0, ids.length - 1),
+    );
+  });
 
-      let width = NODE_WIDTH;
-      let height = NODE_HEIGHT;
+  const layerX = new Map<number, number>();
+  let currentLayerX = 0;
+  orderedLayers.forEach((layer) => {
+    layerX.set(layer, currentLayerX);
+    currentLayerX +=
+      (layerWidths.get(layer) ?? WORKFLOW_NODE_SIZE.width) +
+      WORKFLOW_NODE_GAP.rank;
+  });
 
-      // 서브모듈 노드가 펼쳐져 있는 경우 동적 크기 계산
-      if (
-        node.type === 'workflowNode' &&
-        (node.data as any).expanded &&
-        (node.data as any).graph_snapshot
-      ) {
-        try {
-          const snapshot = (node.data as any).graph_snapshot;
-          const subNodes = (snapshot.nodes as any[]) || [];
-          const subEdges = (snapshot.edges as any[]) || [];
+  orderedLayers.forEach((layer) => {
+    let currentY = 0;
+    (layerNodes.get(layer) ?? []).forEach((nodeId) => {
+      const node = nodeById.get(nodeId)!;
+      const { height } = getLayoutNodeSize(node);
+      node.position = snapCanvasPosition({
+        x: layerX.get(layer) ?? 0,
+        y: currentY,
+      });
+      currentY += height + WORKFLOW_NODE_GAP.sibling;
+    });
+  });
 
-          // 시작 노드 찾기
-          const startNode = subNodes.find(
-            (n) => n.type === 'start' || n.type === 'startNode',
-          );
+  const maxConnectedHeight = Math.max(0, ...layerHeights.values());
+  const connectedWidth = Math.max(
+    MIN_ORPHAN_ROW_WIDTH,
+    ...orderedLayers.map(
+      (layer) =>
+        (layerX.get(layer) ?? 0) +
+        (layerWidths.get(layer) ?? WORKFLOW_NODE_SIZE.width),
+    ),
+  );
+  const orphanRowWidth = Math.max(connectedWidth, MIN_ORPHAN_ROW_WIDTH);
+  let orphanX = 0;
+  let orphanY = maxConnectedHeight + WORKFLOW_NODE_GAP.rank;
+  let currentRowHeight = 0;
 
-          let validNodes = subNodes;
-
-          // 시작 노드가 있으면 도달 가능한 노드만 필터링
-          if (startNode) {
-            const reachableIds = new Set<string>([startNode.id]);
-            const queue = [startNode.id];
-
-            while (queue.length > 0) {
-              const curr = queue.shift()!;
-              const outgoing = subEdges.filter((e) => e.source === curr);
-              for (const e of outgoing) {
-                if (!reachableIds.has(e.target)) {
-                  reachableIds.add(e.target);
-                  queue.push(e.target);
-                }
-              }
-            }
-            validNodes = subNodes.filter((n) => reachableIds.has(n.id));
-          }
-
-          if (validNodes.length > 0) {
-            const bounds = validNodes.reduce(
-              (acc, n) => {
-                const x = n.position.x;
-                const y = n.position.y;
-                const w =
-                  (n.measured?.width as number) || (n.width as number) || 300;
-                const h =
-                  (n.measured?.height as number) || (n.height as number) || 150;
-                return {
-                  minX: Math.min(acc.minX, x),
-                  maxX: Math.max(acc.maxX, x + w),
-                  minY: Math.min(acc.minY, y),
-                  maxY: Math.max(acc.maxY, y + h),
-                };
-              },
-              {
-                minX: Infinity,
-                maxX: -Infinity,
-                minY: Infinity,
-                maxY: -Infinity,
-              },
-            );
-
-            const PADDING = 60;
-            let calcWidth =
-              bounds.minX === Infinity
-                ? 600
-                : bounds.maxX - bounds.minX + PADDING * 2;
-
-            // 최소 너비 보정
-            const minWidthByCount = validNodes.length * 100;
-            calcWidth = Math.max(calcWidth, minWidthByCount);
-
-            const calcHeight =
-              bounds.minY === Infinity
-                ? 300
-                : bounds.maxY - bounds.minY + PADDING * 2;
-
-            // 제한 적용
-            const containerWidth = Math.min(Math.max(calcWidth, 600), 1800);
-            const containerHeight = Math.min(Math.max(calcHeight, 300), 1200);
-
-            // 80% 축소 적용
-            width = Math.round(containerWidth * 0.8);
-            height = containerHeight;
-          }
-        } catch {
-          // Failed to calculate submodule size for layout
-        }
-      }
-
-      dagreGraph.setNode(node.id, { width, height });
+  orphanOrder.forEach((nodeId) => {
+    const node = nodeById.get(nodeId)!;
+    const { width, height } = getLayoutNodeSize(node);
+    node.position = snapCanvasPosition({ x: orphanX, y: orphanY });
+    orphanX += width + ORPHAN_GAP_X;
+    currentRowHeight = Math.max(currentRowHeight, height);
+    if (orphanX > orphanRowWidth) {
+      orphanX = 0;
+      orphanY += currentRowHeight + ORPHAN_GAP_Y;
+      currentRowHeight = 0;
     }
   });
 
-  edges.forEach((edge) => {
-    if (
-      connectedNodeIds.has(edge.source) &&
-      connectedNodeIds.has(edge.target)
-    ) {
-      dagreGraph.setEdge(edge.source, edge.target);
-    }
-  });
-
-  // 3. Dagre 레이아웃 계산 (연결된 노드)
-  dagre.layout(dagreGraph);
-
-  // 4. 새 위치 적용 및 고립된 노드 배치 준비
-  let minX = Infinity;
-  let maxX = -Infinity;
-  let maxY = 0;
-
-  const layoutedNodes = nodes.map((node) => {
-    if (node.type === 'note') return node;
-
-    if (connectedNodeIds.has(node.id)) {
-      const nodeWithPosition = dagreGraph.node(node.id);
-      const x = nodeWithPosition.x - nodeWithPosition.width / 2;
-      const y = nodeWithPosition.y - nodeWithPosition.height / 2;
-
-      // Bounding Box 계산
-      minX = Math.min(minX, x);
-      maxX = Math.max(maxX, x + nodeWithPosition.width);
-      if (y + nodeWithPosition.height > maxY) {
-        maxY = y + nodeWithPosition.height;
-      }
-
-      return {
-        ...node,
-        position: { x, y },
-      };
-    }
-    return node;
-  });
-
-  // 만약 연결된 노드가 하나도 없으면 기본값 설정
-  if (minX === Infinity) minX = 0;
-  if (maxX === -Infinity) maxX = 1000; // 기본 너비
-
-  // 고립된 노드(Orphan Nodes) 그리드 배치
-  const orphanStartY = maxY + 150; // 연결된 그래프와 충분한 간격
-  let currentX = minX;
-  let currentY = orphanStartY;
-  const gapX = 50;
-  const gapY = 50;
-
-  // 연결된 그래프의 너비를 기준으로 줄바꿈 (최소 1000px 보장)
-  const maxWidth = Math.max(maxX - minX, 1000);
-
-  const finalNodes = layoutedNodes.map((node) => {
-    if (connectedNodeIds.has(node.id) || node.type === 'note') return node;
-
-    // 위치 할당
-    const newNode = {
-      ...node,
-      position: { x: currentX, y: currentY },
-    };
-
-    // 다음 위치 계산
-    currentX += NODE_WIDTH + gapX;
-
-    // 줄바꿈 체크 (시작점으로부터의 거리가 최대 너비를 넘으면)
-    if (currentX - minX > maxWidth) {
-      currentX = minX;
-      currentY += NODE_HEIGHT + gapY;
-    }
-
-    return newNode;
-  });
-
-  return finalNodes;
+  return layoutedNodes;
 }

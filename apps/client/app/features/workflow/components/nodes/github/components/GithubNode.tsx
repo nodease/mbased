@@ -21,7 +21,7 @@ const actionNames: Record<string, string> = {
 };
 
 export const GithubNode = memo(
-  ({ data, selected }: NodeProps<Node<GithubNodeData>>) => {
+  ({ id, data, selected }: NodeProps<Node<GithubNodeData>>) => {
     const action = data.action || 'get_pr';
     const actionClass = actionColors[action] || defaultActionColor;
     const actionName = actionNames[action] || action;
@@ -48,6 +48,7 @@ export const GithubNode = memo(
 
     return (
       <BaseNode
+        id={id}
         data={data}
         selected={selected}
         showSourceHandle={true}
